@@ -255,6 +255,20 @@
     </button>
   </div>
   <div style="display:flex;align-items:center;gap:6px;">
+    <button id="howToPlayBtn" title="How to Play" style="
+      background:linear-gradient(160deg,rgba(40,28,8,0.95),rgba(25,17,5,0.98));
+      border:1px solid rgba(180,140,50,0.45);
+      border-bottom:2px solid rgba(80,50,10,0.8);
+      border-radius:50%; cursor:pointer;
+      width:28px; height:28px;
+      display:flex; align-items:center; justify-content:center;
+      touch-action:manipulation;
+      -webkit-tap-highlight-color:transparent;
+      box-shadow:0 0 6px rgba(200,160,60,0.12);
+      flex-shrink:0;
+      color:#f5c842; font-family:'Cinzel',serif; font-size:13px; font-weight:700;
+      line-height:1;
+    " aria-label="How to Play">?</button>
     <button id="restartTopBtn" title="Restart" style="
       background:linear-gradient(160deg,rgba(40,28,8,0.95),rgba(25,17,5,0.98));
       border:1px solid rgba(180,140,50,0.45);
@@ -566,9 +580,10 @@ async function upsertMapToCloud(levelData) {
       const existingSlug = rows[0].slug;
       await fetch(`${SUPA_URL}/rest/v1/maps?slug=eq.${encodeURIComponent(existingSlug)}`, {
         method: 'PATCH',
-        headers: { 'Content-Type':'application/json','apikey':SUPA_KEY,'Authorization':`Bearer ${SUPA_KEY}` },
+        headers: { 'Content-Type':'application/json','apikey':SUPA_KEY,'Authorization':`Bearer ${SUPA_KEY}`,'Prefer':'return=minimal' },
         body: JSON.stringify({ data: levelData, name: levelData.name })
       });
+      console.log('upsertMapToCloud: updated existing map, slug:', existingSlug);
       return existingSlug; // always return the stable slug
     }
   }
@@ -4763,6 +4778,48 @@ async function loadActiveSeries() {
   // Try to load from cloud in background - never blocks page load
   loadActiveSeries().catch(()=>{});
 })();
+
+// How to Play overlay
+function showHowToPlay(){
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:500;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;';
+
+  const panel = document.createElement('div');
+  panel.style.cssText = "background:linear-gradient(160deg,#2a1f10,#1c160d);border:1px solid rgba(200,160,60,0.5);box-shadow:0 0 0 1px rgba(120,80,20,0.3),0 8px 40px rgba(0,0,0,0.8);border-radius:4px;padding:28px 22px;width:min(320px,100%);display:flex;flex-direction:column;gap:14px;font-family:'Lato',sans-serif;";
+
+  panel.innerHTML = `
+    <div style="text-align:center;">
+      <div style="font-family:'Cinzel',serif;font-size:15px;font-weight:600;color:#f5c842;letter-spacing:1px;text-shadow:0 0 12px rgba(245,200,66,0.4);">HOW TO PLAY</div>
+      <div style="height:1px;background:linear-gradient(90deg,transparent,rgba(200,160,60,0.4),transparent);margin-top:10px;"></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:10px;">
+      <div style="display:flex;align-items:flex-start;gap:10px;">
+        <span style="font-size:18px;flex-shrink:0;">💎</span>
+        <span style="color:#c9a84c;font-size:12px;line-height:1.6;"><strong style="color:#f5c842;">Collect all diamonds</strong> to escape the level - you don't have to clear all the bricks if there are diamonds</span>
+      </div>
+      <div style="display:flex;align-items:flex-start;gap:10px;">
+        <span style="font-size:18px;flex-shrink:0;">👆</span>
+        <span style="color:#c9a84c;font-size:12px;line-height:1.6;">Tap <strong style="color:#f5c842;">and hold</strong> on the left or the right to move the ball. <strong style="color:#f5c842;">Don't swipe!</strong></span>
+      </div>
+      <div style="display:flex;align-items:flex-start;gap:10px;">
+        <span style="font-size:18px;flex-shrink:0;">🔑</span>
+        <span style="color:#c9a84c;font-size:12px;line-height:1.6;"><strong style="color:#f5c842;">Keys are needed to unlock locks</strong> — snag the key first.</span>
+      </div>
+      <div style="display:flex;align-items:flex-start;gap:10px;">
+        <span style="font-size:18px;flex-shrink:0;">💣</span>
+        <span style="color:#c9a84c;font-size:12px;line-height:1.6;">Collect bombs then plant them by holding <strong style="color:#f5c842;">both left and right</strong>, then <strong style="color:#f5c842;">release both at the same time.</strong></span>
+      </div>
+    </div>
+    <button id="howToPlayClose" style="width:100%;background:linear-gradient(180deg,rgba(60,45,20,0.95),rgba(35,25,10,0.98));border:1px solid rgba(245,200,66,0.6);border-bottom:2px solid rgba(80,50,10,0.9);color:#f5c842;font-family:'Cinzel',serif;font-weight:600;font-size:14px;letter-spacing:1px;padding:13px;cursor:pointer;border-radius:3px;margin-top:4px;">GOT IT</button>
+  `;
+
+  ov.appendChild(panel);
+  document.body.appendChild(ov);
+  panel.querySelector('#howToPlayClose').addEventListener('click', ()=>ov.remove());
+  ov.addEventListener('click', e=>{ if(e.target===ov) ov.remove(); });
+}
+
+document.getElementById('howToPlayBtn').addEventListener('click', showHowToPlay);
 
 // Kick off the game loop and show home screen
 requestAnimationFrame(loop);
