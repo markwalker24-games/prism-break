@@ -701,10 +701,13 @@ async function loadSeriesBySlug(slug) {
       }
     }
     function tryLoad(){
-      if(typeof startGame === 'function'){
-        startGame(levelData);
+      if(typeof startGame !== 'function'){ setTimeout(tryLoad, 200); return; }
+      const isNewUser = !LS.get('pb_visited');
+      if(isNewUser){
+        LS.set('pb_visited', '1');
+        showSharedMapIntro(levelData);
       } else {
-        setTimeout(tryLoad, 200);
+        startGame(levelData);
       }
     }
     setTimeout(tryLoad, 600);
@@ -712,6 +715,51 @@ async function loadSeriesBySlug(slug) {
     setTimeout(()=>showToast('⚠️ Could not load shared map'), 800);
   }
 })();
+
+function showSharedMapIntro(levelData){
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:500;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;';
+
+  const panel = document.createElement('div');
+  panel.style.cssText = "background:linear-gradient(160deg,#2a1f10,#1c160d);border:1px solid rgba(200,160,60,0.5);box-shadow:0 0 0 1px rgba(120,80,20,0.3),0 8px 40px rgba(0,0,0,0.8);border-radius:4px;padding:28px 22px;width:min(320px,100%);display:flex;flex-direction:column;gap:14px;font-family:'Lato',sans-serif;";
+
+  panel.innerHTML = `
+    <div style="text-align:center;">
+      <div style="font-family:'Cinzel Decorative',serif;font-size:20px;font-weight:700;color:#f5c842;letter-spacing:2px;text-shadow:0 0 20px rgba(245,200,66,0.5);">PRISM BREAK</div>
+      <div style="height:1px;background:linear-gradient(90deg,transparent,rgba(200,160,60,0.4),transparent);margin-top:10px;"></div>
+    </div>
+    <div style="color:#e8d5a0;font-size:13px;line-height:1.7;text-align:center;">Someone challenged you to solve their map. Here's how to play:</div>
+    <div style="display:flex;flex-direction:column;gap:10px;">
+      <div style="display:flex;align-items:flex-start;gap:10px;">
+        <span style="font-size:18px;flex-shrink:0;">👆</span>
+        <span style="color:#c9a84c;font-size:12px;line-height:1.6;"><strong style="color:#f5c842;">Tap left or right</strong> to move the ball side to side</span>
+      </div>
+      <div style="display:flex;align-items:flex-start;gap:10px;">
+        <span style="font-size:18px;flex-shrink:0;">💎</span>
+        <span style="color:#c9a84c;font-size:12px;line-height:1.6;"><strong style="color:#f5c842;">Collect all diamonds</strong> to escape the level</span>
+      </div>
+      <div style="display:flex;align-items:flex-start;gap:10px;">
+        <span style="font-size:18px;flex-shrink:0;">🔑</span>
+        <span style="color:#c9a84c;font-size:12px;line-height:1.6;"><strong style="color:#f5c842;">Keys unlock locks</strong> — find the key first</span>
+      </div>
+      <div style="display:flex;align-items:flex-start;gap:10px;">
+        <span style="font-size:18px;flex-shrink:0;">💣</span>
+        <span style="color:#c9a84c;font-size:12px;line-height:1.6;"><strong style="color:#f5c842;">Hold both sides</strong> to plant a bomb</span>
+      </div>
+    </div>
+    <div style="height:1px;background:linear-gradient(90deg,transparent,rgba(200,160,60,0.2),transparent);"></div>
+    <div style="color:rgba(180,140,60,0.6);font-size:11px;text-align:center;">Playing: <span style="color:#f5c842;">${levelData.name || 'Shared Map'}</span></div>
+    <button id="sharedMapPlayBtn" style="width:100%;background:linear-gradient(180deg,rgba(60,45,20,0.95),rgba(35,25,10,0.98));border:1px solid rgba(245,200,66,0.6);border-bottom:2px solid rgba(80,50,10,0.9);color:#f5c842;font-family:'Cinzel',serif;font-weight:600;font-size:15px;letter-spacing:1px;padding:15px;cursor:pointer;border-radius:3px;box-shadow:0 0 12px rgba(245,200,66,0.15);touch-action:manipulation;">PLAY</button>
+  `;
+
+  ov.appendChild(panel);
+  document.body.appendChild(ov);
+
+  panel.querySelector('#sharedMapPlayBtn').addEventListener('click', ()=>{
+    ov.remove();
+    startGame(levelData);
+  });
+}
 
 function savedLevels() {
   try { return JSON.parse(LS.get('cc_levels')||'[]'); } catch(e){ return []; }
