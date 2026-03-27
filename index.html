@@ -3214,6 +3214,7 @@ function openMapsPanel(defaultTab='maps') {
     });
     const allMaps = [...saved, ...fromSeries];
     body.innerHTML = '';
+    body.style.padding = '10px';
 
     if(!allMaps.length){
       const empty = document.createElement('div');
@@ -3223,20 +3224,82 @@ function openMapsPanel(defaultTab='maps') {
       return;
     }
 
+    // Thumbnail grid
+    const grid = document.createElement('div');
+    grid.style.cssText = 'display:flex;flex-wrap:wrap;gap:10px;justify-content:flex-start;align-content:flex-start;';
+    body.appendChild(grid);
+
+    const TW = 116, TH = 90;
+
     allMaps.forEach((lv, i)=>{
       const owned = isOwnedMap(lv);
-      const row = document.createElement('div');
-      row.style.cssText=`display:flex;align-items:center;background:${owned?'#1a1a2e':'#0d1f2d'};border:1px solid ${owned?'#333':'rgba(46,196,182,0.25)'};padding:10px 10px;border-radius:3px;gap:7px;`;
-      row.innerHTML=`
-        <span data-idx="${i}" class="mpName" style="color:${owned?'#e8d5a0':'#7ecfdb'};font-size:14px;font-family:'Lato',sans-serif;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;" title="Tap to rename">${lv.name}${owned?'':' <span style="font-size:11px;color:rgba(46,196,182,0.6);font-style:italic;">(Shared)</span>'}</span>
-        <button data-idx="${i}" class="mpLoad" style="${btnTeal}">LOAD</button>
-        <button data-idx="${i}" class="mpShare" style="font-family:'Lato',sans-serif;font-weight:700;font-size:11px;cursor:pointer;border-radius:3px;flex-shrink:0;padding:6px 10px;background:rgba(40,28,5,0.95);border:1px solid rgba(245,200,66,0.55);color:#f5c842;letter-spacing:0.5px;" title="Share link">SHARE</button>
-        <button data-idx="${i}" class="mpDel" style="${btnDanger}">×</button>`;
 
-      // RENAME (owned maps only)
-      row.querySelector('.mpName').addEventListener('click', ()=>{
-        if(!isOwnedMap(lv)){ showBuilderToast('Shared maps cannot be renamed'); return; }
-        showRenamePopup(row.querySelector('.mpName'), lv.name, newName=>{
+      const card = document.createElement('div');
+      card.style.cssText = `display:flex;flex-direction:column;align-items:stretch;width:${TW}px;background:${owned?'#1a1a2e':'#0d1f2d'};border:1px solid ${owned?'rgba(200,160,60,0.35)':'rgba(46,196,182,0.3)'};border-radius:4px;overflow:hidden;position:relative;box-shadow:0 2px 8px rgba(0,0,0,0.4);`;
+
+      // Thumbnail canvas
+      const cnv = document.createElement('canvas');
+      cnv.width = TW; cnv.height = TH;
+      cnv.style.cssText = `display:block;width:${TW}px;height:${TH}px;cursor:pointer;`;
+      const tc = cnv.getContext('2d');
+      tc.fillStyle = '#0a0a14';
+      tc.fillRect(0,0,TW,TH);
+      if(lv.bricks && lv.bricks.length){
+        const bw = TW/BRICK_COLS, bh = TH/BRICK_ROWS;
+        lv.bricks.forEach(b=>{
+          const col = b.col !== undefined ? b.col : Math.round(b.x/(b.w||BRICK_W));
+          const row = b.row !== undefined ? b.row : Math.round(b.y/(b.h||BRICK_H));
+          if(col<0||col>=BRICK_COLS||row<0||row>=BRICK_ROWS) return;
+          let color = b.color||'#888';
+          if(b.isSteel)        color='#8a9bb0';
+          else if(b.isDiamond) color='#00eeff';
+          else if(b.isKey)     color='#ffd700';
+          else if(b.isLock)    color='#b8860b';
+          else if(b.isSkull)   color='#333';
+          else if(b.isBomb)    color='#ff6600';
+          else if(b.isReverse) color='#9966cc';
+          else if(b.isWhite)   color='#e8e8f0';
+          tc.fillStyle = b.isPaint ? color+'99' : color;
+          tc.fillRect(col*bw+0.5, row*bh+0.5, bw-1, bh-1);
+        });
+      }
+
+      // Map name - tap to rename
+      const nameEl = document.createElement('div');
+      nameEl.style.cssText = `color:${owned?'#c9a84c':'#7ecfdb'};font-size:10px;font-family:'Lato',sans-serif;font-weight:700;padding:5px 6px 4px;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:${owned?'pointer':'default'};`;
+      nameEl.textContent = lv.name;
+      nameEl.title = owned ? 'Tap to rename' : lv.name;
+
+      // Top row: LOAD + DELETE outlined side by side
+      const topBtns = document.createElement('div');
+      topBtns.style.cssText = 'display:flex;gap:4px;padding:0 5px 4px;';
+
+      const loadBtn = document.createElement('button');
+      loadBtn.textContent = 'EDIT';
+      loadBtn.style.cssText = `flex:1;background:none;border:1px solid rgba(245,200,66,0.55);color:#f5c842;font-family:'Lato',sans-serif;font-weight:700;font-size:10px;padding:5px 4px;cursor:pointer;border-radius:3px;-webkit-tap-highlight-color:transparent;`;
+
+      const delBtn = document.createElement('button');
+      delBtn.textContent = 'DELETE';
+      delBtn.style.cssText = `flex:1;background:none;border:1px solid rgba(220,60,60,0.6);color:#e66;font-family:'Lato',sans-serif;font-weight:700;font-size:10px;padding:5px 4px;cursor:pointer;border-radius:3px;-webkit-tap-highlight-color:transparent;`;
+
+      topBtns.appendChild(loadBtn);
+      topBtns.appendChild(delBtn);
+
+      // Bottom row: SHARE solid gold full width
+      const shareBtn = document.createElement('button');
+      shareBtn.textContent = 'SHARE';
+      shareBtn.style.cssText = `width:calc(100% - 10px);margin:0 5px 6px;background:linear-gradient(180deg,rgba(60,45,20,0.95),rgba(35,25,10,0.98));border:1px solid rgba(245,200,66,0.6);border-bottom:2px solid rgba(80,50,10,0.9);color:#f5c842;font-family:'Lato',sans-serif;font-weight:700;font-size:10px;padding:6px 4px;cursor:pointer;border-radius:3px;letter-spacing:0.5px;box-shadow:0 0 6px rgba(245,200,66,0.1);-webkit-tap-highlight-color:transparent;box-sizing:border-box;`;
+
+      card.appendChild(nameEl);
+      card.appendChild(cnv);
+      card.appendChild(topBtns);
+      card.appendChild(shareBtn);
+      grid.appendChild(card);
+
+      // RENAME - tap name
+      nameEl.addEventListener('click', ()=>{
+        if(!owned){ showBuilderToast('Shared maps cannot be renamed'); return; }
+        showRenamePopup(nameEl, lv.name, newName=>{
           const levels = savedLevels();
           const entry = levels.find(l=>l.name===lv.name);
           if(!entry) return;
@@ -3244,7 +3307,6 @@ function openMapsPanel(defaultTab='maps') {
           entry.name = newName;
           LS.set('cc_levels', JSON.stringify(levels));
           upsertMapToCloud(entry).catch(()=>{});
-          // Update series references
           savedSeries().forEach(s=>{
             let changed=false;
             s.levels.forEach(l=>{ if(l.name===oldName){ l.name=newName; changed=true; } });
@@ -3255,26 +3317,25 @@ function openMapsPanel(defaultTab='maps') {
         });
       });
 
-      // LOAD
-      row.querySelector('.mpLoad').addEventListener('click', ()=>{ ov.remove(); loadLevelIntoBuilder(lv); });
-
-      // ASSIGN to series (owned maps only)
+      // LOAD - tap thumbnail or load button
+      const doLoad = ()=>{ ov.remove(); loadLevelIntoBuilder(lv); };
+      cnv.addEventListener('click', doLoad);
+      loadBtn.addEventListener('click', doLoad);
 
       // SHARE
-      row.querySelector('.mpShare').addEventListener('click', async ()=>{
-        const btn = row.querySelector('.mpShare');
-        const orig = btn.innerHTML; btn.innerHTML='⏳'; btn.disabled=true;
+      shareBtn.addEventListener('click', async ()=>{
+        const orig = shareBtn.textContent; shareBtn.textContent='...'; shareBtn.disabled=true;
         try {
           let slug;
           try { slug = await upsertMapToCloud(lv); }
           catch(uploadErr){ console.warn('Cloud upload failed, using local slug:', uploadErr); slug = slugify(lv.name); }
           showShareLinkOverlay('MAP SHARED!', getShareUrl(slug), lv);
         } catch(e){ console.error('Share failed:', e); showBuilderToast('⚠️ Share failed: ' + (e && e.message ? e.message.slice(0,60) : 'unknown error')); }
-        finally { btn.innerHTML=orig; btn.disabled=false; }
+        finally { shareBtn.textContent=orig; shareBtn.disabled=false; }
       });
 
       // DELETE
-      row.querySelector('.mpDel').addEventListener('click', ()=>{
+      delBtn.addEventListener('click', ()=>{
         const isOwned = savedLevels().some(l=>l.name===lv.name);
         const note = isOwned ? '' : '<div style="color:rgba(200,160,60,0.6);font-size:12px;margin-top:6px;">This map was shared with you — it will only be removed from your list.</div>';
         showConfirmOverlay(
@@ -3287,8 +3348,6 @@ function openMapsPanel(defaultTab='maps') {
           }
         );
       });
-
-      body.appendChild(row);
     });
   }
 
