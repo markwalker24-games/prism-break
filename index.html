@@ -555,6 +555,7 @@ function slugify(name) {
 
 async function upsertMapToCloud(levelData) {
   // Check if this map already exists in cloud - reuse its slug if so
+  console.log('upsertMapToCloud called for:', levelData.name, 'creator:', CREATOR_ID);
   const existing = await fetch(`${SUPA_URL}/rest/v1/maps?creator_id=eq.${encodeURIComponent(CREATOR_ID)}&name=eq.${encodeURIComponent(levelData.name)}&select=slug&limit=1`, {
     headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` }
   });
@@ -574,12 +575,14 @@ async function upsertMapToCloud(levelData) {
   // New map - generate slug once and insert
   const slug = slugify(levelData.name || 'map');
   const payload = { slug, name: levelData.name || 'Unnamed', data: levelData, creator_id: CREATOR_ID };
+  console.log('Inserting new map to Supabase:', slug, 'creator:', CREATOR_ID);
   const res = await fetch(`${SUPA_URL}/rest/v1/maps`, {
     method: 'POST',
     headers: { 'Content-Type':'application/json','apikey':SUPA_KEY,'Authorization':`Bearer ${SUPA_KEY}`,'Prefer':'return=representation' },
     body: JSON.stringify(payload)
   });
-  if(!res.ok) { const err=await res.text(); throw new Error(err); }
+  if(!res.ok) { const err=await res.text(); console.error('Supabase insert failed:', res.status, err); throw new Error(err); }
+  console.log('Supabase insert success, slug:', slug);
   return slug;
 }
 
