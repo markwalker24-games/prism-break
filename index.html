@@ -2444,7 +2444,7 @@ function renderLevelList(){
   // Standalone maps: owned by this user and not in any series
   const allSeriesLevelNames=new Set(savedSeries().flatMap(s=>s.levels.map(l=>l.name)));
   const customMaps=savedLevels().filter(lv=>!allSeriesLevelNames.has(lv.name) && isOwnedMap(lv));
-  if(customMaps.length) groups.push({ name:'My Maps', levels:customMaps, isSeries:false, seriesObj:null, progressLocked:false });
+  if(customMaps.length) groups.push({ name:'My Additional Maps', levels:customMaps, isSeries:false, seriesObj:null, progressLocked:false });
 
   if(!groups.length){
     list.innerHTML='<div style="color:#888;font-size:11px;text-align:center;width:100%;padding:20px 0;line-height:1.8;">No maps yet.<br>Use Map Builder to create one!</div>';
@@ -2459,12 +2459,13 @@ function renderLevelList(){
       const progress = group.progressLocked ? getSeriesProgress(group.name) : Infinity;
       const isOpen = !!openState[gi];
 
+      const isMine = !group.isSeries;
       const header=document.createElement('div');
       header.style.cssText=`
         width:100%; display:flex; align-items:center; justify-content:space-between;
         padding:11px 12px; cursor:pointer; border-radius:4px; box-sizing:border-box;
-        background:${isOpen ? 'rgba(50,36,12,0.95)' : 'rgba(30,22,8,0.9)'};
-        border:1px solid ${isOpen ? 'rgba(200,160,60,0.55)' : 'rgba(140,100,30,0.3)'};
+        background:${isOpen ? (isMine ? 'rgba(8,28,32,0.95)' : 'rgba(50,36,12,0.95)') : (isMine ? 'rgba(6,20,24,0.9)' : 'rgba(30,22,8,0.9)')};
+        border:1px solid ${isOpen ? (isMine ? 'rgba(46,196,182,0.4)' : 'rgba(200,160,60,0.55)') : (isMine ? 'rgba(46,196,182,0.2)' : 'rgba(140,100,30,0.3)')};
         transition:background 0.15s, border-color 0.15s;
         margin-bottom:${isOpen ? '0' : '6px'};
         border-bottom-left-radius:${isOpen ? '0' : '4px'};
@@ -2479,14 +2480,31 @@ function renderLevelList(){
           ? `<span style="color:rgba(46,196,182,0.65);font-family:'Lato',sans-serif;font-size:10px;font-style:italic;">Shared</span>`
           : '';
       nameEl.innerHTML=`
-        <span style="color:#f5c842;font-family:'Cinzel',serif;font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${group.name}</span>
+        <span style="color:${isMine ? '#2ec4b6' : '#f5c842'};font-family:'Cinzel',serif;font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${group.name}</span>
         ${badge}
-        <span style="color:rgba(180,140,60,0.65);font-family:'Lato',sans-serif;font-size:11px;white-space:nowrap;">${group.levels.length} map${group.levels.length!==1?'s':''}</span>
+        <span style="color:${isMine ? 'rgba(46,196,182,0.5)' : 'rgba(180,140,60,0.65)'};font-family:'Lato',sans-serif;font-size:11px;white-space:nowrap;">${group.levels.length} map${group.levels.length!==1?'s':''}</span>
       `;
 
       const chevron=document.createElement('div');
       chevron.style.cssText=`color:rgba(200,160,60,0.7);font-size:11px;transform:${isOpen?'rotate(180deg)':'rotate(0deg)'};transition:transform 0.2s;flex-shrink:0;margin-left:8px;`;
       chevron.textContent='▼';
+
+      // Share button for series (non-featured only, so users can share their own series)
+      const shareSeriesBtn = document.createElement('button');
+      shareSeriesBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>';
+      shareSeriesBtn.style.cssText = 'background:none;border:none;color:rgba(245,200,66,0.55);cursor:pointer;padding:4px;flex-shrink:0;line-height:0;-webkit-tap-highlight-color:transparent;transition:color 0.15s;';
+      shareSeriesBtn.title = 'Share this series';
+      shareSeriesBtn.addEventListener('click', async (e)=>{
+        e.stopPropagation(); // don't toggle accordion
+        shareSeriesBtn.style.color = '#f5c842';
+        try {
+          let slug;
+          try { slug = await shareSeriesToCloud(group.seriesObj); }
+          catch(uploadErr){ console.warn('Series upload failed:', uploadErr); slug = group.seriesObj.name.toLowerCase().replace(/[^a-z0-9]+/g,'-'); }
+          showShareLinkOverlay('SERIES SHARED!', getSeriesShareUrl(slug));
+        } catch(e){ showToast('⚠️ Share failed'); }
+        finally { shareSeriesBtn.style.color = 'rgba(245,200,66,0.55)'; }
+      });
 
       header.appendChild(nameEl);
       header.appendChild(chevron);
@@ -2498,9 +2516,9 @@ function renderLevelList(){
       const panel=document.createElement('div');
       panel.style.cssText=`
         width:100%; box-sizing:border-box;
-        border:1px solid rgba(200,160,60,0.55); border-top:none;
+        border:1px solid ${isMine ? 'rgba(46,196,182,0.4)' : 'rgba(200,160,60,0.55)'}; border-top:none;
         border-bottom-left-radius:4px; border-bottom-right-radius:4px;
-        background:rgba(20,14,4,0.95); padding:10px;
+        background:${isMine ? 'rgba(4,18,22,0.95)' : 'rgba(20,14,4,0.95)'}; padding:10px;
         display:flex; flex-wrap:wrap; gap:8px; margin-bottom:6px;
       `;
 
@@ -2542,6 +2560,25 @@ function renderLevelList(){
         }
         panel.appendChild(card);
       });
+
+      // Share button at bottom of expanded panel
+      if(group.isSeries && group.seriesObj){
+        const sharePanelBtn = document.createElement('button');
+        sharePanelBtn.style.cssText = "width:100%;background:none;border:1px solid rgba(245,200,66,0.35);color:rgba(245,200,66,0.7);font-family:'Cinzel',serif;font-size:11px;font-weight:600;letter-spacing:0.5px;padding:8px;cursor:pointer;border-radius:3px;margin-top:2px;display:flex;align-items:center;justify-content:center;gap:7px;-webkit-tap-highlight-color:transparent;";
+        sharePanelBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg> SHARE SERIES';
+        sharePanelBtn.addEventListener('click', async ()=>{
+          const orig = sharePanelBtn.innerHTML; sharePanelBtn.textContent = '...'; sharePanelBtn.disabled = true;
+          try {
+            let slug;
+            try { slug = await shareSeriesToCloud(group.seriesObj); }
+            catch(uploadErr){ console.warn('Series upload failed:', uploadErr); slug = group.seriesObj.name.toLowerCase().replace(/[^a-z0-9]+/g,'-'); }
+            showShareLinkOverlay('SERIES SHARED!', getSeriesShareUrl(slug));
+          } catch(e){ showToast('⚠️ Share failed'); }
+          finally { sharePanelBtn.innerHTML = orig; sharePanelBtn.disabled = false; }
+        });
+        panel.appendChild(sharePanelBtn);
+      }
+
       list.appendChild(panel);
     });
   }
@@ -2567,10 +2604,9 @@ document.getElementById('saveCloseBtn').addEventListener('click',closeSaveDialog
 let builderOpen=false;
 let adminMode = LS.get('pb_admin')==='1';
 
-// PIN is split across two constants so it's not a single obvious string
-const _pa = '19';
-const _pb = '87';
-function _checkPin(p){ return p===(_pa+_pb); }
+// Password split so it's not a single obvious string in the source
+const _pw = "You'reagenius" + "forguessingthis!";
+function _checkPw(p){ return p===_pw; }
 
 function updateAdminStar(){
   const svg = document.getElementById('adminStarSvg');
@@ -2600,61 +2636,64 @@ document.getElementById('adminStarBtn').addEventListener('click',()=>{
 function showPinOverlay(){
   const ov=document.createElement('div');
   ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:400;display:flex;align-items:center;justify-content:center;';
-  ov.innerHTML=`<div id="pinPanel" style="background:linear-gradient(160deg,#2a1f10,#1c160d);border:1px solid rgba(200,160,60,0.5);border-radius:4px;padding:28px 24px;width:min(300px,88vw);display:flex;flex-direction:column;align-items:center;gap:16px;box-shadow:0 8px 40px rgba(0,0,0,0.8);">
+
+  const panel=document.createElement('div');
+  panel.id='pinPanel';
+  panel.style.cssText="background:linear-gradient(160deg,#2a1f10,#1c160d);border:1px solid rgba(200,160,60,0.5);border-radius:4px;padding:28px 24px;width:min(300px,88vw);display:flex;flex-direction:column;align-items:center;gap:16px;box-shadow:0 8px 40px rgba(0,0,0,0.8);";
+  panel.innerHTML=`
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(200,160,60,0.7)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
     <div style="color:#c9a84c;font-family:'Cinzel',serif;font-size:13px;letter-spacing:2px;">ADMIN ACCESS</div>
-    <div id="pinDots" style="display:flex;gap:12px;margin:4px 0;">
-      <div class="pdot" style="width:12px;height:12px;border-radius:50%;border:2px solid rgba(200,160,60,0.4);background:transparent;transition:background 0.15s;"></div>
-      <div class="pdot" style="width:12px;height:12px;border-radius:50%;border:2px solid rgba(200,160,60,0.4);background:transparent;transition:background 0.15s;"></div>
-      <div class="pdot" style="width:12px;height:12px;border-radius:50%;border:2px solid rgba(200,160,60,0.4);background:transparent;transition:background 0.15s;"></div>
-      <div class="pdot" style="width:12px;height:12px;border-radius:50%;border:2px solid rgba(200,160,60,0.4);background:transparent;transition:background 0.15s;"></div>
-    </div>
-    <div id="pinGrid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;width:180px;">
-      ${[1,2,3,4,5,6,7,8,9,'',0,''].map(n=>n===''?`<div></div>`:`<button data-n="${n}" class="pinKey" style="background:rgba(40,28,8,0.9);border:1px solid rgba(180,140,50,0.3);border-bottom:2px solid rgba(60,40,10,0.8);border-radius:3px;color:#e8d5a0;font-family:'Cinzel',serif;font-size:16px;padding:12px;cursor:pointer;-webkit-tap-highlight-color:transparent;">${n}</button>`).join('')}
-    </div>
-    <button id="pinCancel" style="background:none;border:none;color:rgba(180,140,60,0.4);font-family:'Cinzel',serif;font-size:11px;cursor:pointer;letter-spacing:1px;">CANCEL</button>
-  </div>`;
+  `;
+
+  const input=document.createElement('input');
+  input.type='password';
+  input.placeholder='Enter password';
+  input.autocomplete='off';
+  input.style.cssText="width:100%;background:rgba(10,8,4,0.9);border:1px solid rgba(150,110,40,0.5);color:#e8d5a0;font-family:'Lato',sans-serif;font-size:14px;padding:10px 12px;border-radius:3px;outline:none;box-sizing:border-box;";
+  input.addEventListener('focus',()=>{ input.style.borderColor='rgba(245,200,66,0.7)'; });
+  input.addEventListener('blur',()=>{ input.style.borderColor='rgba(150,110,40,0.5)'; });
+
+  const submitBtn=document.createElement('button');
+  submitBtn.textContent='UNLOCK';
+  submitBtn.style.cssText="width:100%;background:linear-gradient(180deg,rgba(60,45,20,0.95),rgba(35,25,10,0.98));border:1px solid rgba(245,200,66,0.6);border-bottom:2px solid rgba(80,50,10,0.9);color:#f5c842;font-family:'Cinzel',serif;font-weight:600;font-size:13px;letter-spacing:1px;padding:12px;cursor:pointer;border-radius:3px;";
+
+  const cancelBtn=document.createElement('button');
+  cancelBtn.textContent='CANCEL';
+  cancelBtn.style.cssText="background:none;border:none;color:rgba(180,140,60,0.4);font-family:'Cinzel',serif;font-size:11px;cursor:pointer;letter-spacing:1px;";
+
+  panel.appendChild(input);
+  panel.appendChild(submitBtn);
+  panel.appendChild(cancelBtn);
+  ov.appendChild(panel);
   document.body.appendChild(ov);
-
-  let entered='';
-  const dots=ov.querySelectorAll('.pdot');
-
-  function updateDots(){
-    dots.forEach((d,i)=>{ d.style.background=i<entered.length?'#f5c842':'transparent'; });
-  }
+  setTimeout(()=>input.focus(), 100);
 
   function shake(){
-    const panel=ov.querySelector('#pinPanel');
     panel.style.transition='transform 0.08s';
     const seq=[8,-8,6,-6,4,-4,0];
     let i=0;
     const next=()=>{ panel.style.transform=`translateX(${seq[i]}px)`; i++; if(i<seq.length) setTimeout(next,60); };
     next();
-    // Flash dots red
-    dots.forEach(d=>{ d.style.background='#e63946'; d.style.borderColor='#e63946'; });
-    setTimeout(()=>{ entered=''; updateDots(); dots.forEach(d=>{ d.style.borderColor='rgba(200,160,60,0.4)'; }); }, 500);
+    input.style.borderColor='#e63946';
+    input.value='';
+    setTimeout(()=>{ input.style.borderColor='rgba(150,110,40,0.5)'; }, 500);
   }
 
-  ov.querySelectorAll('.pinKey').forEach(btn=>{
-    btn.addEventListener('click',()=>{
-      if(entered.length>=4) return;
-      entered+=btn.dataset.n;
-      updateDots();
-      if(entered.length===4){
-        if(_checkPin(entered)){
-          adminMode=true;
-          LS.set('pb_admin','1');
-          updateAdminStar();
-          ov.remove();
-          showBuilderToast('★ Admin mode unlocked');
-        } else {
-          shake();
-        }
-      }
-    });
-  });
+  function tryUnlock(){
+    if(_checkPw(input.value.trim())){
+      adminMode=true;
+      LS.set('pb_admin','1');
+      updateAdminStar();
+      ov.remove();
+      showBuilderToast('★ Admin mode unlocked');
+    } else {
+      shake();
+    }
+  }
 
-  ov.querySelector('#pinCancel').addEventListener('click',()=>ov.remove());
+  submitBtn.addEventListener('click', tryUnlock);
+  input.addEventListener('keydown', e=>{ if(e.key==='Enter') tryUnlock(); });
+  cancelBtn.addEventListener('click', ()=>ov.remove());
 }
 
 let builderBricks=[];
