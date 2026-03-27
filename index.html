@@ -3093,7 +3093,7 @@ function showConfirmOverlay(message, onYes) {
   ov.innerHTML=`<div style="background:linear-gradient(160deg,#2a1f10,#1c160d);border:1px solid rgba(200,160,60,0.5);border-radius:4px;padding:24px 20px;width:min(300px,88vw);display:flex;flex-direction:column;gap:16px;box-shadow:0 8px 40px rgba(0,0,0,0.8);">
     <div style="color:#e8d5a0;font-family:'Lato',sans-serif;font-size:15px;line-height:1.5;text-align:center;">${message}</div>
     <div style="display:flex;gap:10px;">
-      <button id="cfmYes" style="flex:1;background:#2ec4b6;border:none;color:#000;font-family:'Cinzel',serif;font-weight:600;font-size:13px;padding:11px;border-radius:3px;cursor:pointer;">Yes</button>
+      <button id="cfmYes" style="flex:1;background:#c0392b;border:none;color:#fff;font-family:'Cinzel',serif;font-weight:600;font-size:13px;padding:11px;border-radius:3px;cursor:pointer;">Yes</button>
       <button id="cfmNo" style="flex:1;background:none;border:1px solid rgba(180,140,50,0.4);color:rgba(200,170,90,0.7);font-family:'Cinzel',serif;font-size:13px;padding:11px;border-radius:3px;cursor:pointer;">No</button>
     </div>
   </div>`;
@@ -3214,7 +3214,7 @@ function openMapsPanel(defaultTab='maps') {
     });
     const allMaps = [...saved, ...fromSeries];
     body.innerHTML = '';
-    body.style.padding = '10px';
+    body.style.padding = '8px';
 
     if(!allMaps.length){
       const empty = document.createElement('div');
@@ -3226,26 +3226,26 @@ function openMapsPanel(defaultTab='maps') {
 
     // Thumbnail grid
     const grid = document.createElement('div');
-    grid.style.cssText = 'display:flex;flex-wrap:wrap;gap:10px;justify-content:flex-start;align-content:flex-start;';
+    grid.style.cssText = 'display:grid;grid-template-columns:repeat(3,1fr);gap:8px;width:100%;';
     body.appendChild(grid);
 
-    const TW = 116, TH = 90;
+    const TH = 90;
 
     allMaps.forEach((lv, i)=>{
       const owned = isOwnedMap(lv);
 
       const card = document.createElement('div');
-      card.style.cssText = `display:flex;flex-direction:column;align-items:stretch;width:${TW}px;background:${owned?'#1a1a2e':'#0d1f2d'};border:1px solid ${owned?'rgba(200,160,60,0.35)':'rgba(46,196,182,0.3)'};border-radius:4px;overflow:hidden;position:relative;box-shadow:0 2px 8px rgba(0,0,0,0.4);`;
+      card.style.cssText = `display:flex;flex-direction:column;align-items:stretch;min-width:0;background:${owned?'#1a1a2e':'#0d1f2d'};border:1px solid ${owned?'rgba(200,160,60,0.35)':'rgba(46,196,182,0.3)'};border-radius:4px;overflow:hidden;position:relative;box-shadow:0 2px 8px rgba(0,0,0,0.4);`;
 
-      // Thumbnail canvas
+      // Thumbnail canvas - fills card width
       const cnv = document.createElement('canvas');
-      cnv.width = TW; cnv.height = TH;
-      cnv.style.cssText = `display:block;width:${TW}px;height:${TH}px;cursor:pointer;`;
+      cnv.width = 120; cnv.height = TH;
+      cnv.style.cssText = `display:block;width:100%;height:${TH}px;cursor:pointer;`;
       const tc = cnv.getContext('2d');
       tc.fillStyle = '#0a0a14';
-      tc.fillRect(0,0,TW,TH);
+      tc.fillRect(0,0,120,TH);
       if(lv.bricks && lv.bricks.length){
-        const bw = TW/BRICK_COLS, bh = TH/BRICK_ROWS;
+        const bw = 120/BRICK_COLS, bh = TH/BRICK_ROWS;
         lv.bricks.forEach(b=>{
           const col = b.col !== undefined ? b.col : Math.round(b.x/(b.w||BRICK_W));
           const row = b.row !== undefined ? b.row : Math.round(b.y/(b.h||BRICK_H));
@@ -3270,29 +3270,24 @@ function openMapsPanel(defaultTab='maps') {
       nameEl.textContent = lv.name;
       nameEl.title = owned ? 'Tap to rename' : lv.name;
 
-      // Top row: LOAD + DELETE outlined side by side
-      const topBtns = document.createElement('div');
-      topBtns.style.cssText = 'display:flex;gap:4px;padding:0 5px 4px;';
-
-      const loadBtn = document.createElement('button');
-      loadBtn.textContent = 'EDIT';
-      loadBtn.style.cssText = `flex:1;background:none;border:1px solid rgba(245,200,66,0.55);color:#f5c842;font-family:'Lato',sans-serif;font-weight:700;font-size:10px;padding:5px 4px;cursor:pointer;border-radius:3px;-webkit-tap-highlight-color:transparent;`;
-
-      const delBtn = document.createElement('button');
-      delBtn.textContent = 'DELETE';
-      delBtn.style.cssText = `flex:1;background:none;border:1px solid rgba(220,60,60,0.6);color:#e66;font-family:'Lato',sans-serif;font-weight:700;font-size:10px;padding:5px 4px;cursor:pointer;border-radius:3px;-webkit-tap-highlight-color:transparent;`;
-
-      topBtns.appendChild(loadBtn);
-      topBtns.appendChild(delBtn);
-
-      // Bottom row: SHARE solid gold full width
+      // SHARE solid gold full width
       const shareBtn = document.createElement('button');
       shareBtn.textContent = 'SHARE';
       shareBtn.style.cssText = `width:calc(100% - 10px);margin:0 5px 6px;background:linear-gradient(180deg,rgba(60,45,20,0.95),rgba(35,25,10,0.98));border:1px solid rgba(245,200,66,0.6);border-bottom:2px solid rgba(80,50,10,0.9);color:#f5c842;font-family:'Lato',sans-serif;font-weight:700;font-size:10px;padding:6px 4px;cursor:pointer;border-radius:3px;letter-spacing:0.5px;box-shadow:0 0 6px rgba(245,200,66,0.1);-webkit-tap-highlight-color:transparent;box-sizing:border-box;`;
 
+      // Wrap thumbnail with edit icon overlay
+      const cnvWrap = document.createElement('div');
+      cnvWrap.style.cssText = 'position:relative;width:100%;';
+
+      const editOverlay = document.createElement('div');
+      editOverlay.style.cssText = 'position:absolute;top:5px;right:5px;pointer-events:none;opacity:0.25;';
+      editOverlay.innerHTML = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+
+      cnvWrap.appendChild(cnv);
+      cnvWrap.appendChild(editOverlay);
+
       card.appendChild(nameEl);
-      card.appendChild(cnv);
-      card.appendChild(topBtns);
+      card.appendChild(cnvWrap);
       card.appendChild(shareBtn);
       grid.appendChild(card);
 
@@ -3317,10 +3312,34 @@ function openMapsPanel(defaultTab='maps') {
         });
       });
 
-      // LOAD - tap thumbnail or load button
-      const doLoad = ()=>{ ov.remove(); loadLevelIntoBuilder(lv); };
-      cnv.addEventListener('click', doLoad);
-      loadBtn.addEventListener('click', doLoad);
+      // TAP thumbnail = load into builder
+      cnvWrap.addEventListener('click', ()=>{ ov.remove(); loadLevelIntoBuilder(lv); });
+
+      // LONG-PRESS thumbnail = delete
+      let pressTimer = null;
+      const startPress = ()=>{
+        pressTimer = setTimeout(()=>{
+          pressTimer = null;
+          const isOwned = savedLevels().some(l=>l.name===lv.name);
+          const note = isOwned ? '' : '<div style="color:rgba(200,160,60,0.6);font-size:12px;margin-top:6px;">This map was shared with you — it will only be removed from your list.</div>';
+          showConfirmOverlay(
+            `Delete <strong style="color:#f5c842;">${lv.name}</strong>?${note}`,
+            ()=>{
+              deleteLevel(lv.name);
+              if(isOwned) deleteCloudMapByName(lv.name).catch(()=>{});
+              openMapsPanel('maps');
+              showBuilderToast(`"${lv.name}" deleted`);
+            }
+          );
+        }, 600);
+      };
+      const cancelPress = ()=>{ if(pressTimer){ clearTimeout(pressTimer); pressTimer=null; } };
+      cnvWrap.addEventListener('pointerdown', startPress);
+      cnvWrap.addEventListener('pointerup', cancelPress);
+      cnvWrap.addEventListener('pointerleave', cancelPress);
+      cnvWrap.addEventListener('pointermove', cancelPress);
+      cnvWrap.style.cursor = 'pointer';
+      cnvWrap.title = 'Tap to edit · Hold to delete';
 
       // SHARE
       shareBtn.addEventListener('click', async ()=>{
@@ -3332,21 +3351,6 @@ function openMapsPanel(defaultTab='maps') {
           showShareLinkOverlay('MAP SHARED!', getShareUrl(slug), lv);
         } catch(e){ console.error('Share failed:', e); showBuilderToast('⚠️ Share failed: ' + (e && e.message ? e.message.slice(0,60) : 'unknown error')); }
         finally { shareBtn.textContent=orig; shareBtn.disabled=false; }
-      });
-
-      // DELETE
-      delBtn.addEventListener('click', ()=>{
-        const isOwned = savedLevels().some(l=>l.name===lv.name);
-        const note = isOwned ? '' : '<div style="color:rgba(200,160,60,0.6);font-size:12px;margin-top:6px;">This map was shared with you — it will only be removed from your list.</div>';
-        showConfirmOverlay(
-          `Delete <strong style="color:#f5c842;">${lv.name}</strong>?${note}`,
-          ()=>{
-            deleteLevel(lv.name);
-            if(isOwned) deleteCloudMapByName(lv.name).catch(()=>{});
-            openMapsPanel('maps');
-            showBuilderToast(`"${lv.name}" deleted`);
-          }
-        );
       });
     });
   }
@@ -3625,7 +3629,7 @@ function showAddMapsToSeriesOverlay(seriesName, onDone){
       // Draw thumbnail
       const tc = thumb.getContext('2d');
       tc.fillStyle = '#0a0a14';
-      tc.fillRect(0,0,TW,TH);
+      tc.fillRect(0,0,120,TH);
       if(lv.bricks && lv.bricks.length){
         const cols = BRICK_COLS, rows = BRICK_ROWS;
         const bw = TW/cols, bh = TH/rows;
