@@ -554,26 +554,26 @@ function slugify(name) {
 }
 
 async function upsertMapToCloud(levelData) {
-  const slug = slugify(levelData.name || 'map');
-  const payload = { slug, name: levelData.name || 'Unnamed', data: levelData, creator_id: CREATOR_ID };
-  // Use upsert - if a map with this slug exists for this creator, update it
-  // We key on name+creator so re-saving the same map updates rather than duplicates
+  // Check if this map already exists in cloud - reuse its slug if so
   const existing = await fetch(`${SUPA_URL}/rest/v1/maps?creator_id=eq.${encodeURIComponent(CREATOR_ID)}&name=eq.${encodeURIComponent(levelData.name)}&select=slug&limit=1`, {
     headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` }
   });
   if(existing.ok) {
     const rows = await existing.json();
     if(rows.length) {
-      // Update existing
-      await fetch(`${SUPA_URL}/rest/v1/maps?slug=eq.${encodeURIComponent(rows[0].slug)}`, {
+      // Update existing row, reuse its slug
+      const existingSlug = rows[0].slug;
+      await fetch(`${SUPA_URL}/rest/v1/maps?slug=eq.${encodeURIComponent(existingSlug)}`, {
         method: 'PATCH',
         headers: { 'Content-Type':'application/json','apikey':SUPA_KEY,'Authorization':`Bearer ${SUPA_KEY}` },
         body: JSON.stringify({ data: levelData, name: levelData.name })
       });
-      return rows[0].slug;
+      return existingSlug; // always return the stable slug
     }
   }
-  // Insert new
+  // New map - generate slug once and insert
+  const slug = slugify(levelData.name || 'map');
+  const payload = { slug, name: levelData.name || 'Unnamed', data: levelData, creator_id: CREATOR_ID };
   const res = await fetch(`${SUPA_URL}/rest/v1/maps`, {
     method: 'POST',
     headers: { 'Content-Type':'application/json','apikey':SUPA_KEY,'Authorization':`Bearer ${SUPA_KEY}`,'Prefer':'return=representation' },
