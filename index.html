@@ -712,7 +712,8 @@ async function loadSeriesBySlug(slug) {
     }
     setTimeout(tryLoad, 600);
   } catch(e) {
-    setTimeout(()=>showToast('⚠️ Could not load shared map'), 800);
+    console.error('checkMapParam error:', e);
+    setTimeout(()=>showToast('⚠️ Could not load shared map: ' + (e&&e.message?e.message.slice(0,60):String(e))), 800);
   }
 })();
 
