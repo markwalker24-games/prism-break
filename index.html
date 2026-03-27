@@ -4601,25 +4601,44 @@ async function fetchCloudSeries() {
 }
 
 async function upsertCloudSeries(series, sortOrder) {
+  const slug = series.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   const payload = {
-    slug: series.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
+    slug,
     name: series.name,
     description: series.description || '',
     levels: series.levels,
     sort_order: sortOrder
   };
-  const res = await fetch(`${SUPA_URL}/rest/v1/series`, {
+
+  // Try PATCH first (update existing row by slug)
+  const patch = await fetch(`${SUPA_URL}/rest/v1/series?slug=eq.${encodeURIComponent(slug)}`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      'apikey': SUPA_KEY,
+      'Authorization': `Bearer ${SUPA_KEY}`,
+      'Prefer': 'return=representation'
+    },
+    body: JSON.stringify({ name: series.name, description: series.description || '', levels: series.levels, sort_order: sortOrder })
+  });
+  if (patch.ok) {
+    const rows = await patch.json();
+    if (rows && rows.length) return rows[0]; // updated existing row
+  }
+
+  // Row doesn't exist yet - INSERT
+  const post = await fetch(`${SUPA_URL}/rest/v1/series`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'apikey': SUPA_KEY,
       'Authorization': `Bearer ${SUPA_KEY}`,
-      'Prefer': 'resolution=merge-duplicates,return=representation'
+      'Prefer': 'return=representation'
     },
     body: JSON.stringify(payload)
   });
-  if (!res.ok) { const e = await res.text(); throw new Error(e); }
-  return await res.json();
+  if (!post.ok) { const e = await post.text(); throw new Error(e); }
+  return await post.json();
 }
 
 async function appendLevelToCloudSeries(seriesSlug, levelData) {
