@@ -347,6 +347,7 @@
       </div>
       <div id="builderActions">
         <button class="builder-btn" id="builderMapsBtn">📁 MAPS</button>
+        <button class="builder-btn" id="builderImportBtn" style="display:none;border-color:rgba(220,60,60,0.6);color:#e66;">⬆ IMPORT</button>
         <button class="builder-btn" id="builderClearBtn">CLEAR</button>
         <button class="builder-btn green" id="builderTestBtn">▶ TEST</button>
         <button class="builder-btn gold" id="builderSaveBtn">💾 SAVE</button>
@@ -711,6 +712,7 @@ async function loadSeriesBySlug(slug) {
   if(!slug) return;
   try {
     const levelData = await loadMapBySlug(slug);
+    if(levelData) levelData.slug = slug; // stamp slug for record lookup
     // Save preserving original creator_id, marking as received
     if(levelData && levelData.name){
       const levels = savedLevels();
@@ -819,8 +821,8 @@ function saveLevel(name, levelData) {
   const entry = { name, ...levelData, creator_id: CREATOR_ID, created:Date.now() };
   if(existing>=0) levels[existing]=entry; else levels.push(entry);
   LS.set('cc_levels', JSON.stringify(levels));
-  // Background cloud sync - non-blocking, silent on failure
-  upsertMapToCloud(entry).catch(()=>{});
+  // Background cloud sync - stamp slug back onto entry when done
+  upsertMapToCloud(entry).then(slug=>{ entry.slug = slug; }).catch(()=>{});
 }
 function deleteLevel(name) {
   LS.set('cc_levels', JSON.stringify(savedLevels().filter(l=>l.name!==name)));
@@ -2238,11 +2240,17 @@ function startGame(levelData, forcedMode){
   if(levelData && levelData.name){
     (async ()=>{
       try {
-        const res = await fetch(`${SUPA_URL}/rest/v1/maps?name=eq.${encodeURIComponent(levelData.name)}&select=slug&limit=1`, {
-          headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` }
-        });
-        if(res.ok){ const rows=await res.json(); if(rows.length) currentMapRecord = await fetchRecord(rows[0].slug); }
-      } catch(e){}
+        let slug = levelData.slug || null;
+        // Fall back to name lookup if no slug stored
+        if(!slug){
+          const res = await fetch(`${SUPA_URL}/rest/v1/maps?name=eq.${encodeURIComponent(levelData.name)}&select=slug&limit=1`, {
+            headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` }
+          });
+          if(res.ok){ const rows=await res.json(); if(rows.length){ slug=rows[0].slug; levelData.slug=slug; } }
+        }
+        if(slug) currentMapRecord = await fetchRecord(slug);
+        console.log('Record fetch for', levelData.name, '- slug:', slug, '- record:', currentMapRecord);
+      } catch(e){ console.warn('Record fetch failed:', e); }
     })();
   }
 }
@@ -2552,11 +2560,14 @@ function renderLevelList(){
 
       const nameEl=document.createElement('div');
       nameEl.style.cssText='display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap;';
+      const isAdminGroup = group.seriesObj && group.seriesObj._adminImport;
       const badge = group.isFeatured
         ? `<span style="background:rgba(245,200,66,0.15);border:1px solid rgba(245,200,66,0.4);color:#f5c842;font-family:'Cinzel',serif;font-size:9px;padding:1px 6px;border-radius:2px;white-space:nowrap;flex-shrink:0;">⭐ QUEST</span>`
-        : group.progressLocked
-          ? `<span style="color:rgba(46,196,182,0.65);font-family:'Lato',sans-serif;font-size:10px;font-style:italic;">Shared</span>`
-          : '';
+        : isAdminGroup
+          ? `<span style="background:rgba(220,60,60,0.12);border:1px solid rgba(220,60,60,0.4);color:#e66;font-family:'Cinzel',serif;font-size:9px;padding:1px 6px;border-radius:2px;white-space:nowrap;flex-shrink:0;">✦ AI GENERATED</span>`
+          : group.progressLocked
+            ? `<span style="color:rgba(46,196,182,0.65);font-family:'Lato',sans-serif;font-size:10px;font-style:italic;">Shared</span>`
+            : '';
       nameEl.innerHTML=`
         <span style="color:${isMine ? '#2ec4b6' : '#f5c842'};font-family:'Cinzel',serif;font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${group.name}</span>
         ${badge}
@@ -2698,6 +2709,8 @@ function updateAdminStar(){
     svg.setAttribute('stroke','rgba(200,160,60,0.5)');
     svg.style.filter='none';
   }
+  const importBtn = document.getElementById('builderImportBtn');
+  if(importBtn) importBtn.style.display = adminMode ? 'block' : 'none';
 }
 
 document.getElementById('adminStarBtn').addEventListener('click',()=>{
@@ -3325,12 +3338,27 @@ function openMapsPanel(defaultTab='maps') {
 
     // Union of individually saved maps + maps embedded in series
     const saved = savedLevels();
-    const savedNames = new Set(saved.map(l=>l.name));
+    // Build a set of all map names that appear in any series
+    const inSeriesNames = new Set();
+    savedSeries().forEach(s=>{ s.levels.forEach(l=>{ inSeriesNames.add(l.name); }); });
+
+    // Standalone = saved maps NOT in any series
+    // Series maps = all maps that appear in a series (whether also saved or not)
+    const standaloneOnly = saved.filter(l=>!inSeriesNames.has(l.name));
+    const seenSeriesNames = new Set();
     const fromSeries = [];
     savedSeries().forEach(s=>{
-      s.levels.forEach(l=>{ if(!savedNames.has(l.name)){ fromSeries.push({...l, _fromSeries:true}); savedNames.add(l.name); } });
+      s.levels.forEach(l=>{
+        if(!seenSeriesNames.has(l.name)){
+          seenSeriesNames.add(l.name);
+          // Get full data from savedLevels if available, else use series data
+          const full = saved.find(x=>x.name===l.name) || l;
+          fromSeries.push({...full, _fromSeries:true});
+        }
+      });
     });
-    const allMaps = [...saved, ...fromSeries];
+    const allMaps = [...standaloneOnly, ...fromSeries];
+    const savedNames = new Set(allMaps.map(l=>l.name)); // keep for compat
     body.innerHTML = '';
     body.style.padding = '8px';
 
@@ -3393,9 +3421,12 @@ function openMapsPanel(defaultTab='maps') {
 
     allMaps.forEach((lv, i)=>{
       const owned = isOwnedMap(lv) || lv._fromSeries;
+      const isAdmin = !!lv._adminImport;
 
       const card = document.createElement('div');
-      card.style.cssText = `display:flex;flex-direction:column;align-items:stretch;min-width:0;background:${owned?'#1a1a2e':'#0d1f2d'};border:1px solid ${owned?'rgba(200,160,60,0.35)':'rgba(46,196,182,0.3)'};border-radius:4px;overflow:hidden;position:relative;box-shadow:0 2px 8px rgba(0,0,0,0.4);`;
+      const cardBg = isAdmin ? '#1f0a0a' : owned ? '#1a1a2e' : '#0d1f2d';
+      const cardBorder = isAdmin ? 'rgba(220,60,60,0.45)' : owned ? 'rgba(200,160,60,0.35)' : 'rgba(46,196,182,0.3)';
+      card.style.cssText = `display:flex;flex-direction:column;align-items:stretch;min-width:0;background:${cardBg};border:1px solid ${cardBorder};border-radius:4px;overflow:hidden;position:relative;box-shadow:0 2px 8px rgba(0,0,0,0.4);`;
 
       // Thumbnail canvas - fills card width
       const cnv = document.createElement('canvas');
@@ -3426,7 +3457,8 @@ function openMapsPanel(defaultTab='maps') {
 
       // Map name - tap to rename
       const nameEl = document.createElement('div');
-      nameEl.style.cssText = `color:${owned?'#c9a84c':'#7ecfdb'};font-size:10px;font-family:'Lato',sans-serif;font-weight:700;padding:5px 6px 4px;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:${owned?'pointer':'default'};`;
+      const nameColor = isAdmin ? '#e66' : owned ? '#c9a84c' : '#7ecfdb';
+      nameEl.style.cssText = `color:${nameColor};font-size:10px;font-family:'Lato',sans-serif;font-weight:700;padding:5px 6px 4px;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:${owned||isAdmin?'pointer':'default'};`;
       nameEl.textContent = lv.name;
       nameEl.title = owned ? 'Tap to rename' : lv.name;
 
@@ -4173,16 +4205,20 @@ function endGame(reason){
   // Only track records for named maps (not random games)
   if(!testingLevel && currentLevelData && currentLevelData.name){
     (async ()=>{
-      // Get the slug for this map - search by name only (works for own and received maps)
-      let slug = null;
-      try {
-        const existing = await fetch(`${SUPA_URL}/rest/v1/maps?name=eq.${encodeURIComponent(currentLevelData.name)}&select=slug&limit=1`, {
-          headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` }
-        });
-        if(existing.ok){ const rows=await existing.json(); if(rows.length) slug=rows[0].slug; console.log('Map slug found:', slug); }
-      } catch(e){ console.warn('Slug lookup failed:', e); }
+      // Use stored slug directly if available, fall back to name lookup
+      let slug = currentLevelData.slug || null;
+      if(!slug){
+        try {
+          const existing = await fetch(`${SUPA_URL}/rest/v1/maps?name=eq.${encodeURIComponent(currentLevelData.name)}&select=slug&limit=1`, {
+            headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` }
+          });
+          if(existing.ok){ const rows=await existing.json(); if(rows.length){ slug=rows[0].slug; currentLevelData.slug=slug; } console.log('Map slug found:', slug); }
+        } catch(e){ console.warn('Slug lookup failed:', e); }
+      } else {
+        console.log('Using stored slug:', slug);
+      }
 
-      if(!slug){ console.log('No slug found for map, skipping record'); return; } // map not in cloud yet
+      if(!slug){ console.log('No slug found for map, skipping record'); return; }
 
       const record = await fetchRecord(slug);
       const recordEl = document.getElementById('recordDisplay');
@@ -5143,27 +5179,32 @@ async function fetchRecord(slug){
 
 async function saveRecord(slug, initials, timeSeconds){
   try {
-    console.log('saveRecord called:', slug, initials, timeSeconds);
-    // Try PATCH first (update existing)
-    const patch = await fetch(`${SUPA_URL}/rest/v1/records?slug=eq.${encodeURIComponent(slug)}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type':'application/json','apikey':SUPA_KEY,'Authorization':`Bearer ${SUPA_KEY}`,'Prefer':'return=minimal' },
-      body: JSON.stringify({ initials: initials.toUpperCase(), time_seconds: timeSeconds })
-    });
-    console.log('PATCH status:', patch.status);
-    if(patch.ok && patch.status !== 204){
-      console.log('PATCH updated existing record');
-      return;
+    // Fetch current record first - only save if new time is faster or no record exists
+    const current = await fetchRecord(slug);
+    if(current && current.time_seconds <= timeSeconds){
+      console.log('Not a new record - current:', current.time_seconds, 'new:', timeSeconds);
+      return; // existing record is still faster
     }
-    // Insert new
-    const post = await fetch(`${SUPA_URL}/rest/v1/records`, {
-      method: 'POST',
-      headers: { 'Content-Type':'application/json','apikey':SUPA_KEY,'Authorization':`Bearer ${SUPA_KEY}`,'Prefer':'return=minimal' },
-      body: JSON.stringify({ slug, initials: initials.toUpperCase(), time_seconds: timeSeconds })
-    });
-    console.log('POST status:', post.status);
-    if(!post.ok){ const e=await post.text(); console.error('Record insert failed:', e); }
-    else console.log('Record inserted successfully');
+
+    if(current){
+      // Update existing record with faster time
+      const patch = await fetch(`${SUPA_URL}/rest/v1/records?slug=eq.${encodeURIComponent(slug)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type':'application/json','apikey':SUPA_KEY,'Authorization':`Bearer ${SUPA_KEY}`,'Prefer':'return=minimal' },
+        body: JSON.stringify({ initials: initials.toUpperCase(), time_seconds: timeSeconds })
+      });
+      if(patch.ok) console.log('Record updated:', initials, timeSeconds);
+      else { const e=await patch.text(); console.error('Record update failed:', e); }
+    } else {
+      // Insert new record
+      const post = await fetch(`${SUPA_URL}/rest/v1/records`, {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json','apikey':SUPA_KEY,'Authorization':`Bearer ${SUPA_KEY}`,'Prefer':'return=minimal' },
+        body: JSON.stringify({ slug, initials: initials.toUpperCase(), time_seconds: timeSeconds })
+      });
+      if(post.ok) console.log('Record inserted:', initials, timeSeconds);
+      else { const e=await post.text(); console.error('Record insert failed:', e); }
+    }
   } catch(e){ console.warn('Record save failed:', e); }
 }
 
@@ -5209,6 +5250,91 @@ function promptInitialsAndSaveRecord(slug, elapsed, onDone){
   panel.querySelector('#initialsSubmit').addEventListener('click', submit);
   input.addEventListener('keydown', e=>{ if(e.key==='Enter') submit(); });
 }
+
+
+// =====================================================================
+// ADMIN MAP / SERIES IMPORTER
+// =====================================================================
+function showImportOverlay(){
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:500;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;';
+
+  const panel = document.createElement('div');
+  panel.style.cssText = "background:linear-gradient(160deg,#2a1f10,#1c160d);border:1px solid rgba(220,60,60,0.5);border-radius:4px;padding:28px 22px;width:min(320px,100%);display:flex;flex-direction:column;gap:14px;font-family:'Lato',sans-serif;box-shadow:0 8px 40px rgba(0,0,0,0.8);";
+
+  panel.innerHTML = `
+    <div style="font-family:'Cinzel',serif;font-size:14px;color:#e66;text-align:center;letter-spacing:1px;">IMPORT MAP OR SERIES</div>
+    <div style="color:rgba(200,150,80,0.7);font-size:12px;text-align:center;line-height:1.6;">Select a <strong style="color:#e8d5a0;">.json</strong> file exported from Prism Break.<br>Maps and series are detected automatically.</div>
+    <label id="importLabel" style="width:100%;background:rgba(40,10,10,0.9);border:2px dashed rgba(220,60,60,0.4);color:#e66;font-family:'Cinzel',serif;font-size:13px;font-weight:600;padding:18px;cursor:pointer;border-radius:3px;text-align:center;letter-spacing:0.5px;display:block;box-sizing:border-box;">
+      📂 CHOOSE FILE
+      <input type="file" accept=".json" id="importFileInput" style="display:none;">
+    </label>
+    <div id="importStatus" style="color:rgba(200,150,80,0.6);font-size:12px;text-align:center;min-height:16px;"></div>
+    <button id="importCancelBtn" style="background:none;border:none;color:rgba(180,140,60,0.4);font-family:'Cinzel',serif;font-size:12px;cursor:pointer;letter-spacing:1px;">CANCEL</button>
+  `;
+
+  ov.appendChild(panel);
+  document.body.appendChild(ov);
+
+  const statusEl = panel.querySelector('#importStatus');
+
+  panel.querySelector('#importFileInput').addEventListener('change', e=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    statusEl.textContent = 'Reading file...';
+    const reader = new FileReader();
+    reader.onload = evt=>{
+      try {
+        const data = JSON.parse(evt.target.result);
+        // Detect type: series has a 'levels' array and a 'name', map has 'bricks'
+        if(data.levels && Array.isArray(data.levels) && data.name){
+          // SERIES import
+          const seriesObj = {
+            ...data,
+            _adminImport: true,
+            received: true
+          };
+          // Mark each level as admin import
+          seriesObj.levels = seriesObj.levels.map(l=>({ ...l, _adminImport: true }));
+          saveSeries(seriesObj);
+          // Also save each map individually
+          seriesObj.levels.forEach(l=>{
+            const levels = savedLevels();
+            if(!levels.find(x=>x.name===l.name)){
+              levels.push({ ...l, _adminImport: true });
+              LS.set('cc_levels', JSON.stringify(levels));
+            }
+          });
+          statusEl.style.color = '#2ec4b6';
+          statusEl.textContent = `✅ Series "${data.name}" imported — ${data.levels.length} maps`;
+          setTimeout(()=>ov.remove(), 1500);
+        } else if(data.bricks && Array.isArray(data.bricks)){
+          // MAP import
+          const mapObj = { ...data, _adminImport: true };
+          const levels = savedLevels();
+          const existing = levels.findIndex(l=>l.name===mapObj.name);
+          if(existing>=0) levels[existing]=mapObj; else levels.push(mapObj);
+          LS.set('cc_levels', JSON.stringify(levels));
+          statusEl.style.color = '#2ec4b6';
+          statusEl.textContent = `✅ Map "${data.name}" imported`;
+          setTimeout(()=>ov.remove(), 1500);
+        } else {
+          statusEl.style.color = '#e66';
+          statusEl.textContent = '⚠️ Unrecognised format — expected map or series JSON';
+        }
+      } catch(err){
+        statusEl.style.color = '#e66';
+        statusEl.textContent = '⚠️ Invalid JSON file';
+      }
+    };
+    reader.readAsText(file);
+  });
+
+  panel.querySelector('#importCancelBtn').addEventListener('click', ()=>ov.remove());
+  ov.addEventListener('click', e=>{ if(e.target===ov) ov.remove(); });
+}
+
+document.getElementById('builderImportBtn').addEventListener('click', showImportOverlay);
 
 // Kick off the game loop and show home screen
 requestAnimationFrame(loop);
