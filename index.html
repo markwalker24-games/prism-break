@@ -747,7 +747,8 @@ function showSharedMapIntro(levelData){
       <div style="font-family:'Cinzel Decorative',serif;font-size:20px;font-weight:700;color:#f5c842;letter-spacing:2px;text-shadow:0 0 20px rgba(245,200,66,0.5);">PRISM BREAK</div>
       <div style="height:1px;background:linear-gradient(90deg,transparent,rgba(200,160,60,0.4),transparent);margin-top:10px;"></div>
     </div>
-    <div style="color:#e8d5a0;font-size:13px;line-height:1.7;text-align:center;">Someone challenged you to solve their map. Here's how to play:</div>
+    <div id="introRecordDisplay" style="text-align:center;min-height:18px;color:rgba(180,150,80,0.6);font-size:12px;font-family:'Cinzel',serif;letter-spacing:0.5px;"></div>
+    <div style="color:#e8d5a0;font-size:13px;line-height:1.7;text-align:center;">Here's how to play:</div>
     <div style="display:flex;flex-direction:column;gap:10px;">
       <div style="display:flex;align-items:flex-start;gap:10px;">
         <span style="font-size:18px;flex-shrink:0;">💎</span>
@@ -778,6 +779,23 @@ function showSharedMapIntro(levelData){
     ov.remove();
     startGame(levelData);
   });
+
+  // Fetch record and show it
+  (async ()=>{
+    try {
+      const existing = await fetch(`${SUPA_URL}/rest/v1/maps?name=eq.${encodeURIComponent(levelData.name)}&select=slug&limit=1`, {
+        headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` }
+      });
+      if(!existing.ok) return;
+      const rows = await existing.json();
+      if(!rows.length) return;
+      const record = await fetchRecord(rows[0].slug);
+      const el = panel.querySelector('#introRecordDisplay');
+      if(el && record){
+        el.innerHTML = `🏆 Time to Beat: <strong style="color:#f5c842;">${record.initials}</strong> — <strong style="color:#e8d5a0;">${formatTime(record.time_seconds)}</strong>`;
+      }
+    } catch(e){}
+  })();
 }
 
 function savedLevels() {
@@ -2338,11 +2356,35 @@ document.addEventListener('keyup',e=>{
 // TOP BAR BUTTONS (Home + Restart)
 // =====================================================================
 function showTopBarBtns(visible){
-  document.getElementById('homeTopBtn').style.display = visible ? 'block' : 'none';
   document.getElementById('restartTopBtn').style.display = visible ? 'block' : 'none';
+
+  const homeBtn = document.getElementById('homeTopBtn');
+  homeBtn.style.display = visible ? 'block' : 'none';
+
+  // In testing mode, repurpose home button as "back to builder"
+  if(visible && testingLevel){
+    homeBtn.title = 'Back to Builder';
+    homeBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(210,170,60,0.9)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>`;
+  } else {
+    homeBtn.title = 'Home';
+    homeBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="rgba(210,170,60,0.9)" stroke="rgba(150,110,30,0.7)" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9.5L12 3l9 6.5V20a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V9.5z"/><path d="M9 21V12h6v9" fill="rgba(40,28,8,0.9)" stroke="rgba(150,110,30,0.7)"/></svg>`;
+  }
+}
+
+function goBackToBuilder(){
+  testingLevel=false;
+  builderBricks=builderBricksSnapshot.map(b=>({...b}));
+  builderBallPos={...builderBallPosSnapshot};
+  builderPortalPos=builderPortalPosSnapshot?{...builderPortalPosSnapshot}:null;
+  hideMessage();
+  openBuilder();
 }
 
 document.getElementById('homeTopBtn').addEventListener('click',()=>{
+  if(testingLevel){
+    goBackToBuilder();
+    return;
+  }
   gameRunning=false; gameOver=false; ballLaunched=false;
   activeSeries=null; activeSeriesIdx=0;
   showTopBarBtns(false);
@@ -3960,9 +4002,14 @@ function endGame(reason){
 
   // Series-complete banner (shown above buttons when last map in series)
   const seriesCompleteBanner = (inSeries && !hasNext)
-    ? `<div style="font-family:'Cinzel',serif;font-size:15px;color:#f5c842;letter-spacing:1px;text-shadow:0 0 10px rgba(245,200,66,0.4)">🎉 Series Complete!</div>`
+    ? `<div style="display:flex;flex-direction:column;align-items:center;gap:8px;width:100%;">
+        <div style="font-size:42px;filter:drop-shadow(0 0 16px rgba(245,200,66,0.7));">🏆</div>
+        <div style="font-family:'Cinzel',serif;font-size:22px;font-weight:700;color:#f5c842;letter-spacing:2px;text-shadow:0 0 20px rgba(245,200,66,0.6);text-align:center;">SERIES COMPLETE!</div>
+        <div style="color:rgba(200,170,90,0.8);font-size:13px;font-family:'Lato',sans-serif;text-align:center;line-height:1.6;">You finished every map in <strong style="color:#f5c842;">${activeSeries ? activeSeries.name : 'the series'}</strong>.<br>Now it's your turn — build your own.</div>
+        <div style="height:1px;background:linear-gradient(90deg,transparent,rgba(200,160,60,0.3),transparent);width:100%;margin:4px 0;"></div>
+      </div>`
     : '';
-  if(inSeries && !hasNext && activeSeries) clearSeriesProgress(activeSeries.name);
+  if(inSeries && !hasNext && activeSeries) saveSeriesProgress(activeSeries.name, activeSeries.levels.length - 1);
 
   // Middle CTA:
   // - Creator of this map → share it and challenge a friend
@@ -3977,9 +4024,9 @@ function endGame(reason){
     'Your turn to build 🔨',
     'Make one that beats this 🔨',
   ];
-  const buildPromptLabel = buildPromptMsgs[Math.floor(Math.random() * buildPromptMsgs.length)];
+  const buildPromptLabel = isSeriesComplete ? 'BUILD YOUR OWN SERIES 🔨' : buildPromptMsgs[Math.floor(Math.random() * buildPromptMsgs.length)];
   const middleBtn = showBuildPrompt
-    ? `<button id="endBuildBtn" style="${btnStyle('#f5c842','rgba(40,28,5,0.95)')}">${buildPromptLabel}</button>`
+    ? `<button id="endBuildBtn" style="${btnStyle('#f5c842', isSeriesComplete ? 'rgba(60,44,8,0.98)' : 'rgba(40,28,5,0.95)')}">${buildPromptLabel}</button>`
     : `<button id="endShareBtn" style="${btnStyle('#f5c842','rgba(40,28,5,0.95)')}">SHARE THIS MAP</button>`;
 
   // Always show the 3 CTAs on a win (except when testing in builder)
@@ -3995,6 +4042,9 @@ function endGame(reason){
     `;
   }
 
+  // Build win card - record info injected async after render
+  const recordPlaceholder = `<div id="recordDisplay" style="color:rgba(180,150,80,0.5);font-size:11px;font-family:'Cinzel',serif;letter-spacing:0.5px;text-align:center;min-height:16px;"></div>`;
+
   showMessage(card(`
     <div style="font-size:38px;filter:drop-shadow(0 0 10px ${titleGlow})">${icon}</div>
     <div style="font-family:'Cinzel',serif;font-size:20px;font-weight:700;color:${titleColor};letter-spacing:1px;text-shadow:0 0 12px ${titleGlow}">${titleText}</div>
@@ -4003,24 +4053,60 @@ function endGame(reason){
     ${seriesCompleteBanner}
     <div style="height:1px;background:linear-gradient(90deg,transparent,rgba(180,140,50,0.3),transparent);width:100%;margin:2px 0;"></div>
     <div style="display:flex;gap:20px;justify-content:center;">
-      <div><div style="color:rgba(180,150,80,0.5);font-size:10px;font-family:'Cinzel',serif;letter-spacing:1px;margin-bottom:3px">TIME</div>
+      <div><div style="color:rgba(180,150,80,0.5);font-size:10px;font-family:'Cinzel',serif;letter-spacing:1px;margin-bottom:3px">YOUR TIME</div>
            <div style="color:#e8d5a0;font-size:16px;font-weight:700">${timeStr}</div></div>
       <div style="width:1px;background:rgba(180,140,50,0.2)"></div>
       <div><div style="color:rgba(180,150,80,0.5);font-size:10px;font-family:'Cinzel',serif;letter-spacing:1px;margin-bottom:3px">SCORE</div>
            <div style="color:#f5c842;font-size:16px;font-weight:700">${score}</div></div>
     </div>
+    ${recordPlaceholder}
     <div style="display:flex;flex-direction:column;gap:8px;width:100%;margin-top:4px;">
       ${buttons}
     </div>
   `));
 
+  // Fetch record async and update display
+  const mapSlug = currentLevelData && currentLevelData.name
+    ? null // will be fetched via upsertMapToCloud slug
+    : null;
+
+  // Only track records for named maps (not random games)
+  if(!testingLevel && currentLevelData && currentLevelData.name){
+    (async ()=>{
+      // Get the slug for this map
+      let slug = null;
+      try {
+        const existing = await fetch(`${SUPA_URL}/rest/v1/maps?creator_id=eq.${encodeURIComponent(currentLevelData.creator_id||CREATOR_ID)}&name=eq.${encodeURIComponent(currentLevelData.name)}&select=slug&limit=1`, {
+          headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` }
+        });
+        if(existing.ok){ const rows=await existing.json(); if(rows.length) slug=rows[0].slug; }
+      } catch(e){}
+
+      if(!slug) return; // map not in cloud yet
+
+      const record = await fetchRecord(slug);
+      const recordEl = document.getElementById('recordDisplay');
+      if(!recordEl) return;
+
+      const isNewRecord = !record || elapsed < record.time_seconds;
+
+      if(isNewRecord){
+        // New record!
+        recordEl.innerHTML = `<span style="color:#f5c842;font-family:'Cinzel',serif;font-size:12px;letter-spacing:0.5px;">🏆 New Time to Beat!</span>`;
+        promptInitialsAndSaveRecord(slug, elapsed, ()=>{
+          const initials = getStoredInitials();
+          if(recordEl) recordEl.innerHTML = `<span style="color:#f5c842;font-size:12px;font-family:'Cinzel',serif;">🏆 Time to Beat: <strong>${initials}</strong> — ${formatTime(elapsed)}</span>`;
+        });
+      } else {
+        // Show current record
+        recordEl.innerHTML = `<span style="color:rgba(180,150,80,0.6);font-size:11px;font-family:'Cinzel',serif;">Time to Beat: <strong style="color:#e8d5a0;">${record.initials}</strong> — ${formatTime(record.time_seconds)}</span>`;
+      }
+    })();
+  }
+
   if(testingLevel){
     document.getElementById('backToBuilderBtn').addEventListener('click',()=>{
-      testingLevel=false;
-      builderBricks=builderBricksSnapshot.map(b=>({...b}));
-      builderBallPos={...builderBallPosSnapshot};
-      builderPortalPos=builderPortalPosSnapshot?{...builderPortalPosSnapshot}:null;
-      hideMessage(); openBuilder();
+      goBackToBuilder();
     });
     return;
   }
@@ -4931,6 +5017,89 @@ function showHowToPlay(){
 }
 
 document.getElementById('howToPlayBtn').addEventListener('click', showHowToPlay);
+
+
+// =====================================================================
+// TIME TO BEAT - RECORDS
+// =====================================================================
+function getStoredInitials(){
+  return LS.get('pb_initials') || '';
+}
+function setStoredInitials(val){
+  LS.set('pb_initials', val.toUpperCase().slice(0,3));
+}
+
+async function fetchRecord(slug){
+  try {
+    const res = await fetch(`${SUPA_URL}/rest/v1/records?slug=eq.${encodeURIComponent(slug)}&select=initials,time_seconds&limit=1`, {
+      headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` }
+    });
+    if(!res.ok) return null;
+    const rows = await res.json();
+    return rows.length ? rows[0] : null;
+  } catch(e){ return null; }
+}
+
+async function saveRecord(slug, initials, timeSeconds){
+  try {
+    // Try PATCH first (update existing)
+    const patch = await fetch(`${SUPA_URL}/rest/v1/records?slug=eq.${encodeURIComponent(slug)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type':'application/json','apikey':SUPA_KEY,'Authorization':`Bearer ${SUPA_KEY}`,'Prefer':'return=minimal' },
+      body: JSON.stringify({ initials: initials.toUpperCase(), time_seconds: timeSeconds })
+    });
+    if(patch.ok) return;
+    // Insert new
+    await fetch(`${SUPA_URL}/rest/v1/records`, {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json','apikey':SUPA_KEY,'Authorization':`Bearer ${SUPA_KEY}`,'Prefer':'return=minimal' },
+      body: JSON.stringify({ slug, initials: initials.toUpperCase(), time_seconds: timeSeconds })
+    });
+  } catch(e){ console.warn('Record save failed:', e); }
+}
+
+function formatTime(seconds){
+  const m = Math.floor(seconds/60);
+  const s = (seconds%60).toFixed(1).padStart(4,'0');
+  return m > 0 ? `${m}:${s}` : `${seconds.toFixed(1)}s`;
+}
+
+function promptInitialsAndSaveRecord(slug, elapsed, onDone){
+  const stored = getStoredInitials();
+  if(stored){
+    // Already have initials - save immediately
+    saveRecord(slug, stored, elapsed).then(onDone);
+    return;
+  }
+  // Ask for initials
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:600;display:flex;align-items:center;justify-content:center;';
+  const panel = document.createElement('div');
+  panel.style.cssText = "background:linear-gradient(160deg,#2a1f10,#1c160d);border:1px solid rgba(200,160,60,0.5);border-radius:4px;padding:28px 22px;width:min(280px,88vw);display:flex;flex-direction:column;align-items:center;gap:14px;box-shadow:0 8px 40px rgba(0,0,0,0.8);font-family:'Lato',sans-serif;";
+  panel.innerHTML = `
+    <div style="font-size:28px;">🏆</div>
+    <div style="font-family:'Cinzel',serif;font-size:14px;color:#f5c842;letter-spacing:1px;text-align:center;">NEW TIME TO BEAT!</div>
+    <div style="color:rgba(200,170,90,0.7);font-size:12px;text-align:center;line-height:1.6;">Enter your initials to claim the record.</div>
+    <input id="initialsInput" maxlength="3" placeholder="AAA"
+      style="width:100px;text-align:center;background:rgba(10,8,4,0.9);border:1px solid rgba(200,160,60,0.6);color:#f5c842;font-family:'Cinzel',serif;font-size:28px;font-weight:700;letter-spacing:8px;padding:10px;border-radius:3px;outline:none;text-transform:uppercase;box-sizing:border-box;">
+    <button id="initialsSubmit" style="width:100%;background:linear-gradient(180deg,rgba(60,45,20,0.95),rgba(35,25,10,0.98));border:1px solid rgba(245,200,66,0.6);border-bottom:2px solid rgba(80,50,10,0.9);color:#f5c842;font-family:'Cinzel',serif;font-weight:600;font-size:13px;letter-spacing:1px;padding:12px;cursor:pointer;border-radius:3px;">CLAIM THE RECORD</button>
+  `;
+  ov.appendChild(panel);
+  document.body.appendChild(ov);
+  const input = panel.querySelector('#initialsInput');
+  setTimeout(()=>input.focus(), 100);
+  input.addEventListener('input', ()=>{ input.value = input.value.toUpperCase().replace(/[^A-Z]/g,''); });
+
+  const submit = ()=>{
+    const val = input.value.trim().toUpperCase().slice(0,3);
+    if(!val) return;
+    setStoredInitials(val);
+    ov.remove();
+    saveRecord(slug, val, elapsed).then(onDone);
+  };
+  panel.querySelector('#initialsSubmit').addEventListener('click', submit);
+  input.addEventListener('keydown', e=>{ if(e.key==='Enter') submit(); });
+}
 
 // Kick off the game loop and show home screen
 requestAnimationFrame(loop);
