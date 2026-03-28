@@ -4080,16 +4080,16 @@ function endGame(reason){
   // Only track records for named maps (not random games)
   if(!testingLevel && currentLevelData && currentLevelData.name){
     (async ()=>{
-      // Get the slug for this map
+      // Get the slug for this map - search by name only (works for own and received maps)
       let slug = null;
       try {
-        const existing = await fetch(`${SUPA_URL}/rest/v1/maps?creator_id=eq.${encodeURIComponent(currentLevelData.creator_id||CREATOR_ID)}&name=eq.${encodeURIComponent(currentLevelData.name)}&select=slug&limit=1`, {
+        const existing = await fetch(`${SUPA_URL}/rest/v1/maps?name=eq.${encodeURIComponent(currentLevelData.name)}&select=slug&limit=1`, {
           headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` }
         });
-        if(existing.ok){ const rows=await existing.json(); if(rows.length) slug=rows[0].slug; }
-      } catch(e){}
+        if(existing.ok){ const rows=await existing.json(); if(rows.length) slug=rows[0].slug; console.log('Map slug found:', slug); }
+      } catch(e){ console.warn('Slug lookup failed:', e); }
 
-      if(!slug) return; // map not in cloud yet
+      if(!slug){ console.log('No slug found for map, skipping record'); return; } // map not in cloud yet
 
       const record = await fetchRecord(slug);
       const recordEl = document.getElementById('recordDisplay');
@@ -5049,19 +5049,27 @@ async function fetchRecord(slug){
 
 async function saveRecord(slug, initials, timeSeconds){
   try {
+    console.log('saveRecord called:', slug, initials, timeSeconds);
     // Try PATCH first (update existing)
     const patch = await fetch(`${SUPA_URL}/rest/v1/records?slug=eq.${encodeURIComponent(slug)}`, {
       method: 'PATCH',
       headers: { 'Content-Type':'application/json','apikey':SUPA_KEY,'Authorization':`Bearer ${SUPA_KEY}`,'Prefer':'return=minimal' },
       body: JSON.stringify({ initials: initials.toUpperCase(), time_seconds: timeSeconds })
     });
-    if(patch.ok) return;
+    console.log('PATCH status:', patch.status);
+    if(patch.ok && patch.status !== 204){
+      console.log('PATCH updated existing record');
+      return;
+    }
     // Insert new
-    await fetch(`${SUPA_URL}/rest/v1/records`, {
+    const post = await fetch(`${SUPA_URL}/rest/v1/records`, {
       method: 'POST',
       headers: { 'Content-Type':'application/json','apikey':SUPA_KEY,'Authorization':`Bearer ${SUPA_KEY}`,'Prefer':'return=minimal' },
       body: JSON.stringify({ slug, initials: initials.toUpperCase(), time_seconds: timeSeconds })
     });
+    console.log('POST status:', post.status);
+    if(!post.ok){ const e=await post.text(); console.error('Record insert failed:', e); }
+    else console.log('Record inserted successfully');
   } catch(e){ console.warn('Record save failed:', e); }
 }
 
