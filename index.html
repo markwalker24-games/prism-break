@@ -484,6 +484,7 @@ let particles=[];
 let bricks=[];
 let portal=null;
 let gameStartTime=0;
+let totalElapsed=0; // aggregate time across all lives
 let keysHeld=0;
 let blownUpKeys=[]; // tracks key positions destroyed by bombs, not collected
 let diamondsCollected=0;
@@ -1530,6 +1531,9 @@ function resolveBrick(b){
 
 function killBall(){
   if(gameOver) return;
+  // Accumulate time before this death
+  if(ballLaunched && gameStartTime) totalElapsed += (performance.now() - gameStartTime) / 1000;
+  gameStartTime = 0;
   // Explosion at ball position
   for(let i=0;i<24;i++){
     const a=Math.random()*Math.PI*2, s=2+Math.random()*4;
@@ -2073,7 +2077,7 @@ function draw(){
   }
   // Live timer once launched
   if(gameRunning&&ballLaunched&&!paused){
-    const elapsed=((performance.now()-gameStartTime)/1000).toFixed(1);
+    const elapsed=(totalElapsed + (gameStartTime ? (performance.now()-gameStartTime)/1000 : 0)).toFixed(1);
     ctx.fillStyle='rgba(255,255,255,0.5)';
     ctx.font='7px "Press Start 2P",monospace';
     ctx.textAlign='right';
@@ -2140,7 +2144,7 @@ function startGame(levelData, forcedMode){
   const isCustomLevel = !!(levelData && levelData.name && levelData.bricks && !isHardcodedLevel && !testingLevel);
   editBtn.style.display = isCustomLevel ? 'block' : 'none';
   score=0; particles=[]; gameOver=false; ballLaunched=false; paused=false;
-  gameStartTime=0; portal=null; keysHeld=0; diamondsCollected=0; screenFlash=0;
+  gameStartTime=0; totalElapsed=0; portal=null; keysHeld=0; diamondsCollected=0; screenFlash=0;
   lives=3; controlsReversed=false; fallingBricks=[]; finaleTriggered=false; bombsHeld=0; activeBombs=[]; bothSidesHeld=false; bothSidesTimestamp=0; isRespawning=false; poisonBall=null; blownUpKeys=[]; deathFreeze=false;
   if(bothSidesReleaseTimer){ clearTimeout(bothSidesReleaseTimer); bothSidesReleaseTimer=null; }
   bombHud.style.display='none';
@@ -2213,7 +2217,7 @@ function startGame(levelData, forcedMode){
 
 function restartGame(){
   score=0; particles=[]; gameOver=false; ballLaunched=false; paused=false;
-  gameStartTime=0; keysHeld=0; diamondsCollected=0; screenFlash=0; bombsHeld=0; activeBombs=[]; bothSidesHeld=false; bombHud.style.display="none"; blownUpKeys=[];
+  gameStartTime=0; totalElapsed=0; keysHeld=0; diamondsCollected=0; screenFlash=0; bombsHeld=0; activeBombs=[]; bothSidesHeld=false; bombHud.style.display="none"; blownUpKeys=[];
   lives=3; controlsReversed=false;
   renderLives();
   scoreDisplay.textContent=0; keyDisplay.textContent=0;
@@ -3943,7 +3947,10 @@ document.getElementById('builderTestBtn').addEventListener('click',()=>{
 function endGame(reason){
   if(gameOver) return;
   gameRunning=false; gameOver=true;
-  const elapsed=ballLaunched?((performance.now()-gameStartTime)/1000):0;
+  // Accumulate any remaining time since last launch
+  if(ballLaunched && gameStartTime) totalElapsed += (performance.now() - gameStartTime) / 1000;
+  gameStartTime = 0;
+  const elapsed = totalElapsed;
   const timeScore=Math.max(100, Math.round(10000 - elapsed*100));
   score=timeScore; scoreDisplay.textContent=score;
   const timeStr=elapsed.toFixed(1)+'s';
