@@ -2078,11 +2078,31 @@ function draw(){
   // Live timer once launched
   if(gameRunning&&ballLaunched&&!paused){
     const elapsed=(totalElapsed + (gameStartTime ? (performance.now()-gameStartTime)/1000 : 0)).toFixed(1);
-    ctx.fillStyle='rgba(255,255,255,0.5)';
     ctx.font='7px "Press Start 2P",monospace';
     ctx.textAlign='right';
-    ctx.fillText(elapsed+'s', W-6, 14);
+    // Time to Beat - shown above timer if record exists
+    if(currentMapRecord){
+      const ttb = formatTime(currentMapRecord.time_seconds);
+      const elapsedNum = parseFloat(elapsed);
+      const beating = elapsedNum < currentMapRecord.time_seconds;
+      ctx.fillStyle = beating ? 'rgba(245,200,66,0.8)' : 'rgba(255,80,60,0.8)';
+      ctx.fillText(`TTB ${currentMapRecord.initials} ${ttb}`, W-6, 14);
+      ctx.fillStyle='rgba(255,255,255,0.5)';
+      ctx.fillText(elapsed+'s', W-6, 24);
+    } else {
+      ctx.fillStyle='rgba(255,255,255,0.5)';
+      ctx.fillText(elapsed+'s', W-6, 14);
+    }
     ctx.textAlign='left';
+    // Level indicator when playing a series
+    if(activeSeries && !testingLevel){
+      const lvLabel = `LEVEL ${activeSeriesIdx+1} OF ${activeSeries.levels.length}`;
+      ctx.fillStyle='rgba(255,255,255,0.5)';
+      ctx.font='7px "Press Start 2P",monospace';
+      ctx.textAlign='right';
+      ctx.fillText(lvLabel, W-6, currentMapRecord ? 34 : 24);
+      ctx.textAlign='left';
+    }
   }
   // Screen flash on diamond collect
   if(screenFlash>0){
@@ -2213,6 +2233,18 @@ function startGame(levelData, forcedMode){
 
   currentLevelBricks={ bricks:bricks.map(b=>({...b})), ballX:ball.x, ballY:ball.y, portal:null, name:(levelData&&levelData.name)||null };
   gameRunning=true; hideMessage();
+  // Load Time to Beat for HUD display
+  currentMapRecord = null;
+  if(levelData && levelData.name){
+    (async ()=>{
+      try {
+        const res = await fetch(`${SUPA_URL}/rest/v1/maps?name=eq.${encodeURIComponent(levelData.name)}&select=slug&limit=1`, {
+          headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` }
+        });
+        if(res.ok){ const rows=await res.json(); if(rows.length) currentMapRecord = await fetchRecord(rows[0].slug); }
+      } catch(e){}
+    })();
+  }
 }
 
 function restartGame(){
@@ -3172,14 +3204,15 @@ function showShareLinkOverlay(title, url, levelData) {
   ov.addEventListener('click', e=>{ if(e.target===ov) ov.remove(); });
 }
 
-function showConfirmOverlay(message, onYes) {
+function showConfirmOverlay(message, onYes, confirmLabel='DELETE', cancelLabel='CANCEL') {
+  const isDanger = confirmLabel === 'DELETE';
   const ov=document.createElement('div');
   ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.82);z-index:600;display:flex;align-items:center;justify-content:center;';
   ov.innerHTML=`<div style="background:linear-gradient(160deg,#2a1f10,#1c160d);border:1px solid rgba(200,160,60,0.5);border-radius:4px;padding:24px 20px;width:min(300px,88vw);display:flex;flex-direction:column;gap:16px;box-shadow:0 8px 40px rgba(0,0,0,0.8);">
     <div style="color:#e8d5a0;font-family:'Lato',sans-serif;font-size:15px;line-height:1.5;text-align:center;">${message}</div>
     <div style="display:flex;gap:10px;">
-      <button id="cfmYes" style="flex:1;background:#c0392b;border:none;color:#fff;font-family:'Cinzel',serif;font-weight:600;font-size:13px;padding:11px;border-radius:3px;cursor:pointer;">Yes</button>
-      <button id="cfmNo" style="flex:1;background:none;border:1px solid rgba(180,140,50,0.4);color:rgba(200,170,90,0.7);font-family:'Cinzel',serif;font-size:13px;padding:11px;border-radius:3px;cursor:pointer;">No</button>
+      <button id="cfmYes" style="flex:1;background:${isDanger?'#c0392b':'rgba(40,28,5,0.95)'};border:${isDanger?'none':'1px solid rgba(245,200,66,0.6)'};color:#fff;font-family:'Cinzel',serif;font-weight:600;font-size:13px;padding:11px;border-radius:3px;cursor:pointer;">${confirmLabel}</button>
+      <button id="cfmNo" style="flex:1;background:none;border:1px solid rgba(180,140,50,0.4);color:rgba(200,170,90,0.7);font-family:'Cinzel',serif;font-size:13px;padding:11px;border-radius:3px;cursor:pointer;">${cancelLabel}</button>
     </div>
   </div>`;
   document.body.appendChild(ov);
@@ -3295,7 +3328,7 @@ function openMapsPanel(defaultTab='maps') {
     const savedNames = new Set(saved.map(l=>l.name));
     const fromSeries = [];
     savedSeries().forEach(s=>{
-      s.levels.forEach(l=>{ if(!savedNames.has(l.name)){ fromSeries.push(l); savedNames.add(l.name); } });
+      s.levels.forEach(l=>{ if(!savedNames.has(l.name)){ fromSeries.push({...l, _fromSeries:true}); savedNames.add(l.name); } });
     });
     const allMaps = [...saved, ...fromSeries];
     body.innerHTML = '';
@@ -3309,15 +3342,57 @@ function openMapsPanel(defaultTab='maps') {
       return;
     }
 
-    // Thumbnail grid
-    const grid = document.createElement('div');
-    grid.style.cssText = 'display:grid;grid-template-columns:repeat(3,1fr);gap:8px;width:100%;';
-    body.appendChild(grid);
+    // Separate standalone maps from series maps
+    const standaloneMaps = allMaps.filter(l=>!l._fromSeries);
+    const seriesMaps = allMaps.filter(l=>l._fromSeries);
+
+    function renderGrid(maps, container){
+      const grid = document.createElement('div');
+      grid.style.cssText = 'display:grid;grid-template-columns:repeat(3,1fr);gap:8px;width:100%;';
+      container.appendChild(grid);
+      return grid;
+    }
+
+    // Standalone maps section
+    if(standaloneMaps.length){
+      const standaloneLabel = document.createElement('div');
+      standaloneLabel.style.cssText = "font-family:'Cinzel',serif;font-size:10px;color:rgba(245,200,66,0.6);letter-spacing:1px;margin-bottom:6px;";
+      standaloneLabel.textContent = 'STANDALONE';
+      body.appendChild(standaloneLabel);
+    }
+
+    const grid = renderGrid(standaloneMaps.length ? standaloneMaps : allMaps, body);
+
+    // If no standalone maps, render all in one grid and skip divider
+    if(!standaloneMaps.length || !seriesMaps.length){
+      // render whichever exists, done
+    } else {
+      // Divider between standalone and series
+      const divider = document.createElement('div');
+      divider.style.cssText = "display:flex;align-items:center;gap:8px;margin:12px 0 8px;";
+      divider.innerHTML = '<div style="flex:1;height:1px;background:linear-gradient(90deg,transparent,rgba(180,140,50,0.3));"></div>'
+        + '<span style="font-family:Cinzel,serif;font-size:10px;color:rgba(200,160,60,0.5);letter-spacing:1.5px;white-space:nowrap;">IN A SERIES</span>'
+        + '<div style="flex:1;height:1px;background:linear-gradient(270deg,transparent,rgba(180,140,50,0.3));"></div>';
+      body.appendChild(divider);
+    }
 
     const TH = 90;
 
+    // Build a combined render list - standalone first, then series with divider already added
+    const renderList = standaloneMaps.length && seriesMaps.length
+      ? allMaps // grid handles both via seriesGrid below
+      : allMaps;
+
+    // Series grid (only if both sections exist)
+    let seriesGrid = null;
+    if(standaloneMaps.length && seriesMaps.length){
+      seriesGrid = document.createElement('div');
+      seriesGrid.style.cssText = 'display:grid;grid-template-columns:repeat(3,1fr);gap:8px;width:100%;';
+      body.appendChild(seriesGrid);
+    }
+
     allMaps.forEach((lv, i)=>{
-      const owned = isOwnedMap(lv);
+      const owned = isOwnedMap(lv) || lv._fromSeries;
 
       const card = document.createElement('div');
       card.style.cssText = `display:flex;flex-direction:column;align-items:stretch;min-width:0;background:${owned?'#1a1a2e':'#0d1f2d'};border:1px solid ${owned?'rgba(200,160,60,0.35)':'rgba(46,196,182,0.3)'};border-radius:4px;overflow:hidden;position:relative;box-shadow:0 2px 8px rgba(0,0,0,0.4);`;
@@ -3374,7 +3449,8 @@ function openMapsPanel(defaultTab='maps') {
       card.appendChild(nameEl);
       card.appendChild(cnvWrap);
       card.appendChild(shareBtn);
-      grid.appendChild(card);
+      if(lv._fromSeries && seriesGrid) seriesGrid.appendChild(card);
+      else grid.appendChild(card);
 
       // RENAME - tap name
       nameEl.addEventListener('click', ()=>{
@@ -3397,14 +3473,19 @@ function openMapsPanel(defaultTab='maps') {
         });
       });
 
-      // TAP thumbnail = load into builder
-      cnvWrap.addEventListener('click', ()=>{ ov.remove(); loadLevelIntoBuilder(lv); });
-
-      // LONG-PRESS thumbnail = delete
+      // TAP vs LONG-PRESS - distinguish by duration
       let pressTimer = null;
-      const startPress = ()=>{
+      let pressStartTime = 0;
+      let didLongPress = false;
+
+      cnvWrap.addEventListener('pointerdown', e=>{
+        didLongPress = false;
+        pressStartTime = Date.now();
         pressTimer = setTimeout(()=>{
+          didLongPress = true;
           pressTimer = null;
+          // Visual feedback
+          cnvWrap.style.opacity = '0.6';
           const isOwned = savedLevels().some(l=>l.name===lv.name);
           const note = isOwned ? '' : '<div style="color:rgba(200,160,60,0.6);font-size:12px;margin-top:6px;">This map was shared with you — it will only be removed from your list.</div>';
           showConfirmOverlay(
@@ -3416,13 +3497,24 @@ function openMapsPanel(defaultTab='maps') {
               showBuilderToast(`"${lv.name}" deleted`);
             }
           );
+          setTimeout(()=>{ cnvWrap.style.opacity = '1'; }, 300);
         }, 600);
-      };
-      const cancelPress = ()=>{ if(pressTimer){ clearTimeout(pressTimer); pressTimer=null; } };
-      cnvWrap.addEventListener('pointerdown', startPress);
-      cnvWrap.addEventListener('pointerup', cancelPress);
-      cnvWrap.addEventListener('pointerleave', cancelPress);
-      cnvWrap.addEventListener('pointermove', cancelPress);
+      });
+
+      cnvWrap.addEventListener('pointerup', ()=>{
+        if(pressTimer){ clearTimeout(pressTimer); pressTimer=null; }
+      });
+      cnvWrap.addEventListener('pointerleave', ()=>{
+        if(pressTimer){ clearTimeout(pressTimer); pressTimer=null; didLongPress=false; }
+      });
+
+      // TAP = short press, load into builder
+      cnvWrap.addEventListener('click', ()=>{
+        if(didLongPress){ didLongPress=false; return; } // swallow click after long press
+        ov.remove();
+        loadLevelIntoBuilder(lv);
+      });
+
       cnvWrap.style.cursor = 'pointer';
       cnvWrap.title = 'Tap to edit · Hold to delete';
 
@@ -3573,7 +3665,8 @@ function openMapsPanel(defaultTab='maps') {
                 setFeaturedSeriesName(s.name);
                 renderSeriesTab();
                 showBuilderToast(`★ "${s.name}" is now the Featured series`);
-              }
+              },
+              'YES', 'CANCEL'
             );
           }, 600); };
           const cancelPress=()=>{ clearTimeout(pressTimer); };
@@ -5029,6 +5122,7 @@ document.getElementById('howToPlayBtn').addEventListener('click', showHowToPlay)
 // =====================================================================
 // TIME TO BEAT - RECORDS
 // =====================================================================
+let currentMapRecord = null; // loaded when game starts, shown on HUD
 function getStoredInitials(){
   return LS.get('pb_initials') || '';
 }
