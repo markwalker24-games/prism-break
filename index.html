@@ -2459,8 +2459,32 @@ document.getElementById('editMapBtn').addEventListener('click', ()=>{
 // LEVEL SELECT
 // =====================================================================
 function openLevelSelect(){
-  renderLevelList();
   document.getElementById('levelSelectOverlay').style.display='flex';
+  renderLevelList(); // render with local data first
+  // Then fetch public series from cloud and merge
+  fetchPublicSeries().then(cloudPublic => {
+    if (!cloudPublic.length) return;
+    const existing = savedSeries();
+    let changed = false;
+    cloudPublic.forEach(cs => {
+      if (!cs.levels) return;
+      let levels;
+      try { levels = typeof cs.levels === 'string' ? JSON.parse(cs.levels) : cs.levels; } catch(e) { return; }
+      const found = existing.find(s => s.name === cs.name);
+      if (!found) {
+        // Add new public series locally (marked as public + received)
+        existing.push({ ...cs, levels, is_public: true, received: true });
+        changed = true;
+      } else if (!found.is_public) {
+        found.is_public = true;
+        changed = true;
+      }
+    });
+    if (changed) {
+      LS.set('cc_series', JSON.stringify(existing));
+      renderLevelList(); // re-render with public series included
+    }
+  }).catch(() => {});
 }
 function closeLevelSelect(){
   document.getElementById('levelSelectOverlay').style.display='none';
@@ -2509,176 +2533,294 @@ function drawLevelThumbnail(canvas, levelData){
 }
 
 function renderLevelList(){
-  const list=document.getElementById('levelList');
-  list.innerHTML='';
+  let list = document.getElementById('levelList');
+  list.innerHTML = '';
 
-  const groups=[];
   const featuredName = getFeaturedSeriesName();
+  const allSeries = savedSeries();
+  const allLevels = savedLevels();
+  const allSeriesLevelNames = new Set(allSeries.flatMap(s => s.levels.map(l => l.name)));
 
-  // Featured series goes first with progression locks
-  const featuredSeriesObj = savedSeries().find(s=>s.name===featuredName);
-  if(featuredSeriesObj){
-    groups.push({ name:featuredSeriesObj.name, levels:featuredSeriesObj.levels, isSeries:true, seriesObj:featuredSeriesObj, progressLocked:true, isFeatured:true });
-  }
+  // ── Categorise series ──────────────────────────────────────────
+  const featuredSeriesObj = allSeries.find(s => s.name === featuredName);
+  const publicSeries   = allSeries.filter(s => s.name !== featuredName && s.is_public);
+  const mySeries       = allSeries.filter(s => s.name !== featuredName && !s.is_public);
 
-  // All other series
-  savedSeries().forEach(s=>{
-    if(s.name === featuredName) return;
-    groups.push({ name:s.name, levels:s.levels, isSeries:true, seriesObj:s, progressLocked: isReceivedSeries(s) });
-  });
+  // Standalone maps owned by user, not in any series
+  const additionalMaps = allLevels.filter(lv => !allSeriesLevelNames.has(lv.name) && isOwnedMap(lv) && !lv._adminImport);
 
-  // Standalone maps: owned by this user and not in any series
-  const allSeriesLevelNames=new Set(savedSeries().flatMap(s=>s.levels.map(l=>l.name)));
-  const customMaps=savedLevels().filter(lv=>!allSeriesLevelNames.has(lv.name) && isOwnedMap(lv));
-  if(customMaps.length) groups.push({ name:'My Additional Maps', levels:customMaps, isSeries:false, seriesObj:null, progressLocked:false });
-
-  if(!groups.length){
-    list.innerHTML='<div style="color:#888;font-size:11px;text-align:center;width:100%;padding:20px 0;line-height:1.8;">No maps yet.<br>Use Map Builder to create one!</div>';
+  const hasAnything = featuredSeriesObj || publicSeries.length || mySeries.length || additionalMaps.length;
+  if (!hasAnything) {
+    list.innerHTML = '<div style="color:#888;font-size:11px;text-align:center;width:100%;padding:20px 0;line-height:1.8;">No maps yet.<br>Use Map Builder to create one!</div>';
     return;
   }
 
-  const openState={};
+  const openState = {};
 
-  function renderAccordions(){
-    list.innerHTML='';
-    groups.forEach((group, gi)=>{
-      const progress = group.progressLocked ? getSeriesProgress(group.name) : Infinity;
-      const isOpen = !!openState[gi];
+  // ── Shared helpers ─────────────────────────────────────────────
+  function sectionLabel(text, color='rgba(200,160,60,0.55)') {
+    const el = document.createElement('div');
+    el.style.cssText = `font-family:'Cinzel',serif;font-size:10px;letter-spacing:2px;color:${color};margin:10px 0 4px;padding-left:2px;`;
+    el.textContent = text;
+    return el;
+  }
 
-      const isMine = !group.isSeries;
-      const header=document.createElement('div');
-      header.style.cssText=`
-        width:100%; display:flex; align-items:center; justify-content:space-between;
-        padding:11px 12px; cursor:pointer; border-radius:4px; box-sizing:border-box;
-        background:${isOpen ? (isMine ? 'rgba(8,28,32,0.95)' : 'rgba(50,36,12,0.95)') : (isMine ? 'rgba(6,20,24,0.9)' : 'rgba(30,22,8,0.9)')};
-        border:1px solid ${isOpen ? (isMine ? 'rgba(46,196,182,0.4)' : 'rgba(200,160,60,0.55)') : (isMine ? 'rgba(46,196,182,0.2)' : 'rgba(140,100,30,0.3)')};
-        transition:background 0.15s, border-color 0.15s;
-        margin-bottom:${isOpen ? '0' : '6px'};
-        border-bottom-left-radius:${isOpen ? '0' : '4px'};
-        border-bottom-right-radius:${isOpen ? '0' : '4px'};
-      `;
+  function makePanelStyle(accent) {
+    return `width:100%;box-sizing:border-box;border:1px solid ${accent};border-top:none;border-bottom-left-radius:4px;border-bottom-right-radius:4px;background:rgba(10,8,4,0.97);padding:10px;display:flex;flex-wrap:wrap;gap:8px;margin-bottom:6px;`;
+  }
 
-      const nameEl=document.createElement('div');
-      nameEl.style.cssText='display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap;';
-      const isAdminGroup = group.seriesObj && group.seriesObj._adminImport;
-      const badge = group.isFeatured
-        ? `<span style="background:rgba(245,200,66,0.15);border:1px solid rgba(245,200,66,0.4);color:#f5c842;font-family:'Cinzel',serif;font-size:9px;padding:1px 6px;border-radius:2px;white-space:nowrap;flex-shrink:0;">⭐ QUEST</span>`
-        : isAdminGroup
-          ? `<span style="background:rgba(220,60,60,0.12);border:1px solid rgba(220,60,60,0.4);color:#e66;font-family:'Cinzel',serif;font-size:9px;padding:1px 6px;border-radius:2px;white-space:nowrap;flex-shrink:0;">✦ AI GENERATED</span>`
-          : group.progressLocked
-            ? `<span style="color:rgba(46,196,182,0.65);font-family:'Lato',sans-serif;font-size:10px;font-style:italic;">Shared</span>`
-            : '';
-      nameEl.innerHTML=`
-        <span style="color:${isMine ? '#2ec4b6' : '#f5c842'};font-family:'Cinzel',serif;font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${group.name}</span>
-        ${badge}
-        <span style="color:${isMine ? 'rgba(46,196,182,0.5)' : 'rgba(180,140,60,0.65)'};font-family:'Lato',sans-serif;font-size:11px;white-space:nowrap;">${group.levels.length} map${group.levels.length!==1?'s':''}</span>
-      `;
+  function buildAccordion(key, label, levels, opts = {}) {
+    const { accent='rgba(200,160,60,0.5)', nameColor='#f5c842', badge='',
+            progressLocked=false, isSeries=true, seriesObj=null,
+            showShareBtn=false, showPublishBtn=false } = opts;
 
-      const chevron=document.createElement('div');
-      chevron.style.cssText=`color:rgba(200,160,60,0.7);font-size:11px;transform:${isOpen?'rotate(180deg)':'rotate(0deg)'};transition:transform 0.2s;flex-shrink:0;margin-left:8px;`;
-      chevron.textContent='▼';
+    const isOpen = !!openState[key];
+    const progress = progressLocked ? getSeriesProgress(label) : Infinity;
 
-      // Share button for series (non-featured only, so users can share their own series)
-      const shareSeriesBtn = document.createElement('button');
-      shareSeriesBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>';
-      shareSeriesBtn.style.cssText = 'background:none;border:none;color:rgba(245,200,66,0.55);cursor:pointer;padding:4px;flex-shrink:0;line-height:0;-webkit-tap-highlight-color:transparent;transition:color 0.15s;';
-      shareSeriesBtn.title = 'Share this series';
-      shareSeriesBtn.addEventListener('click', async (e)=>{
-        e.stopPropagation(); // don't toggle accordion
-        shareSeriesBtn.style.color = '#f5c842';
-        try {
-          let slug;
-          try { slug = await shareSeriesToCloud(group.seriesObj); }
-          catch(uploadErr){ console.warn('Series upload failed:', uploadErr); slug = group.seriesObj.name.toLowerCase().replace(/[^a-z0-9]+/g,'-'); }
-          showShareLinkOverlay('SERIES SHARED!', getSeriesShareUrl(slug));
-        } catch(e){ showToast('⚠️ Share failed'); }
-        finally { shareSeriesBtn.style.color = 'rgba(245,200,66,0.55)'; }
-      });
+    const header = document.createElement('div');
+    header.style.cssText = `width:100%;display:flex;align-items:center;justify-content:space-between;padding:10px 12px;cursor:pointer;border-radius:4px;box-sizing:border-box;background:${isOpen?'rgba(30,22,8,0.97)':'rgba(18,13,4,0.95)'};border:1px solid ${isOpen?accent:'rgba(140,100,30,0.25)'};margin-bottom:${isOpen?'0':'5px'};border-bottom-left-radius:${isOpen?'0':'4px'};border-bottom-right-radius:${isOpen?'0':'4px'};transition:all 0.15s;`;
 
-      header.appendChild(nameEl);
-      header.appendChild(chevron);
-      header.addEventListener('click',()=>{ openState[gi]=!openState[gi]; renderAccordions(); });
-      list.appendChild(header);
+    const nameWrap = document.createElement('div');
+    nameWrap.style.cssText = 'display:flex;align-items:center;gap:7px;min-width:0;flex:1;flex-wrap:wrap;';
+    nameWrap.innerHTML = `
+      <span style="color:${nameColor};font-family:'Cinzel',serif;font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${label}</span>
+      ${badge}
+      <span style="color:rgba(180,140,60,0.5);font-family:'Lato',sans-serif;font-size:11px;white-space:nowrap;">${levels.length} map${levels.length!==1?'s':''}</span>
+    `;
 
-      if(!isOpen) return;
+    const right = document.createElement('div');
+    right.style.cssText = 'display:flex;align-items:center;gap:6px;flex-shrink:0;';
 
-      const panel=document.createElement('div');
-      panel.style.cssText=`
-        width:100%; box-sizing:border-box;
-        border:1px solid ${isMine ? 'rgba(46,196,182,0.4)' : 'rgba(200,160,60,0.55)'}; border-top:none;
-        border-bottom-left-radius:4px; border-bottom-right-radius:4px;
-        background:${isMine ? 'rgba(4,18,22,0.95)' : 'rgba(20,14,4,0.95)'}; padding:10px;
-        display:flex; flex-wrap:wrap; gap:8px; margin-bottom:6px;
-      `;
-
-      group.levels.forEach((lv, idx)=>{
-        const isLocked = group.progressLocked && idx > progress;
-        const card=document.createElement('div');
-        card.className='level-thumb-card';
-        if(isLocked) card.style.cssText+='opacity:0.45;cursor:default;';
-
-        const thumbW=90, thumbH=70;
-        const cnv=document.createElement('canvas');
-        cnv.width=thumbW; cnv.height=thumbH;
-        cnv.className='level-thumb-canvas';
-        cnv.style.width=thumbW+'px'; cnv.style.height=thumbH+'px';
-
-        if(isLocked){
-          const lctx=cnv.getContext('2d');
-          lctx.fillStyle='#0a0a0f'; lctx.fillRect(0,0,thumbW,thumbH);
-          lctx.font='22px serif'; lctx.textAlign='center'; lctx.textBaseline='middle';
-          lctx.fillText('🔒', thumbW/2, thumbH/2);
+    if (showPublishBtn && adminMode && seriesObj) {
+      const pubBtn = document.createElement('button');
+      const isPublished = !!seriesObj.is_public;
+      pubBtn.textContent = isPublished ? '🌐' : '○';
+      pubBtn.title = isPublished ? 'Published - tap to unpublish' : 'Publish this series';
+      pubBtn.style.cssText = `background:none;border:none;font-size:13px;cursor:pointer;opacity:${isPublished?1:0.4};padding:2px 4px;-webkit-tap-highlight-color:transparent;`;
+      pubBtn.addEventListener('click', async e => {
+        e.stopPropagation();
+        const newVal = !seriesObj.is_public;
+        // Ensure series is in cloud first
+        let slug = seriesObj.slug;
+        if (!slug) {
+          try { slug = await shareSeriesToCloud(seriesObj); seriesObj.slug = slug; } catch(err) {}
+        }
+        if (slug) {
+          await publishSeries(slug, newVal);
+          seriesObj.is_public = newVal;
+          saveSeries(seriesObj);
+          renderLevelList();
         } else {
-          drawLevelThumbnail(cnv, lv);
+          showBuilderToast('Push series to cloud first');
         }
-
-        const label=document.createElement('div');
-        label.className='level-thumb-name';
-        // Always show name — locked ones just show a 🔒 prefix
-        label.textContent=(isLocked ? '🔒 ' : '') + (lv.name||'Level');
-        if(isLocked) label.style.color='rgba(180,140,60,0.35)';
-
-        card.appendChild(cnv);
-        card.appendChild(label);
-        if(!isLocked){
-          card.addEventListener('click',()=>{
-            if(group.isSeries){ activeSeries=group.seriesObj; activeSeriesIdx=idx; }
-            closeLevelSelect();
-            startGame(lv);
-          });
-        }
-        panel.appendChild(card);
       });
+      right.appendChild(pubBtn);
+    }
 
-      // Share button at bottom of expanded panel
-      if(group.isSeries && group.seriesObj){
-        const sharePanelBtn = document.createElement('button');
-        sharePanelBtn.style.cssText = "width:100%;background:none;border:1px solid rgba(245,200,66,0.35);color:rgba(245,200,66,0.7);font-family:'Cinzel',serif;font-size:11px;font-weight:600;letter-spacing:0.5px;padding:8px;cursor:pointer;border-radius:3px;margin-top:2px;display:flex;align-items:center;justify-content:center;gap:7px;-webkit-tap-highlight-color:transparent;";
-        sharePanelBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg> SHARE SERIES';
-        sharePanelBtn.addEventListener('click', async ()=>{
-          const orig = sharePanelBtn.innerHTML; sharePanelBtn.textContent = '...'; sharePanelBtn.disabled = true;
-          try {
-            let slug;
-            try { slug = await shareSeriesToCloud(group.seriesObj); }
-            catch(uploadErr){ console.warn('Series upload failed:', uploadErr); slug = group.seriesObj.name.toLowerCase().replace(/[^a-z0-9]+/g,'-'); }
-            showShareLinkOverlay('SERIES SHARED!', getSeriesShareUrl(slug));
-          } catch(e){ showToast('⚠️ Share failed'); }
-          finally { sharePanelBtn.innerHTML = orig; sharePanelBtn.disabled = false; }
-        });
-        panel.appendChild(sharePanelBtn);
+    const chevron = document.createElement('div');
+    chevron.style.cssText = `color:rgba(200,160,60,0.6);font-size:10px;transform:${isOpen?'rotate(180deg)':'none'};transition:transform 0.2s;`;
+    chevron.textContent = '▼';
+    right.appendChild(chevron);
+
+    header.appendChild(nameWrap);
+    header.appendChild(right);
+    header.addEventListener('click', () => { openState[key] = !openState[key]; renderAccordions(); });
+    list.appendChild(header);
+
+    if (!isOpen) return;
+
+    const panel = document.createElement('div');
+    panel.style.cssText = makePanelStyle(accent);
+
+    levels.forEach((lv, idx) => {
+      const isLocked = progressLocked && idx > progress;
+      const card = document.createElement('div');
+      card.className = 'level-thumb-card';
+      if (isLocked) card.style.cssText += 'opacity:0.45;cursor:default;';
+
+      const cnv = document.createElement('canvas');
+      cnv.width = 90; cnv.height = 70;
+      cnv.className = 'level-thumb-canvas';
+      cnv.style.cssText = 'width:90px;height:70px;';
+
+      if (isLocked) {
+        const lctx = cnv.getContext('2d');
+        lctx.fillStyle = '#0a0a0f'; lctx.fillRect(0,0,90,70);
+        lctx.font = '22px serif'; lctx.textAlign = 'center'; lctx.textBaseline = 'middle';
+        lctx.fillText('🔒', 45, 35);
+      } else {
+        drawLevelThumbnail(cnv, lv);
       }
 
-      list.appendChild(panel);
+      const label_el = document.createElement('div');
+      label_el.className = 'level-thumb-name';
+      label_el.textContent = (isLocked ? '🔒 ' : '') + (lv.name || 'Level');
+      if (isLocked) label_el.style.color = 'rgba(180,140,60,0.35)';
+
+      card.appendChild(cnv);
+      card.appendChild(label_el);
+      if (!isLocked) {
+        card.addEventListener('click', () => {
+          if (isSeries && seriesObj) { activeSeries = seriesObj; activeSeriesIdx = idx; }
+          closeLevelSelect();
+          startGame(lv);
+        });
+      }
+      panel.appendChild(card);
     });
+
+    // Share series button
+    if (isSeries && seriesObj && showShareBtn) {
+      const shareBtn = document.createElement('button');
+      shareBtn.style.cssText = "width:100%;background:none;border:1px solid rgba(245,200,66,0.3);color:rgba(245,200,66,0.65);font-family:'Cinzel',serif;font-size:11px;font-weight:600;letter-spacing:0.5px;padding:8px;cursor:pointer;border-radius:3px;margin-top:2px;";
+      shareBtn.textContent = 'SHARE SERIES';
+      shareBtn.addEventListener('click', async () => {
+        const orig = shareBtn.textContent; shareBtn.textContent = '...'; shareBtn.disabled = true;
+        try {
+          const slug = await shareSeriesToCloud(seriesObj);
+          showShareLinkOverlay('SERIES SHARED!', getSeriesShareUrl(slug));
+        } catch(e) { showBuilderToast('⚠️ Share failed'); }
+        finally { shareBtn.textContent = orig; shareBtn.disabled = false; }
+      });
+      panel.appendChild(shareBtn);
+    }
+
+    list.appendChild(panel);
+  }
+
+  function renderAccordions() {
+    list.innerHTML = '';
+
+    // ── QUEST (Featured) ─────────────────────────────────────────
+    if (featuredSeriesObj) {
+      const el = document.createElement('div');
+      el.style.cssText = "font-family:'Cinzel',serif;font-size:11px;font-weight:700;letter-spacing:2px;color:#f5c842;margin-bottom:4px;padding-left:2px;text-shadow:0 0 8px rgba(245,200,66,0.4);";
+      el.textContent = 'CURRENT QUEST';
+      list.appendChild(el);
+      buildAccordion('quest', featuredSeriesObj.name, featuredSeriesObj.levels, {
+        accent: 'rgba(245,200,66,0.5)',
+        nameColor: '#f5c842',
+        badge: `<span style="background:rgba(245,200,66,0.15);border:1px solid rgba(245,200,66,0.4);color:#f5c842;font-family:'Cinzel',serif;font-size:9px;padding:1px 6px;border-radius:2px;">⭐ QUEST</span>`,
+        progressLocked: true,
+        isSeries: true,
+        seriesObj: featuredSeriesObj,
+        showShareBtn: false,
+        showPublishBtn: false,
+      });
+    }
+
+    // ── MORE MAPS header ─────────────────────────────────────────
+    if (publicSeries.length || mySeries.length || additionalMaps.length) {
+      const moreLabel = document.createElement('div');
+      moreLabel.style.cssText = "font-family:'Cinzel',serif;font-size:11px;font-weight:700;letter-spacing:2px;color:rgba(200,160,60,0.8);margin:10px 0 4px;padding-left:2px;";
+      moreLabel.textContent = 'MORE MAPS';
+      list.appendChild(moreLabel);
+    }
+
+    // ── PUBLIC MAPS ──────────────────────────────────────────────
+    if (publicSeries.length) {
+      // Sort by avg_rating desc (rating stored on series obj after fetch)
+      const sortedPublic = [...publicSeries].sort((a,b) => (b.avg_rating||0) - (a.avg_rating||0));
+      list.appendChild(sectionLabel('🌐  PUBLIC MAPS', 'rgba(200,160,60,0.55)'));
+      sortedPublic.forEach((s, i) => {
+        const isAdmin = !!s._adminImport;
+        const stars = s.avg_rating ? '★'.repeat(Math.round(s.avg_rating)) + '☆'.repeat(5-Math.round(s.avg_rating)) : '';
+        const ratingBadge = s.avg_rating
+          ? `<span style="color:#f5c842;font-size:10px;letter-spacing:0;opacity:0.8;" title="${s.avg_rating}/5 (${s.rating_count} rating${s.rating_count!==1?'s':''})">${stars}</span>`
+          : '';
+        buildAccordion('pub_' + i, s.name, s.levels, {
+          accent: 'rgba(200,160,60,0.45)',
+          nameColor: '#f5c842',
+          badge: isAdmin
+            ? `<span style="background:rgba(220,60,60,0.12);border:1px solid rgba(220,60,60,0.4);color:#e66;font-family:'Cinzel',serif;font-size:9px;padding:1px 6px;border-radius:2px;">✦ AI GENERATED</span>`
+            : ratingBadge,
+          progressLocked: false,
+          isSeries: true,
+          seriesObj: s,
+          showShareBtn: true,
+          showPublishBtn: true,
+        });
+      });
+    }
+
+    // ── MY MAPS (outer accordion wrapping inner accordions) ──────
+    const hasMyContent = mySeries.length || additionalMaps.length;
+    if (hasMyContent) {
+      const myKey = 'my_maps_outer';
+      const myOpen = !!openState[myKey];
+
+      // Outer header
+      const myHeader = document.createElement('div');
+      myHeader.style.cssText = `width:100%;display:flex;align-items:center;justify-content:space-between;padding:10px 12px;cursor:pointer;border-radius:4px;box-sizing:border-box;background:${myOpen?'rgba(20,20,20,0.97)':'rgba(12,12,12,0.95)'};border:1px solid ${myOpen?'rgba(180,180,180,0.25)':'rgba(130,130,130,0.15)'};margin-bottom:${myOpen?'0':'5px'};border-bottom-left-radius:${myOpen?'0':'4px'};border-bottom-right-radius:${myOpen?'0':'4px'};transition:all 0.15s;`;
+
+      const totalMyMaps = mySeries.reduce((n,s)=>n+s.levels.length,0) + additionalMaps.length;
+      myHeader.innerHTML = `
+        <div style="display:flex;align-items:center;gap:7px;">
+          <span style="color:#bbb;font-family:'Cinzel',serif;font-size:13px;font-weight:700;letter-spacing:0.5px;">MY MAPS</span>
+          <span style="color:rgba(160,160,160,0.45);font-family:'Lato',sans-serif;font-size:11px;">${totalMyMaps} map${totalMyMaps!==1?'s':''}</span>
+        </div>
+        <div style="color:rgba(160,160,160,0.5);font-size:10px;transform:${myOpen?'rotate(180deg)':'none'};transition:transform 0.2s;">▼</div>
+      `;
+      myHeader.addEventListener('click', () => { openState[myKey] = !openState[myKey]; renderAccordions(); });
+      list.appendChild(myHeader);
+
+      if (myOpen) {
+        const myPanel = document.createElement('div');
+        myPanel.style.cssText = 'width:100%;box-sizing:border-box;border:1px solid rgba(180,180,180,0.2);border-top:none;border-bottom-left-radius:4px;border-bottom-right-radius:4px;background:rgba(8,8,8,0.97);padding:8px;display:flex;flex-direction:column;gap:0;margin-bottom:5px;';
+
+        // Create a sub-list for nested accordions
+        const subList = document.createElement('div');
+        subList.style.cssText = 'display:flex;flex-direction:column;gap:0;width:100%;';
+
+        // Temporarily redirect list to subList for nested buildAccordion calls
+        const realList = list;
+        list = subList;
+
+        mySeries.forEach((s, i) => {
+          const isReceived = isReceivedSeries(s);
+          const isAdmin = !!s._adminImport;
+          let badge = '';
+          if (isAdmin) badge = `<span style="background:rgba(220,60,60,0.12);border:1px solid rgba(220,60,60,0.4);color:#e66;font-family:'Cinzel',serif;font-size:9px;padding:1px 6px;border-radius:2px;">✦ AI GENERATED</span>`;
+          else if (isReceived) badge = `<span style="background:rgba(46,196,182,0.1);border:1px solid rgba(46,196,182,0.35);color:#2ec4b6;font-family:'Cinzel',serif;font-size:9px;padding:1px 6px;border-radius:2px;">SHARED</span>`;
+
+          buildAccordion('my_' + i, s.name, s.levels, {
+            accent: 'rgba(180,180,180,0.2)',
+            nameColor: '#ccc',
+            badge,
+            progressLocked: isReceived,
+            isSeries: true,
+            seriesObj: s,
+            showShareBtn: !isReceived,
+            showPublishBtn: true,
+          });
+        });
+
+        if (additionalMaps.length) {
+          buildAccordion('additional', 'My Additional Maps', additionalMaps, {
+            accent: 'rgba(155,93,229,0.35)',
+            nameColor: '#9b5de5',
+            badge: '',
+            progressLocked: false,
+            isSeries: false,
+            seriesObj: null,
+            showShareBtn: false,
+            showPublishBtn: false,
+          });
+        }
+
+        // Restore real list
+        list = realList;
+
+        myPanel.appendChild(subList);
+        list.appendChild(myPanel);
+      }
+    }
   }
 
   renderAccordions();
 }
 
-// =====================================================================
-// SAVE OVERLAY
-// =====================================================================
-let pendingSaveBricks=null;
+
 function openSaveDialog(brickData){
   pendingSaveBricks=brickData;
   document.getElementById('levelNameInput').value='';
@@ -3598,6 +3740,7 @@ function openMapsPanel(defaultTab='maps') {
             <div class="seriesCount" style="color:#666;font-size:12px;font-family:'Lato',sans-serif;">${s.levels.length} map${s.levels.length!==1?'s':''}</div>
           </div>
           ${isFeatured && adminMode ? `<button class="usPush" style="${btnTeal}font-size:11px;padding:5px 10px;" title="Push to cloud quest">☁ Push</button>` : ''}
+          ${!isFeatured ? `<button class="usPublish" style="background:none;border:1px solid ${s.is_public?'rgba(245,200,66,0.6)':'rgba(140,140,140,0.3)'};color:${s.is_public?'#f5c842':'rgba(160,160,160,0.5)'};font-family:'Lato',sans-serif;font-size:11px;padding:5px 10px;cursor:pointer;border-radius:3px;" title="${s.is_public?'Published - tap to unpublish':'Publish this series'}">${s.is_public?'🌐 Public':'○ Private'}</button>` : ''}
           <button class="usShare" style="font-family:'Lato',sans-serif;font-weight:700;font-size:11px;cursor:pointer;border-radius:3px;flex-shrink:0;padding:6px 10px;background:rgba(40,28,5,0.95);border:1px solid rgba(245,200,66,0.55);color:#f5c842;letter-spacing:0.5px;">SHARE</button>
           ${locked ? '' : `<button class="usDel" style="${btnDanger}">×</button>`}`;
         row.appendChild(hdr2);
@@ -3671,6 +3814,28 @@ function openMapsPanel(defaultTab='maps') {
           addMapsBtn.textContent = '+ Add Maps';
           addMapsBtn.addEventListener('click', ()=>{ showAddMapsToSeriesOverlay(s.name, rebuildLvList); });
           row.appendChild(addMapsBtn);
+        }
+
+        // Publish/unpublish series (any user, non-featured)
+        if(!isFeatured){
+          const pubBtn = hdr2.querySelector('.usPublish');
+          if(pubBtn) pubBtn.addEventListener('click', async e => {
+            e.stopPropagation();
+            const newVal = !s.is_public;
+            let slug = s.slug;
+            if(!slug){
+              try { slug = await shareSeriesToCloud(s); s.slug = slug; } catch(err){}
+            }
+            if(slug){
+              await publishSeries(slug, newVal);
+              s.is_public = newVal;
+              saveSeries(s);
+              renderSeriesTab();
+              showBuilderToast(newVal ? '🌐 Series is now public' : 'Series set to private');
+            } else {
+              showBuilderToast('Could not publish - try sharing first');
+            }
+          });
         }
 
         // Push to cloud (admin only, featured series only)
@@ -4202,6 +4367,12 @@ function endGame(reason){
     ? null // will be fetched via upsertMapToCloud slug
     : null;
 
+  // Show star rating for any map/series the player didn't create, not testing
+  const isOwnMap = currentLevelData && currentLevelData.creator_id === CREATOR_ID;
+  const isOwnSeries = activeSeries && activeSeries.creator_id === CREATOR_ID;
+  const shouldRateMap = !testingLevel && !isOwnMap && currentLevelData && currentLevelData.name && !isSeriesComplete;
+  const shouldRateSeries = !testingLevel && isSeriesComplete && activeSeries && !isOwnSeries;
+
   // Only track records for named maps (not random games)
   if(!testingLevel && currentLevelData && currentLevelData.name){
     (async ()=>{
@@ -4245,6 +4416,19 @@ function endGame(reason){
       goBackToBuilder();
     });
     return;
+  }
+
+  // Rating triggers - show after a short delay so win card is visible first
+  if (shouldRateMap) {
+    setTimeout(async () => {
+      const slug = currentLevelData.slug;
+      if (slug) showStarRating(slug, 'map', null);
+    }, 1200);
+  } else if (shouldRateSeries) {
+    setTimeout(async () => {
+      const slug = activeSeries.slug;
+      if (slug) showStarRating(slug, 'series', null);
+    }, 1500);
   }
 
   // Next Level
@@ -4395,6 +4579,21 @@ function showModeSelect(){
       <span>CHOOSE MAP</span>
     </button>
 
+    <!-- Leaderboard button -->
+    <button id="modeLeaderboard" style="
+      width:100%;
+      background:linear-gradient(160deg,rgba(25,18,8,0.95),rgba(15,10,4,0.97));
+      border:1px solid rgba(180,140,50,0.3);
+      box-shadow:0 2px 12px rgba(0,0,0,0.4),inset 0 1px 0 rgba(255,220,100,0.08);
+      color:rgba(200,170,90,0.85);
+      font-family:'Cinzel',serif;font-size:13px;font-weight:600;letter-spacing:1px;
+      padding:12px 14px;cursor:pointer;border-radius:4px;
+      display:flex;align-items:center;justify-content:center;gap:10px;
+      touch-action:manipulation;">
+      <span style="font-size:16px;opacity:0.85">🏆</span>
+      <span>LEADERBOARD</span>
+    </button>
+
     <!-- Divider -->
     <div style="display:flex;align-items:center;gap:8px;margin:2px 0;">
       <div style="flex:1;height:1px;background:linear-gradient(90deg,transparent,rgba(180,140,50,0.3));"></div>
@@ -4485,7 +4684,9 @@ function showModeSelect(){
   document.getElementById('modeBreakout').addEventListener('click',()=>{ hideMessage(); startGame(null,'escape'); });
   document.getElementById('modeBlackout').addEventListener('click',()=>{ hideMessage(); startGame(null,'blackout'); });
   document.getElementById('modeBuilder').addEventListener('click',()=>{ hideMessage(); openBuilder(); });
-  document.getElementById('modeSelectLevel').addEventListener('click',()=>{ hideMessage(); openLevelSelect(); });
+  document.getElementById('modeLeaderboard').addEventListener('click', () => showLeaderboard());
+
+document.getElementById('modeSelectLevel').addEventListener('click',()=>{ hideMessage(); openLevelSelect(); });
 
   // Draw lock image on breakout icon - wait for image if not yet loaded
   const drawBreakoutIcon = ()=>{
@@ -5335,6 +5536,284 @@ function showImportOverlay(){
 }
 
 document.getElementById('builderImportBtn').addEventListener('click', showImportOverlay);
+
+
+// =====================================================================
+// PUBLIC MAPS + LEADERBOARD
+// =====================================================================
+
+async function fetchPublicSeries() {
+  try {
+    const [seriesRes, ratingsRes] = await Promise.all([
+      fetch(`${SUPA_URL}/rest/v1/series?is_public=eq.true&select=slug,name,description,levels,sort_order,creator_id`, {
+        headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` }
+      }),
+      fetch(`${SUPA_URL}/rest/v1/ratings?type=eq.series&select=slug,rating`, {
+        headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` }
+      })
+    ]);
+    if (!seriesRes.ok) return [];
+    const series = await seriesRes.json();
+    const ratings = ratingsRes.ok ? await ratingsRes.json() : [];
+
+    // Compute avg rating per slug
+    const ratingMap = {};
+    ratings.forEach(r => {
+      if (!ratingMap[r.slug]) ratingMap[r.slug] = [];
+      ratingMap[r.slug].push(r.rating);
+    });
+
+    return series.map(s => {
+      const rs = ratingMap[s.slug] || [];
+      const avg = rs.length ? Math.round((rs.reduce((a,b)=>a+b,0)/rs.length)*10)/10 : 0;
+      return { ...s, avg_rating: avg, rating_count: rs.length };
+    });
+  } catch(e) { return []; }
+}
+
+async function publishSeries(seriesSlug, isPublic) {
+  try {
+    await fetch(`${SUPA_URL}/rest/v1/series?slug=eq.${encodeURIComponent(seriesSlug)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type':'application/json','apikey':SUPA_KEY,'Authorization':`Bearer ${SUPA_KEY}`,'Prefer':'return=minimal' },
+      body: JSON.stringify({ is_public: isPublic })
+    });
+  } catch(e) { console.warn('publishSeries failed:', e); }
+}
+
+async function publishMap(mapSlug, isPublic) {
+  try {
+    await fetch(`${SUPA_URL}/rest/v1/maps?slug=eq.${encodeURIComponent(mapSlug)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type':'application/json','apikey':SUPA_KEY,'Authorization':`Bearer ${SUPA_KEY}`,'Prefer':'return=minimal' },
+      body: JSON.stringify({ is_public: isPublic })
+    });
+  } catch(e) { console.warn('publishMap failed:', e); }
+}
+
+async function fetchLeaderboard() {
+  try {
+    // Get all records for public maps
+    // Join records with maps where is_public=true, group by initials
+    const res = await fetch(
+      `${SUPA_URL}/rest/v1/records?select=initials,slug,maps!inner(is_public)&maps.is_public=eq.true`,
+      { headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` } }
+    );
+    if (!res.ok) {
+      // Fallback: fetch all records + all public map slugs separately
+      const [recordsRes, mapsRes] = await Promise.all([
+        fetch(`${SUPA_URL}/rest/v1/records?select=initials,slug`, {
+          headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` }
+        }),
+        fetch(`${SUPA_URL}/rest/v1/maps?is_public=eq.true&select=slug`, {
+          headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` }
+        })
+      ]);
+      if (!recordsRes.ok || !mapsRes.ok) return [];
+      const records = await recordsRes.json();
+      const publicMaps = await mapsRes.json();
+      const publicSlugs = new Set(publicMaps.map(m => m.slug));
+      // Count records per initials on public maps only
+      const counts = {};
+      records.forEach(r => {
+        if (publicSlugs.has(r.slug)) {
+          counts[r.initials] = (counts[r.initials] || 0) + 1;
+        }
+      });
+      return Object.entries(counts)
+        .map(([initials, count]) => ({ initials, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 20);
+    }
+    const data = await res.json();
+    const counts = {};
+    data.forEach(r => { counts[r.initials] = (counts[r.initials] || 0) + 1; });
+    return Object.entries(counts)
+      .map(([initials, count]) => ({ initials, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 20);
+  } catch(e) { console.warn('fetchLeaderboard failed:', e); return []; }
+}
+
+function showLeaderboard() {
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:500;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;';
+
+  const panel = document.createElement('div');
+  panel.style.cssText = "background:linear-gradient(160deg,#1a1206,#0f0a04);border:1px solid rgba(200,160,60,0.5);border-radius:4px;padding:24px 20px;width:min(320px,100%);display:flex;flex-direction:column;gap:12px;box-shadow:0 8px 40px rgba(0,0,0,0.8);max-height:85vh;overflow-y:auto;";
+
+  panel.innerHTML = `
+    <div style="text-align:center;">
+      <div style="font-size:28px;filter:drop-shadow(0 0 12px rgba(245,200,66,0.5));">🏆</div>
+      <div style="font-family:'Cinzel',serif;font-size:16px;font-weight:700;color:#f5c842;letter-spacing:2px;margin-top:6px;">LEADERBOARD</div>
+      <div style="color:rgba(200,160,60,0.5);font-size:10px;font-family:'Cinzel',serif;letter-spacing:1px;margin-top:3px;">RECORDS HELD ON PUBLIC MAPS</div>
+      <div style="height:1px;background:linear-gradient(90deg,transparent,rgba(200,160,60,0.3),transparent);margin-top:10px;"></div>
+    </div>
+    <div id="leaderboardRows" style="display:flex;flex-direction:column;gap:4px;">
+      <div style="color:rgba(180,140,60,0.5);font-size:12px;font-family:'Lato',sans-serif;text-align:center;padding:16px 0;">Loading...</div>
+    </div>
+    <button id="leaderboardClose" style="background:none;border:none;color:rgba(180,140,60,0.4);font-family:'Cinzel',serif;font-size:12px;cursor:pointer;letter-spacing:1px;padding:6px;">CLOSE</button>
+  `;
+
+  ov.appendChild(panel);
+  document.body.appendChild(ov);
+  ov.addEventListener('click', e => { if(e.target===ov) ov.remove(); });
+  panel.querySelector('#leaderboardClose').addEventListener('click', () => ov.remove());
+
+  // Fetch and render
+  fetchLeaderboard().then(entries => {
+    const rowsEl = panel.querySelector('#leaderboardRows');
+    if (!entries.length) {
+      rowsEl.innerHTML = '<div style="color:rgba(180,140,60,0.4);font-size:12px;font-family:Lato,sans-serif;text-align:center;padding:16px 0;">No records yet.<br>Be the first!</div>';
+      return;
+    }
+    const myInitials = LS.get('pb_initials') || '';
+    rowsEl.innerHTML = entries.map((e, i) => {
+      const isMe = myInitials && e.initials === myInitials;
+      const medals = ['🥇','🥈','🥉'];
+      const rank = i < 3 ? medals[i] : `#${i+1}`;
+      return `<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:${isMe?'rgba(245,200,66,0.08)':'rgba(0,0,0,0.2)'};border:1px solid ${isMe?'rgba(245,200,66,0.3)':'rgba(200,160,60,0.1)'};border-radius:3px;">
+        <span style="font-size:${i<3?'18':'13'}px;min-width:24px;text-align:center;">${rank}</span>
+        <span style="font-family:'Cinzel',serif;font-size:16px;font-weight:700;color:${isMe?'#f5c842':'#e8d5a0'};letter-spacing:3px;flex:1;">${e.initials}</span>
+        <span style="font-family:'Lato',sans-serif;font-size:12px;color:rgba(200,160,60,0.7);">${e.count} record${e.count!==1?'s':''}</span>
+      </div>`;
+    }).join('');
+  });
+}
+
+
+// =====================================================================
+// RATINGS SYSTEM
+// =====================================================================
+
+async function submitRating(slug, type, rating) {
+  try {
+    // Upsert - one rating per creator per slug+type
+    const existing = await fetch(
+      `${SUPA_URL}/rest/v1/ratings?slug=eq.${encodeURIComponent(slug)}&type=eq.${encodeURIComponent(type)}&creator_id=eq.${encodeURIComponent(CREATOR_ID)}&select=rating`,
+      { headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` } }
+    );
+    const rows = existing.ok ? await existing.json() : [];
+    if (rows.length) {
+      await fetch(`${SUPA_URL}/rest/v1/ratings?slug=eq.${encodeURIComponent(slug)}&type=eq.${encodeURIComponent(type)}&creator_id=eq.${encodeURIComponent(CREATOR_ID)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type':'application/json','apikey':SUPA_KEY,'Authorization':`Bearer ${SUPA_KEY}`,'Prefer':'return=minimal' },
+        body: JSON.stringify({ rating })
+      });
+    } else {
+      await fetch(`${SUPA_URL}/rest/v1/ratings`, {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json','apikey':SUPA_KEY,'Authorization':`Bearer ${SUPA_KEY}`,'Prefer':'return=minimal' },
+        body: JSON.stringify({ slug, type, rating, creator_id: CREATOR_ID })
+      });
+    }
+    console.log('Rating submitted:', slug, type, rating);
+  } catch(e) { console.warn('Rating failed:', e); }
+}
+
+async function fetchMyRating(slug, type) {
+  try {
+    const res = await fetch(
+      `${SUPA_URL}/rest/v1/ratings?slug=eq.${encodeURIComponent(slug)}&type=eq.${encodeURIComponent(type)}&creator_id=eq.${encodeURIComponent(CREATOR_ID)}&select=rating`,
+      { headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` } }
+    );
+    if (!res.ok) return null;
+    const rows = await res.json();
+    return rows.length ? rows[0].rating : null;
+  } catch(e) { return null; }
+}
+
+async function fetchAvgRating(slug, type) {
+  try {
+    const res = await fetch(
+      `${SUPA_URL}/rest/v1/ratings?slug=eq.${encodeURIComponent(slug)}&type=eq.${encodeURIComponent(type)}&select=rating`,
+      { headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` } }
+    );
+    if (!res.ok) return null;
+    const rows = await res.json();
+    if (!rows.length) return null;
+    const avg = rows.reduce((s, r) => s + r.rating, 0) / rows.length;
+    return { avg: Math.round(avg * 10) / 10, count: rows.length };
+  } catch(e) { return null; }
+}
+
+function showStarRating(slug, type, onDone) {
+  // Guard already handled by caller - proceed
+
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:700;display:flex;align-items:center;justify-content:center;';
+
+  const panel = document.createElement('div');
+  panel.style.cssText = "background:linear-gradient(160deg,#1a1206,#0f0a04);border:1px solid rgba(200,160,60,0.5);border-radius:4px;padding:22px 20px;width:min(280px,88vw);display:flex;flex-direction:column;align-items:center;gap:12px;box-shadow:0 8px 40px rgba(0,0,0,0.8);font-family:'Lato',sans-serif;";
+
+  const label = type === 'series' ? 'Rate this series' : 'Rate this map';
+  panel.innerHTML = `
+    <div style="font-family:'Cinzel',serif;font-size:12px;color:rgba(200,160,60,0.7);letter-spacing:1px;text-align:center;">${label.toUpperCase()}</div>
+    <div id="starRow" style="display:flex;gap:6px;font-size:36px;cursor:pointer;line-height:1;"></div>
+    <div id="starLabel" style="font-size:12px;color:rgba(180,140,60,0.5);font-family:'Cinzel',serif;letter-spacing:0.5px;min-height:16px;"></div>
+    <button id="starSkip" style="background:none;border:none;color:rgba(160,120,50,0.35);font-family:'Cinzel',serif;font-size:11px;cursor:pointer;letter-spacing:1px;padding:4px;">SKIP</button>
+  `;
+
+  ov.appendChild(panel);
+  document.body.appendChild(ov);
+
+  const starLabels = ['', 'Meh', 'Okay', 'Good', 'Great', 'Amazing'];
+  const starRow = panel.querySelector('#starRow');
+  const starLabel = panel.querySelector('#starLabel');
+  let selected = 0;
+  let submitted = false;
+
+  function renderStars(hover) {
+    const n = hover || selected;
+    starRow.innerHTML = '';
+    for (let i = 1; i <= 5; i++) {
+      const s = document.createElement('span');
+      s.textContent = i <= n ? '★' : '☆';
+      s.style.color = i <= n ? '#f5c842' : 'rgba(180,140,60,0.3)';
+      s.style.transition = 'color 0.1s';
+      s.dataset.star = i;
+      starRow.appendChild(s);
+    }
+    starLabel.textContent = n ? starLabels[n] : '';
+  }
+
+  renderStars(0);
+
+  // Check if already rated
+  fetchMyRating(slug, type).then(existing => {
+    if (existing) {
+      selected = existing;
+      renderStars(0);
+      starLabel.textContent = 'Your rating: ' + starLabels[existing];
+      starLabel.style.color = 'rgba(245,200,66,0.6)';
+    }
+  });
+
+  starRow.addEventListener('mousemove', e => {
+    const star = e.target.closest('[data-star]');
+    if (star) renderStars(parseInt(star.dataset.star));
+  });
+  starRow.addEventListener('mouseleave', () => renderStars(0));
+
+  starRow.addEventListener('click', e => {
+    const star = e.target.closest('[data-star]');
+    if (!star || submitted) return;
+    selected = parseInt(star.dataset.star);
+    submitted = true;
+    renderStars(0);
+    starLabel.textContent = starLabels[selected] + ' — saved!';
+    starLabel.style.color = '#f5c842';
+    submitRating(slug, type, selected).then(() => {
+      setTimeout(() => { ov.remove(); if(onDone) onDone(); }, 700);
+    });
+  });
+
+  panel.querySelector('#starSkip').addEventListener('click', () => {
+    ov.remove(); if(onDone) onDone();
+  });
+
+  ov.addEventListener('click', e => { if(e.target===ov){ ov.remove(); if(onDone) onDone(); } });
+}
 
 // Kick off the game loop and show home screen
 requestAnimationFrame(loop);
