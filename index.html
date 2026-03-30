@@ -2657,14 +2657,44 @@ function renderLevelList(){
       label_el.textContent = (isLocked ? '🔒 ' : '') + (lv.name || 'Level');
       if (isLocked) label_el.style.color = 'rgba(180,140,60,0.35)';
 
+      // Star rating display - loaded async
+      const starsEl = document.createElement('div');
+      starsEl.style.cssText = 'font-size:9px;color:rgba(245,200,66,0.5);letter-spacing:0;text-align:center;min-height:11px;line-height:1;';
+
       card.appendChild(cnv);
       card.appendChild(label_el);
+      card.appendChild(starsEl);
+
       if (!isLocked) {
         card.addEventListener('click', () => {
           if (isSeries && seriesObj) { activeSeries = seriesObj; activeSeriesIdx = idx; }
           closeLevelSelect();
           startGame(lv);
         });
+
+        // Fetch rating async - use stored slug or name lookup
+        (async () => {
+          try {
+            let slug = lv.slug || null;
+            if (!slug && lv.name) {
+              const r = await fetch(`${SUPA_URL}/rest/v1/maps?name=eq.${encodeURIComponent(lv.name)}&select=slug&limit=1`, {
+                headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` }
+              });
+              if (r.ok) { const rows = await r.json(); if (rows.length) { slug = rows[0].slug; lv.slug = slug; } }
+            }
+            if (!slug) return;
+            const rr = await fetch(`${SUPA_URL}/rest/v1/ratings?slug=eq.${encodeURIComponent(slug)}&type=eq.map&select=rating`, {
+              headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` }
+            });
+            if (!rr.ok) return;
+            const rows = await rr.json();
+            if (!rows.length) return;
+            const avg = rows.reduce((s,r) => s+r.rating, 0) / rows.length;
+            const rounded = Math.round(avg);
+            starsEl.textContent = '★'.repeat(rounded) + '☆'.repeat(5-rounded);
+            starsEl.title = `${Math.round(avg*10)/10}/5 (${rows.length} rating${rows.length!==1?'s':''})`;
+          } catch(e) {}
+        })();
       }
       panel.appendChild(card);
     });
@@ -4310,21 +4340,31 @@ function endGame(reason){
 
   // Middle CTA:
   // - Creator of this map → share it and challenge a friend
-  // - Non-creator (played a received/series map) → prompt to build their own
-  // - Series complete → prompt to build their own
+  // - Received map (not in series) → Fire Back with your time
+  // - Series complete → prompt to build their own series
+  // - Other non-creator → prompt to build their own
   const isReceivedMap = currentLevelData && currentLevelData.creator_id && currentLevelData.creator_id !== CREATOR_ID;
   const isSeriesComplete = inSeries && !hasNext;
-  const showBuildPrompt = isReceivedMap || isSeriesComplete;
   const buildPromptMsgs = [
     'Now build your own 🔨',
     'Think you can build a harder one? 🔨',
     'Your turn to build 🔨',
     'Make one that beats this 🔨',
   ];
-  const buildPromptLabel = isSeriesComplete ? 'BUILD YOUR OWN SERIES 🔨' : buildPromptMsgs[Math.floor(Math.random() * buildPromptMsgs.length)];
-  const middleBtn = showBuildPrompt
-    ? `<button id="endBuildBtn" style="${btnStyle('#f5c842', isSeriesComplete ? 'rgba(60,44,8,0.98)' : 'rgba(40,28,5,0.95)')}">${buildPromptLabel}</button>`
-    : `<button id="endShareBtn" style="${btnStyle('#f5c842','rgba(40,28,5,0.95)')}">SHARE THIS MAP</button>`;
+  let middleBtn;
+  if (isSeriesComplete) {
+    middleBtn = `<button id="endBuildBtn" style="${btnStyle('#f5c842','rgba(60,44,8,0.98)')}">BUILD YOUR OWN SERIES 🔨</button>`;
+  } else if (isReceivedMap) {
+    middleBtn = `<button id="endFireBackBtn" style="${btnStyle('#f5c842','rgba(40,28,5,0.95)')}">🔥 Fire Back</button>
+    <button id="endBuildBtn" style="${btnStyle('rgba(200,160,60,0.6)','rgba(20,14,4,0.95)')}">Build Your Own 🔨</button>`;
+  } else {
+    const buildLabel = buildPromptMsgs[Math.floor(Math.random() * buildPromptMsgs.length)];
+    middleBtn = `<button id="endBuildBtn" style="${btnStyle('#f5c842','rgba(40,28,5,0.95)')}">${buildLabel}</button>`;
+  }
+  const showShareBtn = !isReceivedMap && !isSeriesComplete;
+  const shareBtn = showShareBtn
+    ? `<button id="endShareBtn" style="${btnStyle('#f5c842','rgba(40,28,5,0.95)')}">SHARE THIS MAP</button>`
+    : '';
 
   // Always show the 3 CTAs on a win (except when testing in builder)
   let buttons='';
@@ -4334,6 +4374,7 @@ function endGame(reason){
     buttons=`
       <button id="endNextBtn" style="${btnStyle('#2ec4b6','rgba(5,25,28,0.95)')}">▶ Next Level</button>
       ${middleBtn}
+      ${shareBtn}
       <button id="endPlayAgainBtn" style="${btnStyle(titleColor,'rgba(10,15,30,0.95)')}">↺ Play It Again</button>
       <button id="endMenuBtn" style="${ghostBtn}">Home</button>
     `;
@@ -4452,6 +4493,41 @@ function endGame(reason){
     });
   }
 
+  // Fire Back - send your time back to the person who shared the map
+  if(document.getElementById('endFireBackBtn')){
+    document.getElementById('endFireBackBtn').addEventListener('click', async ()=>{
+      const btn = document.getElementById('endFireBackBtn');
+      const orig = btn.innerHTML; btn.innerHTML = '⏳'; btn.disabled = true;
+      try {
+        // Get the share URL for this map
+        let slug = currentLevelData && currentLevelData.slug;
+        if (!slug && currentLevelData && currentLevelData.name) {
+          try { slug = await upsertMapToCloud(currentLevelData); } catch(e) {}
+        }
+        const mapUrl = slug ? getShareUrl(slug) : null;
+        const timeDisplay = formatTime(elapsed);
+        const myInitials = getStoredInitials() || 'someone';
+
+        const fireBackMsgs = [
+          `I beat it! ${timeDisplay} on your Prism Break map — your move 👊`,
+          `${myInitials} just cleared your map in ${timeDisplay}. Think you can go faster? 🔥`,
+          `Done! ${timeDisplay}. Your map is harder than it looks 😅`,
+          `Cleared in ${timeDisplay}! Can you beat that? 🏆`,
+          `${timeDisplay} — is that fast enough for you? 😏`,
+        ];
+        const msg = fireBackMsgs[Math.floor(Math.random() * fireBackMsgs.length)];
+        const fullMsg = mapUrl ? `${msg}
+${mapUrl}` : msg;
+        const smsUrl = `sms:?&body=${encodeURIComponent(fullMsg)}`;
+        window.open(smsUrl, '_blank');
+      } catch(e) {
+        console.warn('Fire back failed:', e);
+      } finally {
+        if(document.getElementById('endFireBackBtn')){ btn.innerHTML = orig; btn.disabled = false; }
+      }
+    });
+  }
+
   // Share This Map
   if(document.getElementById('endShareBtn')){
     document.getElementById('endShareBtn').addEventListener('click', async ()=>{
@@ -4492,7 +4568,7 @@ function endGame(reason){
 
 // Message box tap - handle "tap to play again" when game is over
 msgBox.addEventListener('click',(e)=>{
-  if(e.target.closest('button,#endQuitBtn,#nextLevelBtn,#endNextBtn,#endShareBtn,#backToBuilderBtn,#endPlayAgainBtn,#endMenuBtn,#gameOverRetryBtn,#gameOverMenuBtn')) return;
+  if(e.target.closest('button,#endQuitBtn,#nextLevelBtn,#endNextBtn,#endShareBtn,#endFireBackBtn,#backToBuilderBtn,#endPlayAgainBtn,#endMenuBtn,#gameOverRetryBtn,#gameOverMenuBtn')) return;
   if(!gameOver) return;
   if(isRespawning) return; // respawn handler takes over
   if(testingLevel) return;
