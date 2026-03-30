@@ -2548,6 +2548,7 @@ function renderLevelList(){
 
   // Standalone maps owned by user, not in any series
   const additionalMaps = allLevels.filter(lv => !allSeriesLevelNames.has(lv.name) && isOwnedMap(lv) && !lv._adminImport);
+  const receivedMaps = allLevels.filter(lv => !allSeriesLevelNames.has(lv.name) && !isOwnedMap(lv) && !lv._adminImport && lv.received);
 
   const hasAnything = featuredSeriesObj || publicSeries.length || mySeries.length || additionalMaps.length;
   if (!hasAnything) {
@@ -2774,7 +2775,7 @@ function renderLevelList(){
     }
 
     // ── MY MAPS (outer accordion wrapping inner accordions) ──────
-    const hasMyContent = mySeries.length || additionalMaps.length;
+    const hasMyContent = mySeries.length || additionalMaps.length || receivedMaps.length;
     if (hasMyContent) {
       const myKey = 'my_maps_outer';
       const myOpen = !!openState[myKey];
@@ -2783,7 +2784,7 @@ function renderLevelList(){
       const myHeader = document.createElement('div');
       myHeader.style.cssText = `width:100%;display:flex;align-items:center;justify-content:space-between;padding:10px 12px;cursor:pointer;border-radius:4px;box-sizing:border-box;background:${myOpen?'rgba(20,20,20,0.97)':'rgba(12,12,12,0.95)'};border:1px solid ${myOpen?'rgba(180,180,180,0.25)':'rgba(130,130,130,0.15)'};margin-bottom:${myOpen?'0':'5px'};border-bottom-left-radius:${myOpen?'0':'4px'};border-bottom-right-radius:${myOpen?'0':'4px'};transition:all 0.15s;`;
 
-      const totalMyMaps = mySeries.reduce((n,s)=>n+s.levels.length,0) + additionalMaps.length;
+      const totalMyMaps = mySeries.reduce((n,s)=>n+s.levels.length,0) + additionalMaps.length + receivedMaps.length;
       myHeader.innerHTML = `
         <div style="display:flex;align-items:center;gap:7px;">
           <span style="color:#bbb;font-family:'Cinzel',serif;font-size:13px;font-weight:700;letter-spacing:0.5px;">MY MAPS</span>
@@ -2830,6 +2831,19 @@ function renderLevelList(){
             accent: 'rgba(155,93,229,0.35)',
             nameColor: '#9b5de5',
             badge: '',
+            progressLocked: false,
+            isSeries: false,
+            seriesObj: null,
+            showShareBtn: false,
+            showPublishBtn: false,
+          });
+        }
+
+        if (receivedMaps.length) {
+          buildAccordion('received_maps', 'Shared With Me', receivedMaps, {
+            accent: 'rgba(46,196,182,0.3)',
+            nameColor: '#2ec4b6',
+            badge: `<span style="background:rgba(46,196,182,0.1);border:1px solid rgba(46,196,182,0.35);color:#2ec4b6;font-family:'Cinzel',serif;font-size:9px;padding:1px 6px;border-radius:2px;">SHARED</span>`,
             progressLocked: false,
             isSeries: false,
             seriesObj: null,
