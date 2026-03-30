@@ -3648,10 +3648,48 @@ function openMapsPanel(defaultTab='maps') {
       nameEl.textContent = lv.name;
       nameEl.title = owned ? 'Tap to rename' : lv.name;
 
-      // SHARE solid gold full width
+      // SHARE + PUBLISH buttons
+      const btnRow = document.createElement('div');
+      btnRow.style.cssText = 'width:calc(100% - 10px);margin:0 5px 6px;display:flex;gap:4px;box-sizing:border-box;';
+
       const shareBtn = document.createElement('button');
       shareBtn.textContent = 'SHARE';
-      shareBtn.style.cssText = `width:calc(100% - 10px);margin:0 5px 6px;background:linear-gradient(180deg,rgba(60,45,20,0.95),rgba(35,25,10,0.98));border:1px solid rgba(245,200,66,0.6);border-bottom:2px solid rgba(80,50,10,0.9);color:#f5c842;font-family:'Lato',sans-serif;font-weight:700;font-size:10px;padding:6px 4px;cursor:pointer;border-radius:3px;letter-spacing:0.5px;box-shadow:0 0 6px rgba(245,200,66,0.1);-webkit-tap-highlight-color:transparent;box-sizing:border-box;`;
+      shareBtn.style.cssText = `flex:1;background:linear-gradient(180deg,rgba(60,45,20,0.95),rgba(35,25,10,0.98));border:1px solid rgba(245,200,66,0.6);border-bottom:2px solid rgba(80,50,10,0.9);color:#f5c842;font-family:'Lato',sans-serif;font-weight:700;font-size:10px;padding:6px 4px;cursor:pointer;border-radius:3px;letter-spacing:0.5px;-webkit-tap-highlight-color:transparent;`;
+
+      const pubBtn = document.createElement('button');
+      const isPublished = !!lv.is_public;
+      pubBtn.textContent = isPublished ? '🌐' : '○';
+      pubBtn.title = isPublished ? 'Public — tap to unpublish' : 'Make public';
+      pubBtn.style.cssText = `background:${isPublished?'rgba(40,28,8,0.95)':'rgba(20,14,4,0.9)'};border:1px solid ${isPublished?'rgba(245,200,66,0.6)':'rgba(140,100,30,0.3)'};color:${isPublished?'#f5c842':'rgba(140,100,30,0.4)'};font-size:12px;padding:4px 7px;cursor:pointer;border-radius:3px;flex-shrink:0;-webkit-tap-highlight-color:transparent;`;
+
+      pubBtn.addEventListener('click', async () => {
+        const newVal = !lv.is_public;
+        pubBtn.textContent = '⏳'; pubBtn.disabled = true;
+        try {
+          let slug = lv.slug;
+          if (!slug) { slug = await upsertMapToCloud(lv); lv.slug = slug; }
+          await publishMap(slug, newVal);
+          lv.is_public = newVal;
+          // Update in localStorage
+          const levels = savedLevels();
+          const entry = levels.find(l => l.name === lv.name);
+          if (entry) { entry.is_public = newVal; entry.slug = slug; LS.set('cc_levels', JSON.stringify(levels)); }
+          pubBtn.textContent = newVal ? '🌐' : '○';
+          pubBtn.title = newVal ? 'Public — tap to unpublish' : 'Make public';
+          pubBtn.style.borderColor = newVal ? 'rgba(245,200,66,0.6)' : 'rgba(140,100,30,0.3)';
+          pubBtn.style.color = newVal ? '#f5c842' : 'rgba(140,100,30,0.4)';
+          pubBtn.style.background = newVal ? 'rgba(40,28,8,0.95)' : 'rgba(20,14,4,0.9)';
+          showBuilderToast(newVal ? '🌐 Map is now public' : 'Map set to private');
+        } catch(e) {
+          showBuilderToast('⚠️ Could not publish');
+          pubBtn.textContent = lv.is_public ? '🌐' : '○';
+        } finally {
+          pubBtn.disabled = false;
+        }
+      });
+
+      btnRow.appendChild(shareBtn);
+      if (owned) btnRow.appendChild(pubBtn);
 
       // Wrap thumbnail with edit icon overlay
       const cnvWrap = document.createElement('div');
@@ -3666,7 +3704,7 @@ function openMapsPanel(defaultTab='maps') {
 
       card.appendChild(nameEl);
       card.appendChild(cnvWrap);
-      card.appendChild(shareBtn);
+      card.appendChild(btnRow);
       if(lv._fromSeries && seriesGrid) seriesGrid.appendChild(card);
       else grid.appendChild(card);
 
@@ -3784,7 +3822,7 @@ function openMapsPanel(defaultTab='maps') {
             <div class="seriesCount" style="color:#666;font-size:12px;font-family:'Lato',sans-serif;">${s.levels.length} map${s.levels.length!==1?'s':''}</div>
           </div>
           ${isFeatured && adminMode ? `<button class="usPush" style="${btnTeal}font-size:11px;padding:5px 10px;" title="Push to cloud quest">☁ Push</button>` : ''}
-          ${!isFeatured ? `<button class="usPublish" style="background:none;border:1px solid ${s.is_public?'rgba(245,200,66,0.6)':'rgba(140,140,140,0.3)'};color:${s.is_public?'#f5c842':'rgba(160,160,160,0.5)'};font-family:'Lato',sans-serif;font-size:11px;padding:5px 10px;cursor:pointer;border-radius:3px;" title="${s.is_public?'Published - tap to unpublish':'Publish this series'}">${s.is_public?'🌐 Public':'○ Private'}</button>` : ''}
+          ${!isFeatured ? `<button class="usPublish" style="background:${s.is_public?'rgba(40,28,8,0.95)':'none'};border:1px solid ${s.is_public?'rgba(245,200,66,0.6)':'rgba(140,140,140,0.3)'};color:${s.is_public?'#f5c842':'rgba(160,160,160,0.45)'};font-family:'Lato',sans-serif;font-weight:700;font-size:11px;padding:5px 10px;cursor:pointer;border-radius:3px;letter-spacing:0.3px;" title="${s.is_public?'Published — tap to unpublish':'Make this series public'}">${s.is_public?'🌐 PUBLIC':'○ PRIVATE'}</button>` : ''}
           <button class="usShare" style="font-family:'Lato',sans-serif;font-weight:700;font-size:11px;cursor:pointer;border-radius:3px;flex-shrink:0;padding:6px 10px;background:rgba(40,28,5,0.95);border:1px solid rgba(245,200,66,0.55);color:#f5c842;letter-spacing:0.5px;">SHARE</button>
           ${locked ? '' : `<button class="usDel" style="${btnDanger}">×</button>`}`;
         row.appendChild(hdr2);
@@ -4365,12 +4403,18 @@ function endGame(reason){
     'Your turn to build 🔨',
     'Make one that beats this 🔨',
   ];
+  const hasNamedMap = !testingLevel && currentLevelData && currentLevelData.name;
   let middleBtn;
   if (isSeriesComplete) {
-    middleBtn = `<button id="endBuildBtn" style="${btnStyle('#f5c842','rgba(60,44,8,0.98)')}">BUILD YOUR OWN SERIES 🔨</button>`;
+    middleBtn = `<button id="endFireBackBtn" style="${btnStyle('#f5c842','rgba(40,28,5,0.95)')}">🔥 Fire Back</button>
+    <button id="endBuildBtn" style="${btnStyle('rgba(200,160,60,0.6)','rgba(20,14,4,0.95)')}">BUILD YOUR OWN SERIES 🔨</button>`;
   } else if (isReceivedMap) {
     middleBtn = `<button id="endFireBackBtn" style="${btnStyle('#f5c842','rgba(40,28,5,0.95)')}">🔥 Fire Back</button>
     <button id="endBuildBtn" style="${btnStyle('rgba(200,160,60,0.6)','rgba(20,14,4,0.95)')}">Build Your Own 🔨</button>`;
+  } else if (hasNamedMap) {
+    const buildLabel = buildPromptMsgs[Math.floor(Math.random() * buildPromptMsgs.length)];
+    middleBtn = `<button id="endFireBackBtn" style="${btnStyle('#f5c842','rgba(40,28,5,0.95)')}">🔥 Fire Back</button>
+    <button id="endBuildBtn" style="${btnStyle('rgba(200,160,60,0.6)','rgba(20,14,4,0.95)')}">${buildLabel}</button>`;
   } else {
     const buildLabel = buildPromptMsgs[Math.floor(Math.random() * buildPromptMsgs.length)];
     middleBtn = `<button id="endBuildBtn" style="${btnStyle('#f5c842','rgba(40,28,5,0.95)')}">${buildLabel}</button>`;
@@ -4522,12 +4566,20 @@ function endGame(reason){
         const timeDisplay = formatTime(elapsed);
         const myInitials = getStoredInitials() || 'someone';
 
-        const fireBackMsgs = [
-          `I beat it! ${timeDisplay} on your Prism Break map — your move 👊`,
-          `${myInitials} just cleared your map in ${timeDisplay}. Think you can go faster? 🔥`,
-          `Done! ${timeDisplay}. Your map is harder than it looks 😅`,
+        const mapName = currentLevelData && currentLevelData.name ? currentLevelData.name : 'this map';
+        const isCreatorFiring = currentLevelData && currentLevelData.creator_id === CREATOR_ID;
+        const fireBackMsgs = isCreatorFiring ? [
+          `I built this map and just ran it in ${timeDisplay} — think you can beat me on my own map? 😏`,
+          `${timeDisplay} on ${mapName}. My map, my record. Your move 🔥`,
+          `Just set ${timeDisplay} on my own map. Can you top that? 🏆`,
+          `Creator run: ${timeDisplay} on ${mapName}. Beat that if you can 👊`,
+          `${timeDisplay}. I made it, I own it. Come take the record 😤`,
+        ] : [
+          `I beat it! ${timeDisplay} on ${mapName} — your move 👊`,
+          `${myInitials} just cleared ${mapName} in ${timeDisplay}. Think you can go faster? 🔥`,
+          `Done! ${timeDisplay} on ${mapName}. Harder than it looks 😅`,
           `Cleared in ${timeDisplay}! Can you beat that? 🏆`,
-          `${timeDisplay} — is that fast enough for you? 😏`,
+          `${timeDisplay} on ${mapName} — is that fast enough for you? 😏`,
         ];
         const msg = fireBackMsgs[Math.floor(Math.random() * fireBackMsgs.length)];
         const fullMsg = mapUrl ? `${msg}
