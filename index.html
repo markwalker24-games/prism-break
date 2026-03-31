@@ -2693,10 +2693,10 @@ function renderLevelList(){
   const publicSeries   = allSeries.filter(s => s.name !== featuredName && s.is_public && !s.received);
   const mySeries       = allSeries.filter(s => s.name !== featuredName && (!s.is_public || s.received));
 
-  // Standalone maps owned by user, not in any series
-  const additionalMaps = allLevels.filter(lv => !allSeriesLevelNames.has(lv.name) && isOwnedMap(lv) && !lv._adminImport);
-  // Public standalone maps from cloud (not owned by current user)
-  const publicStandaloneMaps = allLevels.filter(lv => !allSeriesLevelNames.has(lv.name) && lv.is_public && !isOwnedMap(lv) && !lv._adminImport);
+  // Standalone maps owned by user that are NOT published, not in any series
+  const additionalMaps = allLevels.filter(lv => !allSeriesLevelNames.has(lv.name) && isOwnedMap(lv) && !lv.is_public && !lv._adminImport);
+  // Public standalone maps (owned or not) - anyone's published maps
+  const publicStandaloneMaps = allLevels.filter(lv => !allSeriesLevelNames.has(lv.name) && lv.is_public && !lv._adminImport);
   // Standalone maps received via share link only (not public, just privately shared)
   const receivedMaps = allLevels.filter(lv => !allSeriesLevelNames.has(lv.name) && lv.received && !lv.is_public && !isOwnedMap(lv) && !lv._adminImport);
 
