@@ -2498,29 +2498,46 @@ document.getElementById('editMapBtn').addEventListener('click', ()=>{
 function openLevelSelect(){
   document.getElementById('levelSelectOverlay').style.display='flex';
   renderLevelList(); // render with local data first
-  // Then fetch public series from cloud and merge
-  fetchPublicSeries().then(cloudPublic => {
-    if (!cloudPublic.length) return;
-    const existing = savedSeries();
+  // Fetch public series and public standalone maps in parallel
+  Promise.all([
+    fetchPublicSeries(),
+    fetchPublicMaps()
+  ]).then(([cloudPublic, cloudMaps]) => {
     let changed = false;
+
+    // Merge public series
+    const existingSeries = savedSeries();
     cloudPublic.forEach(cs => {
       if (!cs.levels) return;
       let levels;
       try { levels = typeof cs.levels === 'string' ? JSON.parse(cs.levels) : cs.levels; } catch(e) { return; }
-      const found = existing.find(s => s.name === cs.name);
+      const found = existingSeries.find(s => s.name === cs.name);
       if (!found) {
-        // Add new public series locally (marked as public + received)
-        existing.push({ ...cs, levels, is_public: true, received: true });
+        existingSeries.push({ ...cs, levels, is_public: true, received: true });
         changed = true;
       } else if (!found.is_public) {
         found.is_public = true;
         changed = true;
       }
     });
-    if (changed) {
-      LS.set('cc_series', JSON.stringify(existing));
-      renderLevelList(); // re-render with public series included
-    }
+    if (changed) LS.set('cc_series', JSON.stringify(existingSeries));
+
+    // Merge public standalone maps
+    const existingLevels = savedLevels();
+    cloudMaps.forEach(cm => {
+      if (!cm.name) return;
+      const found = existingLevels.find(l => l.name === cm.name);
+      if (!found) {
+        existingLevels.push({ ...cm, is_public: true, received: true });
+        changed = true;
+      } else if (!found.is_public) {
+        found.is_public = true;
+        changed = true;
+      }
+    });
+    if (changed) LS.set('cc_levels', JSON.stringify(existingLevels));
+
+    if (changed) renderLevelList();
   }).catch(() => {});
 }
 function closeLevelSelect(){
@@ -2678,10 +2695,12 @@ function renderLevelList(){
 
   // Standalone maps owned by user, not in any series
   const additionalMaps = allLevels.filter(lv => !allSeriesLevelNames.has(lv.name) && isOwnedMap(lv) && !lv._adminImport);
-  // Standalone maps received via share link
-  const receivedMaps = allLevels.filter(lv => !allSeriesLevelNames.has(lv.name) && lv.received && !isOwnedMap(lv) && !lv._adminImport);
+  // Public standalone maps from cloud (not owned by current user)
+  const publicStandaloneMaps = allLevels.filter(lv => !allSeriesLevelNames.has(lv.name) && lv.is_public && !isOwnedMap(lv) && !lv._adminImport);
+  // Standalone maps received via share link only (not public, just privately shared)
+  const receivedMaps = allLevels.filter(lv => !allSeriesLevelNames.has(lv.name) && lv.received && !lv.is_public && !isOwnedMap(lv) && !lv._adminImport);
 
-  const hasAnything = featuredSeriesObj || publicSeries.length || mySeries.length || additionalMaps.length || receivedMaps.length;
+  const hasAnything = featuredSeriesObj || publicSeries.length || publicStandaloneMaps.length || mySeries.length || additionalMaps.length || receivedMaps.length;
   if (!hasAnything) {
     list.innerHTML = '<div style="color:#888;font-size:11px;text-align:center;width:100%;padding:20px 0;line-height:1.8;">No maps yet.<br>Use Map Builder to create one!</div>';
     return;
@@ -2848,7 +2867,7 @@ function renderLevelList(){
     }
 
     // ── PUBLIC MAPS ──────────────────────────────────────────────
-    if (publicSeries.length) {
+    if (publicSeries.length || publicStandaloneMaps.length) {
       // Sort by avg_rating desc (rating stored on series obj after fetch)
       const sortedPublic = [...publicSeries].sort((a,b) => (b.avg_rating||0) - (a.avg_rating||0));
       list.appendChild(sectionLabel('🌐  PUBLIC MAPS', 'rgba(200,160,60,0.55)'));
@@ -2871,6 +2890,19 @@ function renderLevelList(){
           showPublishBtn: true,
         });
       });
+      // Standalone published maps (not part of a series)
+      if (publicStandaloneMaps.length) {
+        buildAccordion('pub_standalone', 'Individual Maps', publicStandaloneMaps, {
+          accent: 'rgba(200,160,60,0.35)',
+          nameColor: '#e8d5a0',
+          badge: '',
+          progressLocked: false,
+          isSeries: false,
+          seriesObj: null,
+          showShareBtn: false,
+          showPublishBtn: false,
+        });
+      }
     }
 
     // ── MY MAPS (outer accordion wrapping inner accordions) ──────
@@ -5750,6 +5782,25 @@ async function fetchPublicSeries() {
       const avg = rs.length ? Math.round((rs.reduce((a,b)=>a+b,0)/rs.length)*10)/10 : 0;
       return { ...s, avg_rating: avg, rating_count: rs.length };
     });
+  } catch(e) { return []; }
+}
+
+async function fetchPublicMaps() {
+  try {
+    const res = await fetch(
+      `${SUPA_URL}/rest/v1/maps?is_public=eq.true&select=slug,name,data,creator_id`,
+      { headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` } }
+    );
+    if (!res.ok) return [];
+    const rows = await res.json();
+    // Flatten: merge the stored data object with top-level fields
+    return rows.map(r => ({
+      ...(r.data || {}),
+      name: r.name,
+      slug: r.slug,
+      creator_id: r.creator_id,
+      is_public: true,
+    }));
   } catch(e) { return []; }
 }
 
