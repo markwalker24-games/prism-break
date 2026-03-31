@@ -2700,7 +2700,7 @@ function renderLevelList(){
   // Standalone maps received via share link only (not public, just privately shared)
   const receivedMaps = allLevels.filter(lv => !allSeriesLevelNames.has(lv.name) && lv.received && !lv.is_public && !isOwnedMap(lv) && !lv._adminImport);
 
-  const hasAnything = featuredSeriesObj || publicSeries.length || publicStandaloneMaps.length || mySeries.length || additionalMaps.length || receivedMaps.length;
+  const hasAnything = true; // always render all three zones
   if (!hasAnything) {
     list.innerHTML = '<div style="color:#888;font-size:11px;text-align:center;width:100%;padding:20px 0;line-height:1.8;">No maps yet.<br>Use Map Builder to create one!</div>';
     return;
@@ -2837,17 +2837,53 @@ function renderLevelList(){
     list.appendChild(panel);
   }
 
+  function zoneHeader(text, color, glowColor) {
+    const el = document.createElement('div');
+    el.style.cssText = `width:100%;display:flex;align-items:center;gap:8px;margin:14px 0 6px;padding:0 2px;box-sizing:border-box;`;
+    el.innerHTML = `
+      <div style="flex:1;height:1px;background:linear-gradient(90deg,${glowColor},transparent);"></div>
+      <span style="font-family:'Cinzel',serif;font-size:9px;font-weight:700;letter-spacing:3px;color:${color};white-space:nowrap;">${text}</span>
+      <div style="flex:1;height:1px;background:linear-gradient(270deg,${glowColor},transparent);"></div>
+    `;
+    return el;
+  }
+
+  function buildOuterAccordion(key, label, countLabel, accentColor, borderColor, bgClosed, bgOpen, labelColor, chevronColor, buildInner) {
+    const isOpen = !!openState[key];
+    const header = document.createElement('div');
+    header.style.cssText = `width:100%;display:flex;align-items:center;justify-content:space-between;padding:11px 14px;cursor:pointer;border-radius:4px;box-sizing:border-box;background:${isOpen?bgOpen:bgClosed};border:1px solid ${isOpen?accentColor:borderColor};margin-bottom:${isOpen?'0':'5px'};border-bottom-left-radius:${isOpen?'0':'4px'};border-bottom-right-radius:${isOpen?'0':'4px'};transition:all 0.15s;`;
+    header.innerHTML = `
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span style="color:${labelColor};font-family:'Cinzel',serif;font-size:13px;font-weight:700;letter-spacing:0.5px;">${label}</span>
+        <span style="color:${chevronColor};font-family:'Lato',sans-serif;font-size:11px;opacity:0.6;">${countLabel}</span>
+      </div>
+      <div style="color:${chevronColor};font-size:10px;opacity:0.7;transform:${isOpen?'rotate(180deg)':'none'};transition:transform 0.2s;">▼</div>
+    `;
+    header.addEventListener('click', () => { openState[key] = !openState[key]; renderAccordions(); });
+    list.appendChild(header);
+
+    if (isOpen) {
+      const panel = document.createElement('div');
+      panel.style.cssText = `width:100%;box-sizing:border-box;border:1px solid ${accentColor};border-top:none;border-bottom-left-radius:4px;border-bottom-right-radius:4px;background:rgba(6,6,10,0.98);padding:8px;display:flex;flex-direction:column;gap:0;margin-bottom:5px;`;
+      const subList = document.createElement('div');
+      subList.style.cssText = 'display:flex;flex-direction:column;gap:0;width:100%;';
+      const realList = list;
+      list = subList;
+      buildInner();
+      list = realList;
+      panel.appendChild(subList);
+      list.appendChild(panel);
+    }
+  }
+
   function renderAccordions() {
     list.innerHTML = '';
 
-    // ── QUEST (Featured) ─────────────────────────────────────────
+    // ── ZONE 1: CURRENT QUEST ────────────────────────────────────
+    list.appendChild(zoneHeader('CURRENT QUEST', '#f5c842', 'rgba(245,200,66,0.4)'));
     if (featuredSeriesObj) {
-      const el = document.createElement('div');
-      el.style.cssText = "font-family:'Cinzel',serif;font-size:11px;font-weight:700;letter-spacing:2px;color:#f5c842;margin-bottom:4px;padding-left:2px;text-shadow:0 0 8px rgba(245,200,66,0.4);";
-      el.textContent = 'CURRENT QUEST';
-      list.appendChild(el);
       buildAccordion('quest', featuredSeriesObj.name, featuredSeriesObj.levels, {
-        accent: 'rgba(245,200,66,0.5)',
+        accent: 'rgba(245,200,66,0.55)',
         nameColor: '#f5c842',
         badge: `<span style="background:rgba(245,200,66,0.15);border:1px solid rgba(245,200,66,0.4);color:#f5c842;font-family:'Cinzel',serif;font-size:9px;padding:1px 6px;border-radius:2px;">⭐ QUEST</span>`,
         progressLocked: true,
@@ -2856,30 +2892,26 @@ function renderLevelList(){
         showShareBtn: false,
         showPublishBtn: false,
       });
+    } else {
+      const el = document.createElement('div');
+      el.style.cssText = "color:rgba(200,160,60,0.35);font-family:'Lato',sans-serif;font-size:12px;text-align:center;padding:14px 0 6px;letter-spacing:0.3px;";
+      el.textContent = 'No active quest right now — check back soon.';
+      list.appendChild(el);
     }
 
-    // ── MORE MAPS header ─────────────────────────────────────────
-    if (publicSeries.length || mySeries.length || additionalMaps.length) {
-      const moreLabel = document.createElement('div');
-      moreLabel.style.cssText = "font-family:'Cinzel',serif;font-size:11px;font-weight:700;letter-spacing:2px;color:rgba(200,160,60,0.8);margin:10px 0 4px;padding-left:2px;";
-      moreLabel.textContent = 'MORE MAPS';
-      list.appendChild(moreLabel);
-    }
-
-    // ── PUBLIC MAPS ──────────────────────────────────────────────
+    // ── ZONE 2: COMMUNITY MAPS ───────────────────────────────────
+    list.appendChild(zoneHeader('COMMUNITY MAPS', '#2ec4b6', 'rgba(46,196,182,0.35)'));
     if (publicSeries.length || publicStandaloneMaps.length) {
-      // Sort by avg_rating desc (rating stored on series obj after fetch)
       const sortedPublic = [...publicSeries].sort((a,b) => (b.avg_rating||0) - (a.avg_rating||0));
-      list.appendChild(sectionLabel('🌐  PUBLIC MAPS', 'rgba(200,160,60,0.55)'));
       sortedPublic.forEach((s, i) => {
         const isAdmin = !!s._adminImport;
         const stars = s.avg_rating ? '★'.repeat(Math.round(s.avg_rating)) + '☆'.repeat(5-Math.round(s.avg_rating)) : '';
         const ratingBadge = s.avg_rating
-          ? `<span style="color:#f5c842;font-size:10px;letter-spacing:0;opacity:0.8;" title="${s.avg_rating}/5 (${s.rating_count} rating${s.rating_count!==1?'s':''})">${stars}</span>`
+          ? `<span style="color:#2ec4b6;font-size:10px;letter-spacing:0;opacity:0.9;" title="${s.avg_rating}/5 (${s.rating_count} rating${s.rating_count!==1?'s':''})">${stars}</span>`
           : '';
         buildAccordion('pub_' + i, s.name, s.levels, {
-          accent: 'rgba(200,160,60,0.45)',
-          nameColor: '#f5c842',
+          accent: 'rgba(46,196,182,0.45)',
+          nameColor: '#2ec4b6',
           badge: isAdmin
             ? `<span style="background:rgba(220,60,60,0.12);border:1px solid rgba(220,60,60,0.4);color:#e66;font-family:'Cinzel',serif;font-size:9px;padding:1px 6px;border-radius:2px;">✦ AI GENERATED</span>`
             : ratingBadge,
@@ -2890,11 +2922,10 @@ function renderLevelList(){
           showPublishBtn: true,
         });
       });
-      // Standalone published maps (not part of a series)
       if (publicStandaloneMaps.length) {
-        buildAccordion('pub_standalone', 'Individual Maps', publicStandaloneMaps, {
-          accent: 'rgba(200,160,60,0.35)',
-          nameColor: '#e8d5a0',
+        buildAccordion('pub_standalone', 'Community Maps', publicStandaloneMaps, {
+          accent: 'rgba(46,196,182,0.35)',
+          nameColor: '#2ec4b6',
           badge: '',
           progressLocked: false,
           isSeries: false,
@@ -2903,95 +2934,79 @@ function renderLevelList(){
           showPublishBtn: false,
         });
       }
+    } else {
+      const el = document.createElement('div');
+      el.style.cssText = "color:rgba(46,196,182,0.35);font-family:'Lato',sans-serif;font-size:12px;text-align:center;padding:14px 0 6px;letter-spacing:0.3px;";
+      el.textContent = 'No community maps yet — publish yours to be the first!';
+      list.appendChild(el);
     }
 
-    // ── MY MAPS (outer accordion wrapping inner accordions) ──────
-    const hasMyContent = mySeries.length || additionalMaps.length;
-    if (hasMyContent) {
-      const myKey = 'my_maps_outer';
-      const myOpen = !!openState[myKey];
-
-      // Outer header
-      const myHeader = document.createElement('div');
-      myHeader.style.cssText = `width:100%;display:flex;align-items:center;justify-content:space-between;padding:10px 12px;cursor:pointer;border-radius:4px;box-sizing:border-box;background:${myOpen?'rgba(20,20,20,0.97)':'rgba(12,12,12,0.95)'};border:1px solid ${myOpen?'rgba(180,180,180,0.25)':'rgba(130,130,130,0.15)'};margin-bottom:${myOpen?'0':'5px'};border-bottom-left-radius:${myOpen?'0':'4px'};border-bottom-right-radius:${myOpen?'0':'4px'};transition:all 0.15s;`;
-
-      const totalMyMaps = mySeries.reduce((n,s)=>n+s.levels.length,0) + additionalMaps.length;
-      myHeader.innerHTML = `
-        <div style="display:flex;align-items:center;gap:7px;">
-          <span style="color:#bbb;font-family:'Cinzel',serif;font-size:13px;font-weight:700;letter-spacing:0.5px;">MY MAPS</span>
-          <span style="color:rgba(160,160,160,0.45);font-family:'Lato',sans-serif;font-size:11px;">${totalMyMaps} map${totalMyMaps!==1?'s':''}</span>
-        </div>
-        <div style="color:rgba(160,160,160,0.5);font-size:10px;transform:${myOpen?'rotate(180deg)':'none'};transition:transform 0.2s;">▼</div>
-      `;
-      myHeader.addEventListener('click', () => { openState[myKey] = !openState[myKey]; renderAccordions(); });
-      list.appendChild(myHeader);
-
-      if (myOpen) {
-        const myPanel = document.createElement('div');
-        myPanel.style.cssText = 'width:100%;box-sizing:border-box;border:1px solid rgba(180,180,180,0.2);border-top:none;border-bottom-left-radius:4px;border-bottom-right-radius:4px;background:rgba(8,8,8,0.97);padding:8px;display:flex;flex-direction:column;gap:0;margin-bottom:5px;';
-
-        // Create a sub-list for nested accordions
-        const subList = document.createElement('div');
-        subList.style.cssText = 'display:flex;flex-direction:column;gap:0;width:100%;';
-
-        // Temporarily redirect list to subList for nested buildAccordion calls
-        const realList = list;
-        list = subList;
-
-        mySeries.forEach((s, i) => {
-          const isReceived = isReceivedSeries(s);
-          const isAdmin = !!s._adminImport;
-          let badge = '';
-          if (isAdmin) badge = `<span style="background:rgba(220,60,60,0.12);border:1px solid rgba(220,60,60,0.4);color:#e66;font-family:'Cinzel',serif;font-size:9px;padding:1px 6px;border-radius:2px;">✦ AI GENERATED</span>`;
-          else if (isReceived) badge = `<span style="background:rgba(46,196,182,0.1);border:1px solid rgba(46,196,182,0.35);color:#2ec4b6;font-family:'Cinzel',serif;font-size:9px;padding:1px 6px;border-radius:2px;">SHARED</span>`;
-
-          buildAccordion('my_' + i, s.name, s.levels, {
-            accent: 'rgba(180,180,180,0.2)',
-            nameColor: '#ccc',
-            badge,
-            progressLocked: isReceived,
-            isSeries: true,
-            seriesObj: s,
-            showShareBtn: !isReceived,
-            showPublishBtn: true,
+    // ── ZONE 3: MY LIBRARY ───────────────────────────────────────
+    list.appendChild(zoneHeader('MY LIBRARY', 'rgba(200,180,240,0.7)', 'rgba(155,93,229,0.3)'));
+    const totalLibrary = mySeries.reduce((n,s)=>n+s.levels.length,0) + additionalMaps.length + receivedMaps.length;
+    buildOuterAccordion(
+      'my_library_outer',
+      'My Library',
+      totalLibrary ? `${totalLibrary} map${totalLibrary!==1?'s':''}` : 'empty',
+        'rgba(155,93,229,0.35)', 'rgba(155,93,229,0.2)',
+        'rgba(14,10,22,0.95)', 'rgba(20,14,32,0.97)',
+        '#c4a8f0', 'rgba(180,150,220,0.6)',
+        () => {
+          // My series
+          mySeries.forEach((s, i) => {
+            const isReceived = isReceivedSeries(s);
+            const isAdmin = !!s._adminImport;
+            let badge = '';
+            if (isAdmin) badge = `<span style="background:rgba(220,60,60,0.12);border:1px solid rgba(220,60,60,0.4);color:#e66;font-family:'Cinzel',serif;font-size:9px;padding:1px 6px;border-radius:2px;">✦ AI GENERATED</span>`;
+            else if (isReceived) badge = `<span style="background:rgba(46,196,182,0.1);border:1px solid rgba(46,196,182,0.35);color:#2ec4b6;font-family:'Cinzel',serif;font-size:9px;padding:1px 6px;border-radius:2px;">SHARED</span>`;
+            buildAccordion('my_' + i, s.name, s.levels, {
+              accent: 'rgba(155,93,229,0.3)',
+              nameColor: '#c4a8f0',
+              badge,
+              progressLocked: isReceived,
+              isSeries: true,
+              seriesObj: s,
+              showShareBtn: !isReceived,
+              showPublishBtn: true,
+            });
           });
-        });
 
-        if (additionalMaps.length) {
-          buildAccordion('additional', 'My Additional Maps', additionalMaps, {
-            accent: 'rgba(155,93,229,0.35)',
-            nameColor: '#9b5de5',
-            badge: '',
-            progressLocked: false,
-            isSeries: false,
-            seriesObj: null,
-            showShareBtn: false,
-            showPublishBtn: false,
-          });
+          // My standalone maps
+          if (additionalMaps.length) {
+            buildAccordion('additional', 'My Maps', additionalMaps, {
+              accent: 'rgba(155,93,229,0.3)',
+              nameColor: '#c4a8f0',
+              badge: '',
+              progressLocked: false,
+              isSeries: false,
+              seriesObj: null,
+              showShareBtn: false,
+              showPublishBtn: false,
+            });
+          }
+
+          // Shared with me
+          if (receivedMaps.length) {
+            buildAccordion('shared_with_me', 'Shared with Me', receivedMaps, {
+              accent: 'rgba(46,196,182,0.3)',
+              nameColor: '#2ec4b6',
+              badge: `<span style="background:rgba(46,196,182,0.1);border:1px solid rgba(46,196,182,0.35);color:#2ec4b6;font-family:'Cinzel',serif;font-size:9px;padding:1px 6px;border-radius:2px;">SHARED</span>`,
+              progressLocked: false,
+              isSeries: false,
+              seriesObj: null,
+              showShareBtn: false,
+              showPublishBtn: false,
+            });
+          }
+
+          if (!mySeries.length && !additionalMaps.length && !receivedMaps.length) {
+            const el = document.createElement('div');
+            el.style.cssText = "color:rgba(180,150,220,0.35);font-family:'Lato',sans-serif;font-size:12px;text-align:center;padding:14px 0 6px;letter-spacing:0.3px;";
+            el.textContent = 'Build a map to see it here.';
+            list.appendChild(el);
+          }
         }
-
-        // Restore real list
-        list = realList;
-
-        myPanel.appendChild(subList);
-        list.appendChild(myPanel);
-      }
-    }
-
-    // ── SHARED WITH ME ──────────────────────────────────────────
-    if (receivedMaps.length) {
-      const sharedKey = 'shared_with_me';
-      buildAccordion(sharedKey, 'Maps Shared with Me', receivedMaps, {
-        accent: 'rgba(46,196,182,0.4)',
-        nameColor: '#2ec4b6',
-        badge: '<span style="background:rgba(46,196,182,0.1);border:1px solid rgba(46,196,182,0.35);color:#2ec4b6;font-family:\'Cinzel\',serif;font-size:9px;padding:1px 6px;border-radius:2px;">SHARED</span>',
-        progressLocked: false,
-        isSeries: false,
-        seriesObj: null,
-        showShareBtn: false,
-        showPublishBtn: false,
-      });
-    }
+      );
   }
 
   renderAccordions();
