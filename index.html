@@ -3995,6 +3995,8 @@ function openMapsPanel(defaultTab='maps') {
         });
         card.appendChild(challengeBtn);
       }
+
+      if(lv._fromSeries && seriesGrid) seriesGrid.appendChild(card);
       else grid.appendChild(card);
 
       // RENAME - tap name
