@@ -2673,8 +2673,8 @@ function renderLevelList(){
 
   // ── Categorise series ──────────────────────────────────────────
   const featuredSeriesObj = allSeries.find(s => s.name === featuredName);
-  const publicSeries   = allSeries.filter(s => s.name !== featuredName && s.is_public);
-  const mySeries       = allSeries.filter(s => s.name !== featuredName && !s.is_public);
+  const publicSeries   = allSeries.filter(s => s.name !== featuredName && s.is_public && !s.received);
+  const mySeries       = allSeries.filter(s => s.name !== featuredName && (!s.is_public || s.received));
 
   // Standalone maps owned by user, not in any series
   const additionalMaps = allLevels.filter(lv => !allSeriesLevelNames.has(lv.name) && isOwnedMap(lv) && !lv._adminImport);
