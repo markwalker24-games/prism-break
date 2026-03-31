@@ -2948,7 +2948,6 @@ function renderLevelList(){
 
     // ── SHARED WITH ME ──────────────────────────────────────────
     if (receivedMaps.length) {
-      list.appendChild(sectionLabel('📩  SHARED WITH ME', 'rgba(46,196,182,0.55)'));
       const sharedKey = 'shared_with_me';
       buildAccordion(sharedKey, 'Maps Shared with Me', receivedMaps, {
         accent: 'rgba(46,196,182,0.4)',
@@ -3769,6 +3768,43 @@ function openMapsPanel(defaultTab='maps') {
       card.appendChild(nameEl);
       card.appendChild(cnvWrap);
       card.appendChild(shareBtn);
+
+      // PUBLISH button - owned maps only
+      if(owned){
+        const isPublished = !!lv.is_public;
+        const publishBtn = document.createElement('button');
+        publishBtn.textContent = isPublished ? '🌐 Public' : '○ Private';
+        publishBtn.style.cssText = `width:calc(100% - 10px);margin:0 5px 6px;background:none;border:1px solid ${isPublished?'rgba(245,200,66,0.6)':'rgba(140,140,140,0.3)'};color:${isPublished?'#f5c842':'rgba(160,160,160,0.5)'};font-family:'Lato',sans-serif;font-weight:700;font-size:10px;padding:5px 4px;cursor:pointer;border-radius:3px;letter-spacing:0.5px;box-sizing:border-box;`;
+        publishBtn.title = isPublished ? 'Published - tap to unpublish' : 'Publish this map';
+        publishBtn.addEventListener('click', async () => {
+          const newVal = !lv.is_public;
+          publishBtn.textContent = '...'; publishBtn.disabled = true;
+          try {
+            let slug = lv.slug || null;
+            if(!slug){
+              try { slug = await upsertMapToCloud(lv); lv.slug = slug; } catch(e){}
+            }
+            if(slug){
+              await publishMap(slug, newVal);
+              lv.is_public = newVal;
+              // Persist to localStorage
+              const levels = savedLevels();
+              const entry = levels.find(l => l.name === lv.name);
+              if(entry){ entry.is_public = newVal; entry.slug = slug; LS.set('cc_levels', JSON.stringify(levels)); }
+              publishBtn.textContent = newVal ? '🌐 Public' : '○ Private';
+              publishBtn.style.borderColor = newVal ? 'rgba(245,200,66,0.6)' : 'rgba(140,140,140,0.3)';
+              publishBtn.style.color = newVal ? '#f5c842' : 'rgba(160,160,160,0.5)';
+              publishBtn.title = newVal ? 'Published - tap to unpublish' : 'Publish this map';
+              showBuilderToast(newVal ? '🌐 Map is now public' : 'Map set to private');
+            } else {
+              showBuilderToast('Could not publish - try sharing first');
+            }
+          } catch(e){ showBuilderToast('⚠️ Publish failed'); }
+          finally { publishBtn.disabled = false; }
+        });
+        card.appendChild(publishBtn);
+      }
+
       if(lv._fromSeries && seriesGrid) seriesGrid.appendChild(card);
       else grid.appendChild(card);
 
