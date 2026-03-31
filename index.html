@@ -5791,17 +5791,20 @@ async function fetchPublicMaps() {
       `${SUPA_URL}/rest/v1/maps?is_public=eq.true&select=slug,name,data,creator_id`,
       { headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` } }
     );
-    if (!res.ok) return [];
+    console.log('[fetchPublicMaps] status:', res.status);
+    if (!res.ok) { console.warn('[fetchPublicMaps] not ok:', await res.text()); return []; }
     const rows = await res.json();
-    // Flatten: merge the stored data object with top-level fields
-    return rows.map(r => ({
+    console.log('[fetchPublicMaps] rows:', rows);
+    const mapped = rows.map(r => ({
       ...(r.data || {}),
       name: r.name,
       slug: r.slug,
       creator_id: r.creator_id,
       is_public: true,
     }));
-  } catch(e) { return []; }
+    console.log('[fetchPublicMaps] mapped:', mapped);
+    return mapped;
+  } catch(e) { console.error('[fetchPublicMaps] error:', e); return []; }
 }
 
 async function publishSeries(seriesSlug, isPublic) {
