@@ -2676,10 +2676,12 @@ function renderLevelList(){
   const publicSeries   = allSeries.filter(s => s.name !== featuredName && s.is_public && !s.received);
   const mySeries       = allSeries.filter(s => s.name !== featuredName && (!s.is_public || s.received));
 
-  // Standalone maps owned by user OR received via share link, not in any series
-  const additionalMaps = allLevels.filter(lv => !allSeriesLevelNames.has(lv.name) && (isOwnedMap(lv) || lv.received) && !lv._adminImport);
+  // Standalone maps owned by user, not in any series
+  const additionalMaps = allLevels.filter(lv => !allSeriesLevelNames.has(lv.name) && isOwnedMap(lv) && !lv._adminImport);
+  // Standalone maps received via share link
+  const receivedMaps = allLevels.filter(lv => !allSeriesLevelNames.has(lv.name) && lv.received && !isOwnedMap(lv) && !lv._adminImport);
 
-  const hasAnything = featuredSeriesObj || publicSeries.length || mySeries.length || additionalMaps.length;
+  const hasAnything = featuredSeriesObj || publicSeries.length || mySeries.length || additionalMaps.length || receivedMaps.length;
   if (!hasAnything) {
     list.innerHTML = '<div style="color:#888;font-size:11px;text-align:center;width:100%;padding:20px 0;line-height:1.8;">No maps yet.<br>Use Map Builder to create one!</div>';
     return;
@@ -2928,6 +2930,19 @@ function renderLevelList(){
             accent: 'rgba(155,93,229,0.35)',
             nameColor: '#9b5de5',
             badge: '',
+            progressLocked: false,
+            isSeries: false,
+            seriesObj: null,
+            showShareBtn: false,
+            showPublishBtn: false,
+          });
+        }
+
+        if (receivedMaps.length) {
+          buildAccordion('received_maps', 'Maps Shared with Me', receivedMaps, {
+            accent: 'rgba(46,196,182,0.35)',
+            nameColor: '#2ec4b6',
+            badge: '<span style="background:rgba(46,196,182,0.1);border:1px solid rgba(46,196,182,0.35);color:#2ec4b6;font-family:Cinzel,serif;font-size:9px;padding:1px 6px;border-radius:2px;">SHARED</span>',
             progressLocked: false,
             isSeries: false,
             seriesObj: null,
