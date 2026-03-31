@@ -857,7 +857,14 @@ function saveLevel(name, levelData) {
   // Always stamp our creator_id when we save a level ourselves
   const entry = { name, ...levelData, creator_id: CREATOR_ID, created:Date.now() };
   if(existing>=0) levels[existing]=entry; else levels.push(entry);
-  LS.set('cc_levels', JSON.stringify(levels));
+  try {
+    const serialized = JSON.stringify(levels);
+    // Safety check - make sure it parses back correctly before writing
+    JSON.parse(serialized);
+    LS.set('cc_levels', serialized);
+  } catch(e) {
+    console.error('saveLevel: JSON serialization failed, not writing', e);
+  }
   // Background cloud sync - stamp slug back onto entry when done
   upsertMapToCloud(entry).then(slug=>{ entry.slug = slug; }).catch(()=>{});
 }
@@ -2498,11 +2505,12 @@ document.getElementById('editMapBtn').addEventListener('click', ()=>{
 function openLevelSelect(){
   document.getElementById('levelSelectOverlay').style.display='flex';
   renderLevelList(); // render with local data first
-  // Fetch public series and public standalone maps in parallel
+  // Fetch public series, public maps, and challenges in parallel
   Promise.all([
     fetchPublicSeries(),
-    fetchPublicMaps()
-  ]).then(([cloudPublic, cloudMaps]) => {
+    fetchPublicMaps(),
+    syncChallenges()
+  ]).then(([cloudPublic, cloudMaps, _]) => {
     let changed = false;
 
     // Merge public series
@@ -2522,22 +2530,26 @@ function openLevelSelect(){
     });
     if (changed) LS.set('cc_series', JSON.stringify(existingSeries));
 
-    // Merge public standalone maps
+    // Merge public standalone maps - only add maps we don't have, never overwrite owned maps
     const existingLevels = savedLevels();
     cloudMaps.forEach(cm => {
       if (!cm.name) return;
       const found = existingLevels.find(l => l.name === cm.name);
       if (!found) {
-        existingLevels.push({ ...cm, is_public: true, received: true });
-        changed = true;
-      } else if (!found.is_public) {
+        // Only add if it's not ours (we'd already have our own maps locally)
+        if (cm.creator_id !== CREATOR_ID) {
+          existingLevels.push({ ...cm, is_public: true, received: true });
+          changed = true;
+        }
+      } else if (!found.is_public && cm.creator_id === found.creator_id) {
+        // Just update the is_public flag, don't touch anything else
         found.is_public = true;
         changed = true;
       }
     });
     if (changed) LS.set('cc_levels', JSON.stringify(existingLevels));
 
-    if (changed) renderLevelList();
+    renderLevelList(); // always re-render to pick up challenge sync
   }).catch(() => {});
 }
 function closeLevelSelect(){
@@ -2896,6 +2908,84 @@ function renderLevelList(){
       const el = document.createElement('div');
       el.style.cssText = "color:rgba(200,160,60,0.35);font-family:'Lato',sans-serif;font-size:12px;text-align:center;padding:14px 0 6px;letter-spacing:0.3px;";
       el.textContent = 'No active quest right now — check back soon.';
+      list.appendChild(el);
+    }
+
+    // ── ZONE 1.5: CHALLENGES ─────────────────────────────────────
+    list.appendChild(zoneHeader('CHALLENGES', '#e63946', 'rgba(220,60,60,0.35)'));
+    const localChallenges = getLocalChallenges();
+    if (localChallenges.length) {
+      localChallenges.forEach((c) => {
+        const iMSent = c.senderId === CREATOR_ID;
+        // MY TURN: someone sent me a round I haven't beaten
+        const isMyTurn = !iMSent && !c.beaten;
+        // WAITING: I sent a round, they haven't beaten it
+        const isWaiting = iMSent && !c.beaten;
+        // MAKE IT WINNABLE: I sent it, they beat it — now I need to respond
+        // (beaten=true AND I was the sender means they beat my map, ball is in my court)
+        // Actually beaten=true AND senderId===CREATOR_ID means THEY beat MY map
+        // We detect this via: senderId===CREATOR_ID && beaten===true
+        const makeitwinnable = iMSent && c.beaten;
+
+        let statusBadge, statusColor, clickable;
+        if (isMyTurn) {
+          statusBadge = '🔴 YOUR TURN'; statusColor = '#e63946'; clickable = true;
+        } else if (makeitwinnable) {
+          statusBadge = '🔥 FIRE BACK'; statusColor = '#e63946'; clickable = true;
+        } else if (isWaiting) {
+          statusBadge = '⏳ WAITING'; statusColor = 'rgba(200,160,60,0.7)'; clickable = false;
+        } else {
+          statusBadge = '✓ BEATEN'; statusColor = 'rgba(100,180,100,0.7)'; clickable = false;
+        }
+
+        const row = document.createElement('div');
+        row.style.cssText = `width:100%;display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-radius:4px;box-sizing:border-box;background:rgba(20,5,5,0.95);border:1px solid ${clickable?'rgba(220,60,60,0.4)':'rgba(220,60,60,0.15)'};margin-bottom:5px;cursor:${clickable?'pointer':'default'};transition:border-color 0.15s;`;
+        row.innerHTML = `
+          <div style="display:flex;flex-direction:column;gap:3px;">
+            <div style="color:#e8d5a0;font-family:'Cinzel',serif;font-size:12px;font-weight:700;">${c.mapName || 'Challenge Map'}</div>
+            <div style="color:rgba(200,130,130,0.6);font-family:'Lato',sans-serif;font-size:11px;">Round ${c.round}</div>
+          </div>
+          <div style="color:${statusColor};font-family:'Cinzel',serif;font-size:10px;font-weight:700;letter-spacing:0.5px;text-align:right;">${statusBadge}</div>
+        `;
+
+        if (isMyTurn) {
+          row.addEventListener('click', async () => {
+            closeLevelSelect();
+            try {
+              const challengeRow = await loadChallengeRound(c.chainId, c.round);
+              if (!challengeRow) { showToast('⚠️ Challenge not found'); return; }
+              const levelData = await loadMapBySlug(challengeRow.map_slug);
+              if (!levelData) { showToast('⚠️ Challenge map not found'); return; }
+              levelData.slug = challengeRow.map_slug;
+              activeChallengeCtx = { chainId: c.chainId, round: c.round, challengeId: challengeRow.id, senderCreatorId: challengeRow.sender_id };
+              startGame(levelData);
+            } catch(e) { showToast('⚠️ Could not load challenge'); }
+          });
+        } else if (makeitwinnable) {
+          // They beat my map - I need to fire back with a new (possibly easier) round
+          row.addEventListener('click', async () => {
+            closeLevelSelect();
+            try {
+              const challengeRow = await loadChallengeRound(c.chainId, c.round);
+              if (!challengeRow) { showToast('⚠️ Challenge not found'); return; }
+              const levelData = await loadMapBySlug(challengeRow.map_slug);
+              if (!levelData) { showToast('⚠️ Challenge map not found'); return; }
+              levelData.slug = challengeRow.map_slug;
+              // Open builder pre-loaded, next round goes back to them
+              pendingChallengeResponse = { chainId: c.chainId, round: c.round + 1, recipientId: null };
+              openBuilder();
+              loadLevelIntoBuilder(levelData);
+              showBuilderToast('🔥 Edit the map and SAVE to fire back!');
+            } catch(e) { showToast('⚠️ Could not load challenge'); }
+          });
+        }
+
+        list.appendChild(row);
+      });
+    } else {
+      const el = document.createElement('div');
+      el.style.cssText = "color:rgba(220,60,60,0.35);font-family:'Lato',sans-serif;font-size:12px;text-align:center;padding:14px 0 6px;letter-spacing:0.3px;";
+      el.textContent = 'No active challenges — send one from a map you built.';
       list.appendChild(el);
     }
 
@@ -3850,9 +3940,61 @@ function openMapsPanel(defaultTab='maps') {
           finally { publishBtn.disabled = false; }
         });
         card.appendChild(publishBtn);
-      }
 
-      if(lv._fromSeries && seriesGrid) seriesGrid.appendChild(card);
+        // CHALLENGE button
+        const challengeBtn = document.createElement('button');
+        challengeBtn.textContent = '🔥 CHALLENGE';
+        challengeBtn.style.cssText = `width:calc(100% - 10px);margin:0 5px 6px;background:linear-gradient(180deg,rgba(50,5,5,0.95),rgba(30,3,3,0.98));border:1px solid rgba(220,60,60,0.5);color:#e63946;font-family:'Lato',sans-serif;font-weight:700;font-size:10px;padding:6px 4px;cursor:pointer;border-radius:3px;letter-spacing:0.5px;box-sizing:border-box;`;
+        challengeBtn.addEventListener('click', async () => {
+          const orig = challengeBtn.textContent; challengeBtn.textContent = '...'; challengeBtn.disabled = true;
+          try {
+            let slug = lv.slug || null;
+            if (!slug) {
+              try { slug = await upsertMapToCloud(lv); lv.slug = slug; } catch(e) {}
+            }
+            if (!slug) { showBuilderToast('⚠️ Could not upload map'); return; }
+            const { chainId, round } = await createChallenge(slug, null);
+            // Save locally as the sender
+            const all = getLocalChallenges();
+            all.unshift({ chainId, round, challengeId: null, mapSlug: slug, mapName: lv.name, senderId: CREATOR_ID, beaten: false, ts: Date.now() });
+            LS.set('pb_challenges', JSON.stringify(all.slice(0, 50)));
+            const url = getChallengeUrl(chainId, round);
+            const msgs = [
+              `I built a Prism Break map and I bet you can't beat it. 😏\n${url}`,
+              `Think you can crack this? First one to beat it fires back. 🔥\n${url}`,
+              `I made this map. Beat it and make it harder. 🔥\n${url}`,
+            ];
+            const msg = msgs[Math.floor(Math.random() * msgs.length)];
+            ov.remove();
+            // Show share overlay
+            const shareOv = document.createElement('div');
+            shareOv.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:700;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;';
+            const sharePanel = document.createElement('div');
+            sharePanel.style.cssText = 'background:linear-gradient(160deg,#1a0a0a,#120808);border:1px solid rgba(220,60,60,0.5);box-shadow:0 0 0 1px rgba(120,20,20,0.3),0 8px 40px rgba(0,0,0,0.8);border-radius:4px;padding:24px 20px;width:min(340px,100%);display:flex;flex-direction:column;gap:14px;font-family:\'Lato\',sans-serif;';
+            sharePanel.innerHTML = `
+              <div style="font-family:'Cinzel',serif;font-size:15px;font-weight:600;color:#e63946;text-align:center;letter-spacing:1px;">🔥 CHALLENGE SENT</div>
+              <div style="color:rgba(220,150,150,0.7);font-size:12px;text-align:center;">Round 1 is ready. Send the link.</div>
+              <textarea id="challengeInitCopyArea" readonly rows="4" style="width:100%;box-sizing:border-box;background:rgba(10,4,4,0.9);border:1px solid rgba(180,60,60,0.4);color:#e8d5a0;font-family:'Lato',sans-serif;font-size:12px;padding:10px;border-radius:3px;resize:none;line-height:1.6;cursor:text;" onclick="this.select()">${msg}</textarea>
+              <div id="challengeInitCopyStatus" style="color:rgba(180,150,80,0.7);font-size:12px;text-align:center;">Message copied to clipboard!</div>
+              <button id="challengeInitTextBtn" style="width:100%;background:linear-gradient(180deg,rgba(80,10,10,0.98),rgba(50,5,5,0.99));border:1px solid rgba(220,60,60,0.7);border-bottom:2px solid rgba(80,10,10,0.9);color:#e63946;font-family:'Cinzel',serif;font-weight:700;font-size:14px;letter-spacing:1px;padding:14px;cursor:pointer;border-radius:3px;">TEXT THEM</button>
+              <button id="challengeInitDoneBtn" style="width:100%;background:none;border:none;color:rgba(180,100,100,0.4);font-family:'Cinzel',serif;font-size:12px;cursor:pointer;padding:4px;letter-spacing:1px;">DONE</button>
+            `;
+            shareOv.appendChild(sharePanel);
+            document.body.appendChild(shareOv);
+            copyToClipboard(msg,
+              () => { sharePanel.querySelector('#challengeInitCopyStatus').textContent = 'Copied! Just hit Text Them.'; sharePanel.querySelector('#challengeInitCopyStatus').style.color = 'rgba(180,210,80,0.8)'; },
+              () => { sharePanel.querySelector('#challengeInitCopyArea').select(); sharePanel.querySelector('#challengeInitCopyStatus').textContent = 'Auto-copy failed — select and copy above'; }
+            );
+            sharePanel.querySelector('#challengeInitTextBtn').addEventListener('click', () => {
+              window.location.href = `sms:?body=${encodeURIComponent(msg)}`;
+            });
+            sharePanel.querySelector('#challengeInitDoneBtn').addEventListener('click', () => shareOv.remove());
+            shareOv.addEventListener('click', e => { if (e.target === shareOv) shareOv.remove(); });
+          } catch(e) { showBuilderToast('⚠️ Challenge failed: ' + (e.message||'')); }
+          finally { challengeBtn.textContent = orig; challengeBtn.disabled = false; }
+        });
+        card.appendChild(challengeBtn);
+      }
       else grid.appendChild(card);
 
       // RENAME - tap name
@@ -4430,14 +4572,34 @@ document.getElementById('builderSaveBtn').addEventListener('click',()=>{
 function showBuilderToast(msg){ showToast(msg); }
 
 // Update builderCurrentLevelName when saved as new
-document.getElementById('confirmSaveBtn').addEventListener('click',()=>{
+document.getElementById('confirmSaveBtn').addEventListener('click', async ()=>{
   const name=document.getElementById('levelNameInput').value.trim();
   if(!name){ alert('Please enter a name!'); return; }
   saveLevel(name, pendingSaveBricks);
   document.getElementById('saveOverlay').style.display='none';
   builderCurrentLevelName=name;
 
-  showBuilderToast(`"${name}" saved!`);
+  // If this is a challenge response, create next round and show share overlay
+  if (pendingChallengeResponse) {
+    const { chainId, round, recipientId } = pendingChallengeResponse;
+    pendingChallengeResponse = null;
+    try {
+      const bricks = Array.isArray(pendingSaveBricks) ? pendingSaveBricks : (pendingSaveBricks.bricks || []);
+      const slug = await upsertMapToCloud({ name, bricks, creator_id: CREATOR_ID });
+      await createNextRound(chainId, round, slug, CREATOR_ID, recipientId);
+      const all = getLocalChallenges();
+      all.unshift({ chainId, round, challengeId: null, mapSlug: slug, mapName: name, senderId: CREATOR_ID, beaten: false, ts: Date.now() });
+      LS.set('pb_challenges', JSON.stringify(all.slice(0, 50)));
+      const url = getChallengeUrl(chainId, round);
+      closeBuilder();
+      showChallengeShareOverlay(chainId, round, url);
+    } catch(e) {
+      console.error('Challenge round create failed:', e);
+      showBuilderToast('Could not send challenge - try again');
+    }
+  } else {
+    showBuilderToast(`"${name}" saved!`);
+  }
 });
 
 let testingLevel=false;
@@ -4538,12 +4700,14 @@ function endGame(reason){
   if(inSeries && !hasNext && activeSeries) saveSeriesProgress(activeSeries.name, activeSeries.levels.length - 1);
 
   // Middle CTA:
+  // - Challenge map → MAKE IT HARDER as primary red CTA
   // - Creator of this map → share it and challenge a friend
   // - Non-creator (played a received/series map) → prompt to build their own
   // - Series complete → prompt to build their own
   const isReceivedMap = currentLevelData && currentLevelData.creator_id && currentLevelData.creator_id !== CREATOR_ID;
   const isSeriesComplete = inSeries && !hasNext;
-  const showBuildPrompt = isReceivedMap || isSeriesComplete;
+  const isChallengeMap = !!activeChallengeCtx;
+  const showBuildPrompt = !isChallengeMap && (isReceivedMap || isSeriesComplete);
   const buildPromptMsgs = [
     'Now build your own 🔨',
     'Think you can build a harder one? 🔨',
@@ -4551,9 +4715,11 @@ function endGame(reason){
     'Make one that beats this 🔨',
   ];
   const buildPromptLabel = isSeriesComplete ? 'BUILD YOUR OWN SERIES 🔨' : buildPromptMsgs[Math.floor(Math.random() * buildPromptMsgs.length)];
-  const middleBtn = showBuildPrompt
-    ? `<button id="endBuildBtn" style="${btnStyle('#f5c842', isSeriesComplete ? 'rgba(60,44,8,0.98)' : 'rgba(40,28,5,0.95)')}">${buildPromptLabel}</button>`
-    : `<button id="endShareBtn" style="${btnStyle('#f5c842','rgba(40,28,5,0.95)')}">SHARE THIS MAP</button>`;
+  const middleBtn = isChallengeMap
+    ? `<button id="endChallengeFireBackBtn" style="${btnStyle('#e63946','rgba(50,5,5,0.98)')}">🔥 MAKE IT HARDER</button>`
+    : showBuildPrompt
+      ? `<button id="endBuildBtn" style="${btnStyle('#f5c842', isSeriesComplete ? 'rgba(60,44,8,0.98)' : 'rgba(40,28,5,0.95)')}">${buildPromptLabel}</button>`
+      : `<button id="endShareBtn" style="${btnStyle('#f5c842','rgba(40,28,5,0.95)')}">SHARE THIS MAP</button>`;
 
   // Always show the 3 CTAs on a win (except when testing in builder)
   let buttons='';
@@ -4681,7 +4847,18 @@ function endGame(reason){
     });
   }
 
-  // Share This Map
+  // Challenge - Make It Harder
+  if(document.getElementById('endChallengeFireBackBtn')){
+    document.getElementById('endChallengeFireBackBtn').addEventListener('click',()=>{
+      if(!activeChallengeCtx) return;
+      const { chainId, round, challengeId, senderCreatorId } = activeChallengeCtx;
+      const capturedLevel = currentLevelData;
+      activeChallengeCtx = null;
+      showChallengeWinCTA(chainId, round, challengeId, senderCreatorId, capturedLevel);
+    });
+  }
+
+
   if(document.getElementById('endShareBtn')){
     document.getElementById('endShareBtn').addEventListener('click', async ()=>{
       const btn = document.getElementById('endShareBtn');
@@ -4715,6 +4892,7 @@ function endGame(reason){
   // Home
   document.getElementById('endMenuBtn').addEventListener('click',()=>{
     activeSeries=null; activeSeriesIdx=0;
+    activeChallengeCtx=null;
     hideMessage(); showModeSelect();
   });
 }
@@ -6064,6 +6242,278 @@ function showStarRating(slug, type, onDone) {
   });
 
   ov.addEventListener('click', e => { if(e.target===ov){ ov.remove(); if(onDone) onDone(); } });
+}
+
+// =====================================================================
+// CHALLENGE SYSTEM
+// =====================================================================
+
+// Active challenge context - set when a challenge link is opened
+let activeChallengeCtx = null; // { chainId, round, challengeId, senderCreatorId }
+
+function getChallengeUrl(chainId, round) {
+  return `${GAME_URL}?challenge=${chainId}&round=${round}`;
+}
+
+async function createChallenge(mapSlug, recipientId) {
+  const chainId = crypto.randomUUID();
+  const res = await fetch(`${SUPA_URL}/rest/v1/challenges`, {
+    method: 'POST',
+    headers: { 'Content-Type':'application/json','apikey':SUPA_KEY,'Authorization':`Bearer ${SUPA_KEY}`,'Prefer':'return=representation' },
+    body: JSON.stringify({ chain_id: chainId, round: 1, map_slug: mapSlug, sender_id: CREATOR_ID, recipient_id: recipientId || null, beaten: false })
+  });
+  if (!res.ok) throw new Error(await res.text());
+  const rows = await res.json();
+  return { chainId, challengeId: rows[0].id, round: 1 };
+}
+
+async function createNextRound(chainId, round, mapSlug, senderId, recipientId) {
+  const res = await fetch(`${SUPA_URL}/rest/v1/challenges`, {
+    method: 'POST',
+    headers: { 'Content-Type':'application/json','apikey':SUPA_KEY,'Authorization':`Bearer ${SUPA_KEY}`,'Prefer':'return=representation' },
+    body: JSON.stringify({ chain_id: chainId, round, map_slug: mapSlug, sender_id: senderId, recipient_id: recipientId || null, beaten: false })
+  });
+  if (!res.ok) throw new Error(await res.text());
+  const rows = await res.json();
+  return rows[0].id;
+}
+
+async function markChallengeBeaten(challengeId) {
+  await fetch(`${SUPA_URL}/rest/v1/challenges?id=eq.${challengeId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type':'application/json','apikey':SUPA_KEY,'Authorization':`Bearer ${SUPA_KEY}`,'Prefer':'return=minimal' },
+    body: JSON.stringify({ beaten: true })
+  });
+}
+
+async function fetchMyChallenges() {
+  try {
+    // Get all challenge rounds where I'm sender or recipient
+    const res = await fetch(
+      `${SUPA_URL}/rest/v1/challenges?or=(sender_id.eq.${encodeURIComponent(CREATOR_ID)},recipient_id.eq.${encodeURIComponent(CREATOR_ID)})&order=created_at.desc&select=*`,
+      { headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` } }
+    );
+    if (!res.ok) return [];
+    return await res.json();
+  } catch(e) { return []; }
+}
+
+async function loadChallengeRound(chainId, round) {
+  const res = await fetch(
+    `${SUPA_URL}/rest/v1/challenges?chain_id=eq.${chainId}&round=eq.${round}&select=*&limit=1`,
+    { headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` } }
+  );
+  if (!res.ok) return null;
+  const rows = await res.json();
+  return rows[0] || null;
+}
+
+// On page load: check ?challenge= param
+(async function checkChallengeParam() {
+  const params = new URLSearchParams(window.location.search);
+  const chainId = params.get('challenge');
+  const round = parseInt(params.get('round') || '1', 10);
+  if (!chainId) return;
+
+  try {
+    const challengeRow = await loadChallengeRound(chainId, round);
+    if (!challengeRow) { setTimeout(() => showToast('⚠️ Challenge not found'), 800); return; }
+
+    const levelData = await loadMapBySlug(challengeRow.map_slug);
+    if (!levelData) { setTimeout(() => showToast('⚠️ Challenge map not found'), 800); return; }
+    levelData.slug = challengeRow.map_slug;
+
+    // Store challenge context for win screen
+    activeChallengeCtx = {
+      chainId,
+      round,
+      challengeId: challengeRow.id,
+      senderCreatorId: challengeRow.sender_id,
+    };
+
+    // Save map locally as a challenge map
+    if (levelData.name) {
+      const levels = savedLevels();
+      const existing = levels.find(l => l.name === levelData.name);
+      if (!existing) {
+        levels.push({ ...levelData, _challenge: true, _chainId: chainId, received: true });
+        LS.set('cc_levels', JSON.stringify(levels));
+      }
+    }
+
+    // Save challenge thread locally
+    saveLocalChallenge(chainId, round, challengeRow, levelData);
+
+    function tryLoad() {
+      if (typeof startGame !== 'function') { setTimeout(tryLoad, 200); return; }
+      showChallengeIntro(levelData, challengeRow, () => startGame(levelData));
+    }
+    setTimeout(tryLoad, 600);
+  } catch(e) {
+    console.error('checkChallengeParam error:', e);
+    setTimeout(() => showToast('⚠️ Could not load challenge: ' + (e && e.message ? e.message.slice(0, 60) : String(e))), 800);
+  }
+})();
+
+function saveLocalChallenge(chainId, round, row, levelData) {
+  try {
+    const all = JSON.parse(LS.get('pb_challenges') || '[]');
+    const existing = all.find(c => c.chainId === chainId && c.round === round);
+    if (!existing) {
+      all.unshift({ chainId, round, challengeId: row.id, mapSlug: row.map_slug, mapName: levelData.name, senderId: row.sender_id, beaten: false, ts: Date.now() });
+      LS.set('pb_challenges', JSON.stringify(all.slice(0, 50)));
+    }
+  } catch(e) {}
+}
+
+function getLocalChallenges() {
+  try { return JSON.parse(LS.get('pb_challenges') || '[]'); } catch(e) { return []; }
+}
+
+function showChallengeIntro(levelData, row, onPlay) {
+  const isMine = row.sender_id === CREATOR_ID;
+  const round = row.round;
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:500;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;';
+  const panel = document.createElement('div');
+  panel.style.cssText = 'background:linear-gradient(160deg,#1a0a0a,#120808);border:1px solid rgba(220,60,60,0.5);box-shadow:0 0 0 1px rgba(120,20,20,0.3),0 8px 40px rgba(0,0,0,0.8);border-radius:4px;padding:28px 22px;width:min(320px,100%);display:flex;flex-direction:column;gap:14px;font-family:\'Lato\',sans-serif;text-align:center;';
+  panel.innerHTML = `
+    <div style="font-size:36px;">🔥</div>
+    <div style="font-family:'Cinzel',serif;font-size:18px;font-weight:700;color:#e63946;letter-spacing:1px;">CHALLENGE — ROUND ${round}</div>
+    <div style="color:rgba(220,150,150,0.8);font-size:13px;line-height:1.6;">${isMine ? 'Your own challenge map.' : 'Someone sent you a challenge. Beat it to fire back.'}</div>
+    <div style="background:rgba(220,60,60,0.08);border:1px solid rgba(220,60,60,0.25);border-radius:3px;padding:10px 14px;">
+      <div style="color:rgba(200,120,120,0.6);font-size:10px;font-family:'Cinzel',serif;letter-spacing:2px;margin-bottom:4px;">MAP</div>
+      <div style="color:#e8d5a0;font-size:14px;font-weight:700;">${levelData.name || 'Unnamed'}</div>
+    </div>
+    <button id="challengePlayBtn" style="width:100%;background:linear-gradient(180deg,rgba(80,10,10,0.98),rgba(50,5,5,0.99));border:1px solid rgba(220,60,60,0.7);border-bottom:2px solid rgba(80,10,10,0.9);color:#e63946;font-family:'Cinzel',serif;font-weight:700;font-size:15px;letter-spacing:2px;padding:15px;cursor:pointer;border-radius:3px;">▶ ACCEPT THE CHALLENGE</button>
+    <button id="challengeDismissBtn" style="background:none;border:none;color:rgba(180,100,100,0.4);font-family:'Cinzel',serif;font-size:11px;cursor:pointer;letter-spacing:1px;padding:4px;">not now</button>
+  `;
+  ov.appendChild(panel);
+  document.body.appendChild(ov);
+  panel.querySelector('#challengePlayBtn').addEventListener('click', () => { ov.remove(); onPlay(); });
+  panel.querySelector('#challengeDismissBtn').addEventListener('click', () => { ov.remove(); showModeSelect(); });
+}
+
+// Called from win screen when a challenge map is beaten
+function showChallengeWinCTA(chainId, round, challengeId, senderCreatorId, levelData) {
+  // Mark as beaten in Supabase
+  markChallengeBeaten(challengeId).catch(() => {});
+
+  // Update local record
+  try {
+    const all = getLocalChallenges();
+    const entry = all.find(c => c.chainId === chainId && c.round === round);
+    if (entry) { entry.beaten = true; LS.set('pb_challenges', JSON.stringify(all)); }
+  } catch(e) {}
+
+  const nextRound = round + 1;
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:600;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;';
+  const panel = document.createElement('div');
+  panel.style.cssText = 'background:linear-gradient(160deg,#1a0a0a,#120808);border:1px solid rgba(220,60,60,0.6);box-shadow:0 0 30px rgba(220,60,60,0.15),0 8px 40px rgba(0,0,0,0.8);border-radius:4px;padding:28px 22px;width:min(340px,100%);display:flex;flex-direction:column;gap:14px;font-family:\'Lato\',sans-serif;text-align:center;';
+  panel.innerHTML = `
+    <div style="font-size:42px;filter:drop-shadow(0 0 16px rgba(220,60,60,0.6));">🔥</div>
+    <div style="font-family:'Cinzel',serif;font-size:20px;font-weight:700;color:#e63946;letter-spacing:2px;text-shadow:0 0 20px rgba(220,60,60,0.5);">YOU BEAT IT!</div>
+    <div style="color:rgba(220,150,150,0.8);font-size:13px;line-height:1.6;">Now make Round ${nextRound} harder and send it back.</div>
+    <button id="challengeFireBackBtn" style="width:100%;background:linear-gradient(180deg,rgba(80,10,10,0.98),rgba(50,5,5,0.99));border:1px solid rgba(220,60,60,0.7);border-bottom:2px solid rgba(80,10,10,0.9);color:#e63946;font-family:'Cinzel',serif;font-weight:700;font-size:15px;letter-spacing:2px;padding:15px;cursor:pointer;border-radius:3px;box-shadow:0 0 16px rgba(220,60,60,0.2);">🔥 MAKE IT HARDER</button>
+    <button id="challengeSkipBtn" style="background:none;border:none;color:rgba(180,100,100,0.4);font-family:'Cinzel',serif;font-size:11px;cursor:pointer;letter-spacing:1px;padding:4px;">skip — just go home</button>
+  `;
+  ov.appendChild(panel);
+  document.body.appendChild(ov);
+
+  panel.querySelector('#challengeFireBackBtn').addEventListener('click', () => {
+    ov.remove();
+    hideMessage();
+    // Pre-load builder with current map, then on save fire createNextRound
+    pendingChallengeResponse = { chainId, round: nextRound, recipientId: senderCreatorId };
+    openBuilder();
+    loadLevelIntoBuilder(levelData);
+    showBuilderToast('🔥 Make it harder, then SAVE to fire back!');
+  });
+
+  panel.querySelector('#challengeSkipBtn').addEventListener('click', () => {
+    ov.remove();
+    hideMessage();
+    activeSeries = null; activeSeriesIdx = 0;
+    showModeSelect();
+  });
+}
+
+// Pending challenge response - set before opening builder for a challenge response
+let pendingChallengeResponse = null; // { chainId, round, recipientId }
+
+// Hook into saveLevel to intercept challenge responses
+const _originalSaveLevel = saveLevel;
+// We'll patch the save flow via builderSaveBtn listener instead (see below)
+
+function showChallengeShareOverlay(chainId, round, url) {
+  const msgs = [
+    `Round ${round} is ready. Think you can beat it? 🔥\n${url}`,
+    `I made Round ${round} harder. Your turn. 😈\n${url}`,
+    `Round ${round} — good luck with this one. 🔥\n${url}`,
+    `Your turn. Round ${round} is waiting. Can you handle it?\n${url}`,
+  ];
+  const msg = msgs[Math.floor(Math.random() * msgs.length)];
+
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:700;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;';
+  const panel = document.createElement('div');
+  panel.style.cssText = 'background:linear-gradient(160deg,#1a0a0a,#120808);border:1px solid rgba(220,60,60,0.5);box-shadow:0 0 0 1px rgba(120,20,20,0.3),0 8px 40px rgba(0,0,0,0.8);border-radius:4px;padding:24px 20px;width:min(340px,100%);display:flex;flex-direction:column;gap:14px;font-family:\'Lato\',sans-serif;';
+  panel.innerHTML = `
+    <div style="font-family:'Cinzel',serif;font-size:15px;font-weight:600;color:#e63946;text-align:center;letter-spacing:1px;">🔥 YOUR TURN IS READY</div>
+    <div style="color:rgba(220,150,150,0.7);font-size:12px;text-align:center;line-height:1.5;">Round ${round} saved. Send the challenge.</div>
+    <textarea id="challengeCopyArea" readonly rows="4" style="width:100%;box-sizing:border-box;background:rgba(10,4,4,0.9);border:1px solid rgba(180,60,60,0.4);color:#e8d5a0;font-family:'Lato',sans-serif;font-size:12px;padding:10px;border-radius:3px;resize:none;line-height:1.6;cursor:text;" onclick="this.select()">${msg}</textarea>
+    <div id="challengeCopyStatus" style="color:rgba(180,150,80,0.7);font-size:12px;text-align:center;line-height:1.5;">Message copied to clipboard!</div>
+    <button id="challengeTextBtn" style="width:100%;background:linear-gradient(180deg,rgba(80,10,10,0.98),rgba(50,5,5,0.99));border:1px solid rgba(220,60,60,0.7);border-bottom:2px solid rgba(80,10,10,0.9);color:#e63946;font-family:'Cinzel',serif;font-weight:700;font-size:14px;letter-spacing:1px;padding:14px;cursor:pointer;border-radius:3px;">TEXT THEM</button>
+    <button id="challengeDoneBtn" style="width:100%;background:none;border:none;color:rgba(180,100,100,0.4);font-family:'Cinzel',serif;font-size:12px;cursor:pointer;padding:4px;letter-spacing:1px;">DONE</button>
+  `;
+  ov.appendChild(panel);
+  document.body.appendChild(ov);
+
+  copyToClipboard(msg,
+    () => { panel.querySelector('#challengeCopyStatus').textContent = 'Copied! Just hit Text Them.'; panel.querySelector('#challengeCopyStatus').style.color = 'rgba(180,210,80,0.8)'; },
+    () => { panel.querySelector('#challengeCopyArea').select(); panel.querySelector('#challengeCopyStatus').textContent = 'Auto-copy failed — select and copy above'; panel.querySelector('#challengeCopyStatus').style.color = '#f4a261'; }
+  );
+  panel.querySelector('#challengeTextBtn').addEventListener('click', () => {
+    window.location.href = `sms:?body=${encodeURIComponent(msg)}`;
+  });
+  panel.querySelector('#challengeDoneBtn').addEventListener('click', () => { ov.remove(); showModeSelect(); });
+  ov.addEventListener('click', e => { if (e.target === ov) { ov.remove(); showModeSelect(); } });
+}
+
+async function syncChallenges() {
+  try {
+    const rows = await fetchMyChallenges();
+    if (!rows.length) return;
+
+    // Group by chain_id, keep only the latest round per chain
+    const chainMap = {};
+    rows.forEach(r => {
+      if (!chainMap[r.chain_id] || r.round > chainMap[r.chain_id].round) {
+        chainMap[r.chain_id] = r;
+      }
+    });
+
+    const synced = Object.values(chainMap).map(r => ({
+      chainId: r.chain_id,
+      round: r.round,
+      challengeId: r.id,
+      mapSlug: r.map_slug,
+      mapName: r.map_slug, // will be overridden below if we can get the name
+      senderId: r.sender_id,
+      beaten: r.beaten,
+      ts: new Date(r.created_at).getTime()
+    }));
+
+    // Try to enrich with map names from local storage
+    const localLevels = savedLevels();
+    synced.forEach(c => {
+      const match = localLevels.find(l => l.slug === c.mapSlug);
+      if (match) c.mapName = match.name;
+    });
+
+    LS.set('pb_challenges', JSON.stringify(synced.slice(0, 50)));
+  } catch(e) { console.warn('syncChallenges failed:', e); }
 }
 
 // Kick off the game loop and show home screen
