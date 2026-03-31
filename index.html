@@ -2676,8 +2676,8 @@ function renderLevelList(){
   const publicSeries   = allSeries.filter(s => s.name !== featuredName && s.is_public && !s.received);
   const mySeries       = allSeries.filter(s => s.name !== featuredName && (!s.is_public || s.received));
 
-  // Standalone maps owned by user, not in any series
-  const additionalMaps = allLevels.filter(lv => !allSeriesLevelNames.has(lv.name) && isOwnedMap(lv) && !lv._adminImport);
+  // Standalone maps owned by user OR received via share link, not in any series
+  const additionalMaps = allLevels.filter(lv => !allSeriesLevelNames.has(lv.name) && (isOwnedMap(lv) || lv.received) && !lv._adminImport);
 
   const hasAnything = featuredSeriesObj || publicSeries.length || mySeries.length || additionalMaps.length;
   if (!hasAnything) {
