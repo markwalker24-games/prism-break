@@ -2938,25 +2938,28 @@ function renderLevelList(){
           });
         }
 
-        if (receivedMaps.length) {
-          buildAccordion('received_maps', 'Maps Shared with Me', receivedMaps, {
-            accent: 'rgba(46,196,182,0.35)',
-            nameColor: '#2ec4b6',
-            badge: '<span style="background:rgba(46,196,182,0.1);border:1px solid rgba(46,196,182,0.35);color:#2ec4b6;font-family:Cinzel,serif;font-size:9px;padding:1px 6px;border-radius:2px;">SHARED</span>',
-            progressLocked: false,
-            isSeries: false,
-            seriesObj: null,
-            showShareBtn: false,
-            showPublishBtn: false,
-          });
-        }
-
         // Restore real list
         list = realList;
 
         myPanel.appendChild(subList);
         list.appendChild(myPanel);
       }
+    }
+
+    // ── SHARED WITH ME ──────────────────────────────────────────
+    if (receivedMaps.length) {
+      list.appendChild(sectionLabel('📩  SHARED WITH ME', 'rgba(46,196,182,0.55)'));
+      const sharedKey = 'shared_with_me';
+      buildAccordion(sharedKey, 'Maps Shared with Me', receivedMaps, {
+        accent: 'rgba(46,196,182,0.4)',
+        nameColor: '#2ec4b6',
+        badge: '<span style="background:rgba(46,196,182,0.1);border:1px solid rgba(46,196,182,0.35);color:#2ec4b6;font-family:\'Cinzel\',serif;font-size:9px;padding:1px 6px;border-radius:2px;">SHARED</span>',
+        progressLocked: false,
+        isSeries: false,
+        seriesObj: null,
+        showShareBtn: false,
+        showPublishBtn: false,
+      });
     }
   }
 
