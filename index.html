@@ -4653,6 +4653,12 @@ function endGame(reason){
   let buttons='';
   if(testingLevel){
     buttons=`<button id="backToBuilderBtn" style="${btnStyle('#2ec4b6','rgba(5,30,30,0.9)')}">↩ Back to Builder</button>`;
+  } else if(isChallengeMap){
+    buttons=`
+      ${middleBtn}
+      <button id="endPlayAgainBtn" style="${btnStyle(titleColor,'rgba(10,15,30,0.95)')}">↺ Play It Again</button>
+      <button id="endMenuBtn" style="${ghostBtn}">Home</button>
+    `;
   } else if(isRandomMode){
     buttons=`
       <button id="endNextBtn" style="${btnStyle('#2ec4b6','rgba(5,25,28,0.95)')}">▶ Play Another</button>
@@ -4785,6 +4791,18 @@ function endGame(reason){
 
   // Challenge - Make It Harder
   if(document.getElementById('endChallengeFireBackBtn')){
+    // Mark beaten immediately - don't wait for button tap
+    if(activeChallengeCtx) {
+      const { chainId, round, challengeId } = activeChallengeCtx;
+      markChallengeBeaten(challengeId).catch(() => {});
+      // Update local cache right away so it leaves the list
+      try {
+        const all = getLocalChallenges();
+        const entry = all.find(c => c.chainId === chainId && c.round === round);
+        if (entry) { entry.beaten = true; LS.set('pb_challenges', JSON.stringify(all)); }
+      } catch(e) {}
+    }
+
     document.getElementById('endChallengeFireBackBtn').addEventListener('click',()=>{
       if(!activeChallengeCtx) return;
       const { chainId, round, challengeId, senderCreatorId } = activeChallengeCtx;
@@ -6507,7 +6525,7 @@ function showChallengesScreen() {
     else if (fireBack)  { statusText = '🔥 FIRE BACK'; statusColor = '#e63946'; clickable = true; }
     else if (isWaiting) { statusText = '⏳ WAITING';   statusColor = 'rgba(200,160,60,0.7)'; clickable = false; }
     else                { statusText = '✓ BEATEN';     statusColor = 'rgba(100,180,100,0.7)'; clickable = false; }
-    return { c, statusText, statusColor, clickable, isMyTurn, fireBack };
+    return { c, statusText, statusColor, clickable, isMyTurn, fireBack, isWaiting };
   });
 
   const container = document.createElement('div');
