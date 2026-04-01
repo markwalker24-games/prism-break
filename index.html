@@ -2795,10 +2795,16 @@ function renderLevelList(){
     const panel = document.createElement('div');
     panel.style.cssText = makePanelStyle(accent);
 
+    const _pickerChallengeNames = new Set(getLocalChallenges().flatMap(c => [c.mapName].filter(Boolean)));
+
     levels.forEach((lv, idx) => {
       const isLocked = progressLocked && idx > progress;
+      const isChallengeTile = _pickerChallengeNames.has(lv.name) || !!lv._challenge;
       const card = document.createElement('div');
       card.className = 'level-thumb-card';
+      if (isChallengeTile && !isLocked) {
+        card.style.cssText = 'background:rgba(30,5,5,0.95);border-color:rgba(220,60,60,0.45);';
+      }
       if (isLocked) card.style.cssText += 'opacity:0.45;cursor:default;';
 
       const cnv = document.createElement('canvas');
@@ -2819,6 +2825,7 @@ function renderLevelList(){
       label_el.className = 'level-thumb-name';
       label_el.textContent = (isLocked ? '🔒 ' : '') + (lv.name || 'Level');
       if (isLocked) label_el.style.color = 'rgba(180,140,60,0.35)';
+      else if (isChallengeTile) label_el.style.color = '#e63946';
 
       card.appendChild(cnv);
       card.appendChild(label_el);
@@ -2968,18 +2975,20 @@ function renderLevelList(){
           mySeries.forEach((s, i) => {
             const isReceived = isReceivedSeries(s);
             const isAdmin = !!s._adminImport;
+            const isChallengeSeries = !!s._isChallengeSeries;
             let badge = '';
-            if (isAdmin) badge = `<span style="background:rgba(220,60,60,0.12);border:1px solid rgba(220,60,60,0.4);color:#e66;font-family:'Cinzel',serif;font-size:9px;padding:1px 6px;border-radius:2px;">✦ AI GENERATED</span>`;
+            if (isChallengeSeries) badge = `<span style="background:rgba(220,60,60,0.12);border:1px solid rgba(220,60,60,0.4);color:#e63946;font-family:'Cinzel',serif;font-size:9px;padding:1px 6px;border-radius:2px;">🔥 CHALLENGE</span>`;
+            else if (isAdmin) badge = `<span style="background:rgba(220,60,60,0.12);border:1px solid rgba(220,60,60,0.4);color:#e66;font-family:'Cinzel',serif;font-size:9px;padding:1px 6px;border-radius:2px;">✦ AI GENERATED</span>`;
             else if (isReceived) badge = `<span style="background:rgba(46,196,182,0.1);border:1px solid rgba(46,196,182,0.35);color:#2ec4b6;font-family:'Cinzel',serif;font-size:9px;padding:1px 6px;border-radius:2px;">SHARED</span>`;
             buildAccordion('my_' + i, s.name, s.levels, {
-              accent: 'rgba(155,93,229,0.3)',
-              nameColor: '#c4a8f0',
+              accent: isChallengeSeries ? 'rgba(220,60,60,0.35)' : 'rgba(155,93,229,0.3)',
+              nameColor: isChallengeSeries ? '#e63946' : '#c4a8f0',
               badge,
               progressLocked: isReceived,
               isSeries: true,
               seriesObj: s,
-              showShareBtn: !isReceived,
-              showPublishBtn: true,
+              showShareBtn: !isReceived && !isChallengeSeries,
+              showPublishBtn: !isChallengeSeries,
             });
           });
 
@@ -3765,13 +3774,17 @@ function openMapsPanel(defaultTab='maps') {
       body.appendChild(seriesGrid);
     }
 
+    // Build set of challenge map names for color coding
+    const challengeMapNames = new Set(getLocalChallenges().flatMap(c => [c.mapName].filter(Boolean)));
+
     allMaps.forEach((lv, i)=>{
       const owned = isOwnedMap(lv) || lv._fromSeries;
       const isAdmin = !!lv._adminImport;
+      const isChallenge = challengeMapNames.has(lv.name) || !!lv._challenge;
 
       const card = document.createElement('div');
-      const cardBg = isAdmin ? '#1f0a0a' : owned ? '#1a1a2e' : '#0d1f2d';
-      const cardBorder = isAdmin ? 'rgba(220,60,60,0.45)' : owned ? 'rgba(200,160,60,0.35)' : 'rgba(46,196,182,0.3)';
+      const cardBg = isChallenge ? '#1a0505' : isAdmin ? '#141418' : owned ? '#141418' : '#0d1f2d';
+      const cardBorder = isChallenge ? 'rgba(220,60,60,0.45)' : isAdmin ? 'rgba(200,200,210,0.35)' : owned ? 'rgba(200,200,210,0.25)' : 'rgba(46,196,182,0.3)';
       card.style.cssText = `display:flex;flex-direction:column;align-items:stretch;min-width:0;background:${cardBg};border:1px solid ${cardBorder};border-radius:4px;overflow:hidden;position:relative;box-shadow:0 2px 8px rgba(0,0,0,0.4);`;
 
       // Thumbnail canvas - fills card width
@@ -3803,7 +3816,7 @@ function openMapsPanel(defaultTab='maps') {
 
       // Map name - tap to rename
       const nameEl = document.createElement('div');
-      const nameColor = isAdmin ? '#e66' : owned ? '#c9a84c' : '#7ecfdb';
+      const nameColor = isChallenge ? '#e63946' : isAdmin ? '#d0d0d8' : owned ? '#c9a84c' : '#7ecfdb';
       nameEl.style.cssText = `color:${nameColor};font-size:10px;font-family:'Lato',sans-serif;font-weight:700;padding:5px 6px 4px;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:${owned||isAdmin?'pointer':'default'};`;
       nameEl.textContent = lv.name;
       nameEl.title = owned ? 'Tap to rename' : lv.name;
@@ -3880,6 +3893,8 @@ function openMapsPanel(defaultTab='maps') {
             const all = getLocalChallenges();
             all.unshift({ chainId, round, challengeId: null, mapSlug: slug, mapName: lv.name, senderId: CREATOR_ID, beaten: false, ts: Date.now() });
             LS.set('pb_challenges', JSON.stringify(all.slice(0, 50)));
+            // Start the challenge series
+            upsertChallengeSeriesLocally(chainId, lv.name, slug, lv.name).catch(() => {});
             const url = getChallengeUrl(chainId, round);
             const msgs = [
               `I built a Prism Break map and I bet you can't beat it. 😏\n${url}`,
@@ -4544,6 +4559,8 @@ document.getElementById('confirmSaveBtn').addEventListener('click', async ()=>{
       if (saveBtn) { saveBtn.textContent = '💾 SAVE'; saveBtn.style.background = ''; saveBtn.style.borderColor = ''; saveBtn.style.color = ''; }
       const mapsBtn = document.getElementById('builderMapsBtn');
       if (mapsBtn) mapsBtn.style.display = '';
+      // Update the auto-growing challenge series
+      upsertChallengeSeriesLocally(chainId, baseName || autoName, slug, autoName).catch(() => {});
       closeBuilder();
       showToast(updateExisting ? `✓ Challenge updated — they'll see the new version.` : `🔥 "${autoName}" fired back!`);
       showModeSelect();
@@ -6691,6 +6708,57 @@ function showChallengesScreen() {
   });
 }
 
+// Auto-grow a private local series from a challenge chain
+// Called any time a challenge round map is available locally
+async function upsertChallengeSeriesLocally(chainId, baseName, newMapSlug, newMapName) {
+  try {
+    // Fetch all rounds for this chain from Supabase in order
+    const res = await fetch(
+      `${SUPA_URL}/rest/v1/challenges?chain_id=eq.${chainId}&order=round.asc&select=round,map_slug`,
+      { headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` } }
+    );
+    if (!res.ok) return;
+    const rounds = await res.json();
+
+    // Fetch map data for each round
+    const levels = [];
+    for (const r of rounds) {
+      // Try local first
+      const local = savedLevels().find(l => l.slug === r.map_slug);
+      if (local) {
+        levels.push(local);
+      } else {
+        try {
+          const data = await loadMapBySlug(r.map_slug);
+          if (data) {
+            // Auto-name: baseName, baseName 2.0, baseName 3.0...
+            data.name = r.round === 1 ? baseName : `${baseName} ${r.round}.0`;
+            data.slug = r.map_slug;
+            data._challenge = true;
+            levels.push(data);
+          }
+        } catch(e) {}
+      }
+    }
+
+    if (!levels.length) return;
+
+    // Save/update the series locally
+    const seriesName = baseName;
+    const existing = savedSeries().find(s => s._challengeChainId === chainId);
+    const seriesObj = {
+      name: seriesName,
+      description: `Challenge chain · ${levels.length} round${levels.length !== 1 ? 's' : ''}`,
+      levels,
+      is_public: false,
+      _challengeChainId: chainId,
+      _isChallengeSeries: true,
+    };
+    if (existing) seriesObj.name = existing.name; // preserve if renamed
+    saveSeries(seriesObj);
+  } catch(e) { console.warn('upsertChallengeSeriesLocally failed:', e); }
+}
+
 async function syncChallenges() {
   try {
     const rows = await fetchMyChallenges();
@@ -6752,6 +6820,16 @@ async function syncChallenges() {
     });
 
     LS.set('pb_challenges', JSON.stringify(synced.slice(0, 50)));
+
+    // Update auto-growing series for each unique chain
+    const chains = {};
+    synced.forEach(c => {
+      if (!chains[c.chainId]) chains[c.chainId] = c;
+    });
+    Object.values(chains).forEach(c => {
+      const baseName = (c.mapName || 'Challenge').replace(/\s+\d+\.\d+$/, '');
+      upsertChallengeSeriesLocally(c.chainId, baseName, c.mapSlug, c.mapName).catch(() => {});
+    });
   } catch(e) { console.warn('syncChallenges failed:', e); }
 }
 
