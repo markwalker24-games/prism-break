@@ -4590,7 +4590,7 @@ function endGame(reason){
   const hasNext=inSeries && activeSeriesIdx < activeSeries.levels.length-1;
 
   const icon = isEscape ? '💎' : '💥';
-  const titleText = isEscape ? 'DIAMONDS!' : 'BLACK OUT!';
+  const titleText = 'SUCCESS!';
   const titleColor = isEscape ? '#7bbfff' : '#ff9966';
   const titleGlow = isEscape ? 'rgba(80,160,255,0.5)' : 'rgba(255,120,50,0.5)';
   const subText = isEscape ? 'All diamonds collected' : 'All bricks cleared';
@@ -4853,14 +4853,14 @@ function endGame(reason){
 
 // Message box tap - handle "tap to play again" when game is over
 msgBox.addEventListener('click',(e)=>{
-  if(e.target.closest('button,#endQuitBtn,#nextLevelBtn,#endNextBtn,#endShareBtn,#backToBuilderBtn,#endPlayAgainBtn,#endMenuBtn,#gameOverRetryBtn,#gameOverMenuBtn')) return;
+  if(e.target.closest('button,#endQuitBtn,#nextLevelBtn,#endNextBtn,#endShareBtn,#backToBuilderBtn,#endPlayAgainBtn,#endMenuBtn,#gameOverRetryBtn,#gameOverMenuBtn,#endChallengeFireBackBtn')) return;
   if(!gameOver) return;
   if(isRespawning) return; // respawn handler takes over
   if(testingLevel) return;
-  if(activeSeries) return;
-  // Tap anywhere on message = play again with same mode
-  hideMessage();
-  startGame(null, gameMode==='escape'?'escape':'blackout');
+  // Tap outside = go home
+  activeSeries=null; activeSeriesIdx=0;
+  activeChallengeCtx=null;
+  hideMessage(); showModeSelect();
 });
 
 // Single unified canvas click handler
