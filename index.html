@@ -6443,6 +6443,58 @@ function showChallengeShareOverlay(chainId, round, url) {
   ov.addEventListener('click', e => { if (e.target === ov) { ov.remove(); showModeSelect(); } });
 }
 
+function showChallengeWaitingPopup(c, onEditMap) {
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:700;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;';
+
+  const panel = document.createElement('div');
+  panel.style.cssText = "background:linear-gradient(160deg,#1a0a0a,#120808);border:1px solid rgba(220,60,60,0.4);box-shadow:0 0 30px rgba(220,60,60,0.1),0 8px 40px rgba(0,0,0,0.8);border-radius:4px;padding:26px 22px;width:min(320px,100%);display:flex;flex-direction:column;gap:14px;font-family:'Lato',sans-serif;";
+
+  // Build nudge message
+  const nudgeMsgs = [
+    `Still waiting on you for Round ${c.round} of our Prism Break challenge. 👀\n${getChallengeUrl(c.chainId, c.round)}`,
+    `You gonna play this or what? Round ${c.round} is still sitting there. 🔥\n${getChallengeUrl(c.chainId, c.round)}`,
+    `No pressure... but Round ${c.round} isn't going to beat itself. 😏\n${getChallengeUrl(c.chainId, c.round)}`,
+    `Just a reminder that I built something evil for you. Round ${c.round}. 🔥\n${getChallengeUrl(c.chainId, c.round)}`,
+  ];
+  const nudgeMsg = nudgeMsgs[Math.floor(Math.random() * nudgeMsgs.length)];
+
+  panel.innerHTML = `
+    <div style="text-align:center;">
+      <div style="font-size:32px;margin-bottom:6px;">⏳</div>
+      <div style="font-family:'Cinzel',serif;font-size:16px;font-weight:700;color:#e8d5a0;letter-spacing:1px;">${c.mapName || 'Challenge Map'}</div>
+      <div style="color:rgba(200,130,130,0.6);font-size:12px;margin-top:4px;">Round ${c.round} · Waiting for response</div>
+    </div>
+    <div style="height:1px;background:linear-gradient(90deg,transparent,rgba(220,60,60,0.2),transparent);"></div>
+    <div style="background:rgba(220,60,60,0.06);border:1px solid rgba(220,60,60,0.15);border-radius:3px;padding:12px 14px;display:flex;justify-content:space-between;align-items:center;">
+      <div style="color:rgba(200,130,130,0.6);font-family:'Cinzel',serif;font-size:9px;letter-spacing:2px;">STATUS</div>
+      <div style="color:rgba(200,160,60,0.8);font-family:'Lato',sans-serif;font-size:12px;font-weight:700;">Not beaten yet</div>
+    </div>
+    <textarea id="waitingNudgeText" readonly rows="3" style="width:100%;box-sizing:border-box;background:rgba(10,4,4,0.9);border:1px solid rgba(180,60,60,0.3);color:#e8d5a0;font-family:'Lato',sans-serif;font-size:12px;padding:10px;border-radius:3px;resize:none;line-height:1.6;cursor:text;" onclick="this.select()">${nudgeMsg}</textarea>
+    <button id="waitingNudgeBtn" style="width:100%;background:linear-gradient(180deg,rgba(80,10,10,0.98),rgba(50,5,5,0.99));border:1px solid rgba(220,60,60,0.6);border-bottom:2px solid rgba(80,10,10,0.9);color:#e63946;font-family:'Cinzel',serif;font-weight:700;font-size:13px;letter-spacing:1px;padding:13px;cursor:pointer;border-radius:3px;">📲 SEND NUDGE</button>
+    <button id="waitingEditBtn" style="width:100%;background:none;border:1px solid rgba(200,160,60,0.3);color:rgba(200,160,60,0.7);font-family:'Cinzel',serif;font-size:12px;font-weight:600;letter-spacing:1px;padding:11px;cursor:pointer;border-radius:3px;">✏️ EDIT MAP (Make it Easier)</button>
+    <button id="waitingCloseBtn" style="width:100%;background:none;border:none;color:rgba(180,100,100,0.35);font-family:'Cinzel',serif;font-size:11px;cursor:pointer;padding:4px;letter-spacing:1px;">CLOSE</button>
+  `;
+
+  ov.appendChild(panel);
+  document.body.appendChild(ov);
+
+  // Copy nudge to clipboard automatically
+  copyToClipboard(nudgeMsg, () => {}, () => {});
+
+  panel.querySelector('#waitingNudgeBtn').addEventListener('click', () => {
+    window.location.href = `sms:?body=${encodeURIComponent(nudgeMsg)}`;
+  });
+
+  panel.querySelector('#waitingEditBtn').addEventListener('click', () => {
+    ov.remove();
+    onEditMap();
+  });
+
+  panel.querySelector('#waitingCloseBtn').addEventListener('click', () => ov.remove());
+  ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+}
+
 function showChallengesScreen() {
   const challenges = getLocalChallenges();
   const rows = challenges.map(c => {
@@ -6476,7 +6528,7 @@ function showChallengesScreen() {
     rows.forEach((r, i) => {
       const row = document.createElement('div');
       row.id = 'challengeRow' + i;
-      row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-radius:4px;background:rgba(20,5,5,0.95);border:1px solid ' + (r.clickable ? 'rgba(220,60,60,0.4)' : 'rgba(220,60,60,0.12)') + ';margin-bottom:6px;cursor:' + (r.clickable ? 'pointer' : 'default') + ';';
+      row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-radius:4px;background:rgba(20,5,5,0.95);border:1px solid ' + (r.clickable || r.isWaiting ? 'rgba(220,60,60,0.25)' : 'rgba(220,60,60,0.12)') + ';margin-bottom:6px;cursor:' + (r.clickable || r.isWaiting ? 'pointer' : 'default') + ';';
       const left = document.createElement('div');
       left.style.cssText = 'display:flex;flex-direction:column;gap:3px;';
       left.innerHTML = '<div style="color:#e8d5a0;font-family:Cinzel,serif;font-size:13px;font-weight:700;">' + (r.c.mapName || 'Challenge Map') + '</div><div style="color:rgba(200,130,130,0.5);font-size:11px;">Round ' + r.c.round + '</div>';
@@ -6497,11 +6549,30 @@ function showChallengesScreen() {
 
   showMessage(container.outerHTML);
 
-  document.getElementById('challengesBackBtn').addEventListener('click', () => { hideMessage(); showModeSelect(); });
-
   rows.forEach((r, i) => {
-    if (!r.clickable) return;
+    if (!r.clickable && !r.isWaiting) return;
     document.getElementById('challengeRow' + i).addEventListener('click', async () => {
+      if (r.isWaiting) {
+        showChallengeWaitingPopup(r.c, () => {
+          // Edit Map callback
+          _challengeScreenActive = false;
+          hideMessage();
+          try {
+            loadChallengeRound(r.c.chainId, r.c.round).then(challengeRow => {
+              if (!challengeRow) { showToast('⚠️ Challenge not found'); return; }
+              loadMapBySlug(challengeRow.map_slug).then(levelData => {
+                if (!levelData) { showToast('⚠️ Map not found'); return; }
+                levelData.slug = challengeRow.map_slug;
+                pendingChallengeResponse = { chainId: r.c.chainId, round: r.c.round, recipientId: null };
+                openBuilder();
+                loadLevelIntoBuilder(levelData);
+                showBuilderToast('Make it easier, then SAVE to resend.');
+              });
+            });
+          } catch(e) { showToast('⚠️ Could not load map'); }
+        });
+        return;
+      }
       hideMessage();
       try {
         const challengeRow = await loadChallengeRound(r.c.chainId, r.c.round);
@@ -6509,6 +6580,7 @@ function showChallengesScreen() {
         const levelData = await loadMapBySlug(challengeRow.map_slug);
         if (!levelData) { showToast('⚠️ Challenge map not found'); showModeSelect(); return; }
         levelData.slug = challengeRow.map_slug;
+        _challengeScreenActive = false;
         if (r.isMyTurn) {
           activeChallengeCtx = { chainId: r.c.chainId, round: r.c.round, challengeId: challengeRow.id, senderCreatorId: challengeRow.sender_id };
           startGame(levelData);
@@ -6522,12 +6594,19 @@ function showChallengesScreen() {
     });
   });
 
-  // Sync from cloud in background and refresh
+  // Sync from cloud in background and refresh only if still on this screen
+  let _challengeScreenActive = true;
   syncChallenges().then(() => {
-    if (document.getElementById('challengesBackBtn')) showChallengesScreen();
+    if (_challengeScreenActive && document.getElementById('challengesBackBtn')) {
+      showChallengesScreen();
+    }
   }).catch(() => {});
-}
 
+  document.getElementById('challengesBackBtn').addEventListener('click', () => {
+    _challengeScreenActive = false;
+    hideMessage(); showModeSelect();
+  });
+}
 
 async function syncChallenges() {
   try {
@@ -6547,17 +6626,46 @@ async function syncChallenges() {
       round: r.round,
       challengeId: r.id,
       mapSlug: r.map_slug,
-      mapName: r.map_slug, // will be overridden below if we can get the name
+      mapName: null,
       senderId: r.sender_id,
       beaten: r.beaten,
       ts: new Date(r.created_at).getTime()
     }));
 
-    // Try to enrich with map names from local storage
+    // Try to enrich with map names from local storage first
     const localLevels = savedLevels();
     synced.forEach(c => {
-      const match = localLevels.find(l => l.slug === c.mapSlug);
+      const match = localLevels.find(l => l.slug === c.mapSlug || l.name === c.mapSlug);
       if (match) c.mapName = match.name;
+    });
+
+    // For any still missing, fetch from Supabase maps table
+    const missing = synced.filter(c => !c.mapName);
+    if (missing.length) {
+      const slugList = missing.map(c => `"${c.mapSlug}"`).join(',');
+      const res = await fetch(
+        `${SUPA_URL}/rest/v1/maps?slug=in.(${slugList})&select=slug,name`,
+        { headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` } }
+      );
+      if (res.ok) {
+        const mapRows = await res.json();
+        const slugToName = {};
+        mapRows.forEach(m => { slugToName[m.slug] = m.name; });
+        synced.forEach(c => {
+          if (!c.mapName && slugToName[c.mapSlug]) c.mapName = slugToName[c.mapSlug];
+        });
+      }
+    }
+
+    // Final fallback - clean up the slug into something readable
+    synced.forEach(c => {
+      if (!c.mapName) {
+        // Strip trailing random suffix (e.g. "my-map-7o7gb" → "My Map")
+        c.mapName = c.mapSlug
+          .replace(/-[a-z0-9]{4,6}$/, '')
+          .replace(/-/g, ' ')
+          .replace(/\b\w/g, l => l.toUpperCase());
+      }
     });
 
     LS.set('pb_challenges', JSON.stringify(synced.slice(0, 50)));
