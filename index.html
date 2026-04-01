@@ -4488,6 +4488,11 @@ document.getElementById('builderSaveBtn').addEventListener('click',()=>{
       document.getElementById('saveOverlay').style.display='flex';
     });
     ov.querySelector('#saveCancel').addEventListener('click',()=>ov.remove());
+  } else if (pendingChallengeResponse) {
+    // Fire-back mode - skip name dialog, trigger save directly with placeholder name
+    pendingSaveBricks = saveable;
+    document.getElementById('levelNameInput').value = pendingChallengeResponse.baseName || 'Challenge';
+    document.getElementById('confirmSaveBtn').click();
   } else {
     openSaveDialog(saveable);
   }
@@ -4503,23 +4508,31 @@ document.getElementById('confirmSaveBtn').addEventListener('click', async ()=>{
   document.getElementById('saveOverlay').style.display='none';
   builderCurrentLevelName=name;
 
-  // If this is a challenge response, create next round and show share overlay
+  // If this is a challenge response, create next round automatically
   if (pendingChallengeResponse) {
-    const { chainId, round, recipientId } = pendingChallengeResponse;
+    const { chainId, round, recipientId, baseName } = pendingChallengeResponse;
     pendingChallengeResponse = null;
+    // Auto-name: "MapName 2.0", "MapName 3.0" etc
+    const autoName = baseName ? `${baseName} ${round}.0` : name;
     try {
       const bricks = Array.isArray(pendingSaveBricks) ? pendingSaveBricks : (pendingSaveBricks.bricks || []);
-      const slug = await upsertMapToCloud({ name, bricks, creator_id: CREATOR_ID });
+      const slug = await upsertMapToCloud({ name: autoName, bricks, creator_id: CREATOR_ID });
       await createNextRound(chainId, round, slug, CREATOR_ID, recipientId);
+      // Save to local challenges as sender of this new round
       const all = getLocalChallenges();
-      all.unshift({ chainId, round, challengeId: null, mapSlug: slug, mapName: name, senderId: CREATOR_ID, beaten: false, ts: Date.now() });
+      all.unshift({ chainId, round, challengeId: null, mapSlug: slug, mapName: autoName, senderId: CREATOR_ID, beaten: false, ts: Date.now() });
       LS.set('pb_challenges', JSON.stringify(all.slice(0, 50)));
-      const url = getChallengeUrl(chainId, round);
+      // Reset builder UI
+      const saveBtn = document.getElementById('builderSaveBtn');
+      if (saveBtn) { saveBtn.textContent = '💾 SAVE'; saveBtn.style.background = ''; saveBtn.style.borderColor = ''; saveBtn.style.color = ''; }
+      const mapsBtn = document.getElementById('builderMapsBtn');
+      if (mapsBtn) mapsBtn.style.display = '';
       closeBuilder();
-      showChallengeShareOverlay(chainId, round, url);
+      showToast(`🔥 "${autoName}" fired back! It'll appear in their challenge list.`);
+      showModeSelect();
     } catch(e) {
       console.error('Challenge round create failed:', e);
-      showBuilderToast('Could not send challenge - try again');
+      showBuilderToast('Could not fire back - try again');
     }
   } else {
     showBuilderToast(`"${name}" saved!`);
@@ -6410,11 +6423,16 @@ function showChallengeWinCTA(chainId, round, challengeId, senderCreatorId, level
   panel.querySelector('#challengeFireBackBtn').addEventListener('click', () => {
     ov.remove();
     hideMessage();
-    // Pre-load builder with current map, then on save fire createNextRound
-    pendingChallengeResponse = { chainId, round: nextRound, recipientId: senderCreatorId };
+    // Derive base name (strip version suffix like " 2.0", " 3.0")
+    const baseName = (levelData.name || 'Challenge').replace(/\s+\d+\.\d+$/, '');
+    pendingChallengeResponse = { chainId, round: nextRound, recipientId: senderCreatorId, baseName };
     openBuilder();
     loadLevelIntoBuilder(levelData);
-    showBuilderToast('🔥 Make it harder, then SAVE to fire back!');
+    // Modify builder UI for fire-back mode
+    const saveBtn = document.getElementById('builderSaveBtn');
+    if (saveBtn) { saveBtn.textContent = '🔥 FIRE BACK'; saveBtn.style.background = 'linear-gradient(180deg,rgba(80,10,10,0.98),rgba(50,5,5,0.99))'; saveBtn.style.borderColor = 'rgba(220,60,60,0.7)'; saveBtn.style.color = '#e63946'; }
+    const mapsBtn = document.getElementById('builderMapsBtn');
+    if (mapsBtn) mapsBtn.style.display = 'none';
   });
 
   panel.querySelector('#challengeSkipBtn').addEventListener('click', () => {
@@ -6526,13 +6544,14 @@ function showChallengesScreen() {
     const isMyTurn = !iMSent && !c.beaten;
     const fireBack = iMSent && c.beaten;
     const isWaiting = iMSent && !c.beaten;
+    const awaitingFireBack = !iMSent && c.beaten;
     let statusText, statusColor, clickable;
-    if (isMyTurn)       { statusText = '🔴 YOUR TURN'; statusColor = '#e63946'; clickable = true; }
-    else if (fireBack)  { statusText = '🔥 FIRE BACK'; statusColor = '#e63946'; clickable = true; }
-    else if (isWaiting) { statusText = '⏳ WAITING';   statusColor = 'rgba(200,160,60,0.7)'; clickable = false; }
-    else                { statusText = '✓ BEATEN';     statusColor = 'rgba(100,180,100,0.7)'; clickable = false; }
-    return { c, statusText, statusColor, clickable, isMyTurn, fireBack, isWaiting };
-  });
+    if (isMyTurn)           { statusText = '🔴 YOUR TURN';        statusColor = '#e63946'; clickable = true; }
+    else if (fireBack)      { statusText = '🔥 FIRE BACK';        statusColor = '#e63946'; clickable = true; }
+    else if (isWaiting)     { statusText = '⏳ WAITING';          statusColor = 'rgba(200,160,60,0.7)'; clickable = false; }
+    else if (awaitingFireBack) { statusText = '⏳ AWAITING FIRE BACK'; statusColor = 'rgba(200,160,60,0.7)'; clickable = false; }
+    return { c, statusText, statusColor, clickable, isMyTurn, fireBack, isWaiting, awaitingFireBack };
+  }).filter(r => r !== null);
 
   const container = document.createElement('div');
   container.style.cssText = "width:min(340px,92vw);display:flex;flex-direction:column;gap:0;font-family:'Lato',sans-serif;";
@@ -6609,10 +6628,14 @@ function showChallengesScreen() {
           activeChallengeCtx = { chainId: r.c.chainId, round: r.c.round, challengeId: challengeRow.id, senderCreatorId: challengeRow.sender_id };
           startGame(levelData);
         } else if (r.fireBack) {
-          pendingChallengeResponse = { chainId: r.c.chainId, round: r.c.round + 1, recipientId: null };
+          const baseName = (levelData.name || 'Challenge').replace(/\s+\d+\.\d+$/, '');
+          pendingChallengeResponse = { chainId: r.c.chainId, round: r.c.round + 1, recipientId: null, baseName };
           openBuilder();
           loadLevelIntoBuilder(levelData);
-          showBuilderToast('🔥 Edit the map and SAVE to fire back!');
+          const saveBtn = document.getElementById('builderSaveBtn');
+          if (saveBtn) { saveBtn.textContent = '🔥 FIRE BACK'; saveBtn.style.background = 'linear-gradient(180deg,rgba(80,10,10,0.98),rgba(50,5,5,0.99))'; saveBtn.style.borderColor = 'rgba(220,60,60,0.7)'; saveBtn.style.color = '#e63946'; }
+          const mapsBtn = document.getElementById('builderMapsBtn');
+          if (mapsBtn) mapsBtn.style.display = 'none';
         }
       } catch(e) { showToast('⚠️ Could not load challenge'); showModeSelect(); }
     });
