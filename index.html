@@ -2911,84 +2911,6 @@ function renderLevelList(){
       list.appendChild(el);
     }
 
-    // ── ZONE 1.5: CHALLENGES ─────────────────────────────────────
-    list.appendChild(zoneHeader('CHALLENGES', '#e63946', 'rgba(220,60,60,0.35)'));
-    const localChallenges = getLocalChallenges();
-    if (localChallenges.length) {
-      localChallenges.forEach((c) => {
-        const iMSent = c.senderId === CREATOR_ID;
-        // MY TURN: someone sent me a round I haven't beaten
-        const isMyTurn = !iMSent && !c.beaten;
-        // WAITING: I sent a round, they haven't beaten it
-        const isWaiting = iMSent && !c.beaten;
-        // MAKE IT WINNABLE: I sent it, they beat it — now I need to respond
-        // (beaten=true AND I was the sender means they beat my map, ball is in my court)
-        // Actually beaten=true AND senderId===CREATOR_ID means THEY beat MY map
-        // We detect this via: senderId===CREATOR_ID && beaten===true
-        const makeitwinnable = iMSent && c.beaten;
-
-        let statusBadge, statusColor, clickable;
-        if (isMyTurn) {
-          statusBadge = '🔴 YOUR TURN'; statusColor = '#e63946'; clickable = true;
-        } else if (makeitwinnable) {
-          statusBadge = '🔥 FIRE BACK'; statusColor = '#e63946'; clickable = true;
-        } else if (isWaiting) {
-          statusBadge = '⏳ WAITING'; statusColor = 'rgba(200,160,60,0.7)'; clickable = false;
-        } else {
-          statusBadge = '✓ BEATEN'; statusColor = 'rgba(100,180,100,0.7)'; clickable = false;
-        }
-
-        const row = document.createElement('div');
-        row.style.cssText = `width:100%;display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-radius:4px;box-sizing:border-box;background:rgba(20,5,5,0.95);border:1px solid ${clickable?'rgba(220,60,60,0.4)':'rgba(220,60,60,0.15)'};margin-bottom:5px;cursor:${clickable?'pointer':'default'};transition:border-color 0.15s;`;
-        row.innerHTML = `
-          <div style="display:flex;flex-direction:column;gap:3px;">
-            <div style="color:#e8d5a0;font-family:'Cinzel',serif;font-size:12px;font-weight:700;">${c.mapName || 'Challenge Map'}</div>
-            <div style="color:rgba(200,130,130,0.6);font-family:'Lato',sans-serif;font-size:11px;">Round ${c.round}</div>
-          </div>
-          <div style="color:${statusColor};font-family:'Cinzel',serif;font-size:10px;font-weight:700;letter-spacing:0.5px;text-align:right;">${statusBadge}</div>
-        `;
-
-        if (isMyTurn) {
-          row.addEventListener('click', async () => {
-            closeLevelSelect();
-            try {
-              const challengeRow = await loadChallengeRound(c.chainId, c.round);
-              if (!challengeRow) { showToast('⚠️ Challenge not found'); return; }
-              const levelData = await loadMapBySlug(challengeRow.map_slug);
-              if (!levelData) { showToast('⚠️ Challenge map not found'); return; }
-              levelData.slug = challengeRow.map_slug;
-              activeChallengeCtx = { chainId: c.chainId, round: c.round, challengeId: challengeRow.id, senderCreatorId: challengeRow.sender_id };
-              startGame(levelData);
-            } catch(e) { showToast('⚠️ Could not load challenge'); }
-          });
-        } else if (makeitwinnable) {
-          // They beat my map - I need to fire back with a new (possibly easier) round
-          row.addEventListener('click', async () => {
-            closeLevelSelect();
-            try {
-              const challengeRow = await loadChallengeRound(c.chainId, c.round);
-              if (!challengeRow) { showToast('⚠️ Challenge not found'); return; }
-              const levelData = await loadMapBySlug(challengeRow.map_slug);
-              if (!levelData) { showToast('⚠️ Challenge map not found'); return; }
-              levelData.slug = challengeRow.map_slug;
-              // Open builder pre-loaded, next round goes back to them
-              pendingChallengeResponse = { chainId: c.chainId, round: c.round + 1, recipientId: null };
-              openBuilder();
-              loadLevelIntoBuilder(levelData);
-              showBuilderToast('🔥 Edit the map and SAVE to fire back!');
-            } catch(e) { showToast('⚠️ Could not load challenge'); }
-          });
-        }
-
-        list.appendChild(row);
-      });
-    } else {
-      const el = document.createElement('div');
-      el.style.cssText = "color:rgba(220,60,60,0.35);font-family:'Lato',sans-serif;font-size:12px;text-align:center;padding:14px 0 6px;letter-spacing:0.3px;";
-      el.textContent = 'No active challenges — send one from a map you built.';
-      list.appendChild(el);
-    }
-
     // ── ZONE 2: COMMUNITY MAPS ───────────────────────────────────
     list.appendChild(zoneHeader('COMMUNITY MAPS', '#2ec4b6', 'rgba(46,196,182,0.35)'));
     if (publicSeries.length || publicStandaloneMaps.length) {
@@ -4717,16 +4639,26 @@ function endGame(reason){
     'Make one that beats this 🔨',
   ];
   const buildPromptLabel = isSeriesComplete ? 'BUILD YOUR OWN SERIES 🔨' : buildPromptMsgs[Math.floor(Math.random() * buildPromptMsgs.length)];
+  const isRandomMode = !currentLevelData || !currentLevelData.name;
+
   const middleBtn = isChallengeMap
     ? `<button id="endChallengeFireBackBtn" style="${btnStyle('#e63946','rgba(50,5,5,0.98)')}">🔥 MAKE IT HARDER</button>`
-    : showBuildPrompt
-      ? `<button id="endBuildBtn" style="${btnStyle('#f5c842', isSeriesComplete ? 'rgba(60,44,8,0.98)' : 'rgba(40,28,5,0.95)')}">${buildPromptLabel}</button>`
-      : `<button id="endShareBtn" style="${btnStyle('#f5c842','rgba(40,28,5,0.95)')}">SHARE THIS MAP</button>`;
+    : isRandomMode
+      ? `` // no middle button for random mode
+      : showBuildPrompt
+        ? `<button id="endBuildBtn" style="${btnStyle('#f5c842', isSeriesComplete ? 'rgba(60,44,8,0.98)' : 'rgba(40,28,5,0.95)')}">${buildPromptLabel}</button>`
+        : `<button id="endShareBtn" style="${btnStyle('#f5c842','rgba(40,28,5,0.95)')}">SHARE THIS MAP</button>`;
 
   // Always show the 3 CTAs on a win (except when testing in builder)
   let buttons='';
   if(testingLevel){
     buttons=`<button id="backToBuilderBtn" style="${btnStyle('#2ec4b6','rgba(5,30,30,0.9)')}">↩ Back to Builder</button>`;
+  } else if(isRandomMode){
+    buttons=`
+      <button id="endNextBtn" style="${btnStyle('#2ec4b6','rgba(5,25,28,0.95)')}">▶ Play Another</button>
+      <button id="endPlayAgainBtn" style="${btnStyle(titleColor,'rgba(10,15,30,0.95)')}">↺ Play It Again</button>
+      <button id="endMenuBtn" style="${ghostBtn}">Home</button>
+    `;
   } else {
     buttons=`
       <button id="endNextBtn" style="${btnStyle('#2ec4b6','rgba(5,25,28,0.95)')}">▶ Next Level</button>
@@ -4828,15 +4760,17 @@ function endGame(reason){
     }, 1500);
   }
 
-  // Next Level
+  // Next Level / Play Another
   document.getElementById('endNextBtn').addEventListener('click',()=>{
-    if(hasNext){
+    if(isRandomMode){
+      hideMessage();
+      startGame(null, gameMode);
+    } else if(hasNext){
       activeSeriesIdx++;
       saveSeriesProgress(activeSeries.name, activeSeriesIdx);
       hideMessage();
       startGame(activeSeries.levels[activeSeriesIdx]);
     } else {
-      // No next level - go to menu so they can pick another
       activeSeries=null; activeSeriesIdx=0;
       hideMessage(); showModeSelect();
     }
@@ -4988,6 +4922,22 @@ function showModeSelect(){
       <span>CHOOSE MAP</span>
     </button>
 
+    <!-- Challenges -->
+    <button id="modeChallenges" style="
+      width:100%;
+      background:linear-gradient(160deg,rgba(30,5,5,0.97),rgba(18,3,3,0.98));
+      border:1px solid rgba(220,60,60,0.45);
+      box-shadow:0 2px 12px rgba(0,0,0,0.5),inset 0 1px 0 rgba(255,80,80,0.08);
+      color:#e63946;
+      font-family:'Cinzel',serif;font-size:13px;font-weight:700;letter-spacing:1px;
+      padding:12px 14px;cursor:pointer;border-radius:4px;
+      display:flex;align-items:center;justify-content:center;gap:10px;
+      touch-action:manipulation;">
+      <span style="font-size:16px;">🔥</span>
+      <span>CHALLENGES</span>
+      <span id="challengeBadge" style="display:none;background:#e63946;color:#fff;font-family:'Lato',sans-serif;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;letter-spacing:0;"></span>
+    </button>
+
     <!-- Leaderboard button -->
     <button id="modeLeaderboard" style="
       width:100%;
@@ -5073,7 +5023,7 @@ function showModeSelect(){
   showMessage(html);
 
   // Stone press effect
-  ['modeBreakout','modeBlackout','modeBuilder','modeSelectLevel','modeHardcoded0'].forEach(id=>{
+  ['modeBreakout','modeBlackout','modeBuilder','modeSelectLevel','modeChallenges','modeHardcoded0'].forEach(id=>{
     const el = document.getElementById(id);
     if(!el) return;
     el.addEventListener('mousedown', ()=>{ el.style.transform='scale(0.97) translateY(1px)'; el.style.transition='transform 0.08s'; });
@@ -5081,6 +5031,16 @@ function showModeSelect(){
     el.addEventListener('touchstart', ()=>{ el.style.transform='scale(0.97) translateY(1px)'; el.style.transition='transform 0.08s'; },{passive:true});
     el.addEventListener('touchend',   ()=>{ el.style.transform=''; });
   });
+
+  // Show live challenge badge
+  const activeChallengeCount = getLocalChallenges().filter(c => !c.senderId || c.senderId !== CREATOR_ID ? !c.beaten : false).length;
+  const badge = document.getElementById('challengeBadge');
+  if (badge && activeChallengeCount > 0) {
+    badge.textContent = activeChallengeCount;
+    badge.style.display = 'inline-block';
+  }
+
+  document.getElementById('modeChallenges').addEventListener('click', () => { hideMessage(); showChallengesScreen(); });
 
   // Featured quest button (series index 0 only)
   const featuredBtn = document.getElementById('modeHardcoded0');
@@ -6482,6 +6442,92 @@ function showChallengeShareOverlay(chainId, round, url) {
   panel.querySelector('#challengeDoneBtn').addEventListener('click', () => { ov.remove(); showModeSelect(); });
   ov.addEventListener('click', e => { if (e.target === ov) { ov.remove(); showModeSelect(); } });
 }
+
+function showChallengesScreen() {
+  const challenges = getLocalChallenges();
+  const rows = challenges.map(c => {
+    const iMSent = c.senderId === CREATOR_ID;
+    const isMyTurn = !iMSent && !c.beaten;
+    const fireBack = iMSent && c.beaten;
+    const isWaiting = iMSent && !c.beaten;
+    let statusText, statusColor, clickable;
+    if (isMyTurn)       { statusText = '🔴 YOUR TURN'; statusColor = '#e63946'; clickable = true; }
+    else if (fireBack)  { statusText = '🔥 FIRE BACK'; statusColor = '#e63946'; clickable = true; }
+    else if (isWaiting) { statusText = '⏳ WAITING';   statusColor = 'rgba(200,160,60,0.7)'; clickable = false; }
+    else                { statusText = '✓ BEATEN';     statusColor = 'rgba(100,180,100,0.7)'; clickable = false; }
+    return { c, statusText, statusColor, clickable, isMyTurn, fireBack };
+  });
+
+  const container = document.createElement('div');
+  container.style.cssText = "width:min(340px,92vw);display:flex;flex-direction:column;gap:0;font-family:'Lato',sans-serif;";
+
+  // Header
+  const hdr = document.createElement('div');
+  hdr.style.cssText = 'text-align:center;margin-bottom:14px;';
+  hdr.innerHTML = '<div style="font-family:Cinzel,serif;font-size:18px;font-weight:700;color:#e63946;letter-spacing:2px;text-shadow:0 0 16px rgba(220,60,60,0.4);">🔥 CHALLENGES</div><div style="height:1px;background:linear-gradient(90deg,transparent,rgba(220,60,60,0.4),transparent);margin-top:8px;"></div>';
+  container.appendChild(hdr);
+
+  if (!rows.length) {
+    const empty = document.createElement('div');
+    empty.style.cssText = 'color:rgba(220,60,60,0.35);font-size:13px;text-align:center;padding:24px 0;line-height:1.8;';
+    empty.innerHTML = 'No active challenges.<br><span style="font-size:11px;color:rgba(200,130,130,0.4);">Send one from a map in the Map Builder.</span>';
+    container.appendChild(empty);
+  } else {
+    rows.forEach((r, i) => {
+      const row = document.createElement('div');
+      row.id = 'challengeRow' + i;
+      row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-radius:4px;background:rgba(20,5,5,0.95);border:1px solid ' + (r.clickable ? 'rgba(220,60,60,0.4)' : 'rgba(220,60,60,0.12)') + ';margin-bottom:6px;cursor:' + (r.clickable ? 'pointer' : 'default') + ';';
+      const left = document.createElement('div');
+      left.style.cssText = 'display:flex;flex-direction:column;gap:3px;';
+      left.innerHTML = '<div style="color:#e8d5a0;font-family:Cinzel,serif;font-size:13px;font-weight:700;">' + (r.c.mapName || 'Challenge Map') + '</div><div style="color:rgba(200,130,130,0.5);font-size:11px;">Round ' + r.c.round + '</div>';
+      const right = document.createElement('div');
+      right.style.cssText = "color:" + r.statusColor + ";font-family:'Cinzel',serif;font-size:10px;font-weight:700;letter-spacing:0.5px;";
+      right.textContent = r.statusText;
+      row.appendChild(left);
+      row.appendChild(right);
+      container.appendChild(row);
+    });
+  }
+
+  const backBtn = document.createElement('button');
+  backBtn.id = 'challengesBackBtn';
+  backBtn.style.cssText = "width:100%;background:none;border:none;color:rgba(180,100,100,0.45);font-family:'Cinzel',serif;font-size:12px;cursor:pointer;padding:10px;letter-spacing:1px;margin-top:4px;";
+  backBtn.textContent = 'BACK';
+  container.appendChild(backBtn);
+
+  showMessage(container.outerHTML);
+
+  document.getElementById('challengesBackBtn').addEventListener('click', () => { hideMessage(); showModeSelect(); });
+
+  rows.forEach((r, i) => {
+    if (!r.clickable) return;
+    document.getElementById('challengeRow' + i).addEventListener('click', async () => {
+      hideMessage();
+      try {
+        const challengeRow = await loadChallengeRound(r.c.chainId, r.c.round);
+        if (!challengeRow) { showToast('⚠️ Challenge not found'); showModeSelect(); return; }
+        const levelData = await loadMapBySlug(challengeRow.map_slug);
+        if (!levelData) { showToast('⚠️ Challenge map not found'); showModeSelect(); return; }
+        levelData.slug = challengeRow.map_slug;
+        if (r.isMyTurn) {
+          activeChallengeCtx = { chainId: r.c.chainId, round: r.c.round, challengeId: challengeRow.id, senderCreatorId: challengeRow.sender_id };
+          startGame(levelData);
+        } else if (r.fireBack) {
+          pendingChallengeResponse = { chainId: r.c.chainId, round: r.c.round + 1, recipientId: null };
+          openBuilder();
+          loadLevelIntoBuilder(levelData);
+          showBuilderToast('🔥 Edit the map and SAVE to fire back!');
+        }
+      } catch(e) { showToast('⚠️ Could not load challenge'); showModeSelect(); }
+    });
+  });
+
+  // Sync from cloud in background and refresh
+  syncChallenges().then(() => {
+    if (document.getElementById('challengesBackBtn')) showChallengesScreen();
+  }).catch(() => {});
+}
+
 
 async function syncChallenges() {
   try {
