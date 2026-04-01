@@ -4771,20 +4771,22 @@ function endGame(reason){
   }
 
   // Next Level / Play Another
-  document.getElementById('endNextBtn').addEventListener('click',()=>{
-    if(isRandomMode){
-      hideMessage();
-      startGame(null, gameMode);
-    } else if(hasNext){
-      activeSeriesIdx++;
-      saveSeriesProgress(activeSeries.name, activeSeriesIdx);
-      hideMessage();
-      startGame(activeSeries.levels[activeSeriesIdx]);
-    } else {
-      activeSeries=null; activeSeriesIdx=0;
-      hideMessage(); showModeSelect();
-    }
-  });
+  if(document.getElementById('endNextBtn')){
+    document.getElementById('endNextBtn').addEventListener('click',()=>{
+      if(isRandomMode){
+        hideMessage();
+        startGame(null, gameMode);
+      } else if(hasNext){
+        activeSeriesIdx++;
+        saveSeriesProgress(activeSeries.name, activeSeriesIdx);
+        hideMessage();
+        startGame(activeSeries.levels[activeSeriesIdx]);
+      } else {
+        activeSeries=null; activeSeriesIdx=0;
+        hideMessage(); showModeSelect();
+      }
+    });
+  }
 
   // Build Your Own (shown instead of share on received maps)
   if(document.getElementById('endBuildBtn')){
