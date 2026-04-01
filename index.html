@@ -4513,29 +4513,43 @@ document.getElementById('confirmSaveBtn').addEventListener('click', async ()=>{
 
   // If this is a challenge response, create next round automatically
   if (pendingChallengeResponse) {
-    const { chainId, round, recipientId, baseName } = pendingChallengeResponse;
+    const { chainId, round, recipientId, baseName, updateExisting, existingChallengeId } = pendingChallengeResponse;
     pendingChallengeResponse = null;
-    // Auto-name: "MapName 2.0", "MapName 3.0" etc
     const autoName = baseName ? `${baseName} ${round}.0` : name;
     try {
       const fullData = { ...pendingSaveBricks, name: autoName, creator_id: CREATOR_ID };
       const slug = await upsertMapToCloud(fullData);
-      await createNextRound(chainId, round, slug, CREATOR_ID, recipientId);
-      // Save to local challenges as sender of this new round
-      const all = getLocalChallenges();
-      all.unshift({ chainId, round, challengeId: null, mapSlug: slug, mapName: autoName, senderId: CREATOR_ID, beaten: false, ts: Date.now() });
-      LS.set('pb_challenges', JSON.stringify(all.slice(0, 50)));
+
+      if (updateExisting && existingChallengeId) {
+        // Patch the existing challenge row's map_slug - no new round created
+        await fetch(`${SUPA_URL}/rest/v1/challenges?id=eq.${existingChallengeId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type':'application/json','apikey':SUPA_KEY,'Authorization':`Bearer ${SUPA_KEY}`,'Prefer':'return=minimal' },
+          body: JSON.stringify({ map_slug: slug })
+        });
+        // Update local cache
+        const all = getLocalChallenges();
+        const entry = all.find(c => c.chainId === chainId && c.round === round);
+        if (entry) { entry.mapSlug = slug; entry.mapName = autoName; LS.set('pb_challenges', JSON.stringify(all)); }
+      } else {
+        // Fire-back - create new round
+        await createNextRound(chainId, round, slug, CREATOR_ID, recipientId);
+        const all = getLocalChallenges();
+        all.unshift({ chainId, round, challengeId: null, mapSlug: slug, mapName: autoName, senderId: CREATOR_ID, beaten: false, ts: Date.now() });
+        LS.set('pb_challenges', JSON.stringify(all.slice(0, 50)));
+      }
+
       // Reset builder UI
       const saveBtn = document.getElementById('builderSaveBtn');
       if (saveBtn) { saveBtn.textContent = '💾 SAVE'; saveBtn.style.background = ''; saveBtn.style.borderColor = ''; saveBtn.style.color = ''; }
       const mapsBtn = document.getElementById('builderMapsBtn');
       if (mapsBtn) mapsBtn.style.display = '';
       closeBuilder();
-      showToast(`🔥 "${autoName}" fired back! It'll appear in their challenge list.`);
+      showToast(updateExisting ? `✓ Challenge updated — they'll see the new version.` : `🔥 "${autoName}" fired back!`);
       showModeSelect();
     } catch(e) {
-      console.error('Challenge round create failed:', e);
-      showBuilderToast('Could not fire back - try again');
+      console.error('Challenge save failed:', e);
+      showBuilderToast('Could not save - try again');
     }
   } else {
     showBuilderToast(`"${name}" saved!`);
@@ -6600,7 +6614,7 @@ function showChallengesScreen() {
     document.getElementById('challengeRow' + i).addEventListener('click', async () => {
       if (r.isWaiting) {
         showChallengeWaitingPopup(r.c, () => {
-          // Edit Map callback
+          // Edit Map callback - update existing round, not create new one
           _challengeScreenActive = false;
           hideMessage();
           try {
@@ -6609,10 +6623,21 @@ function showChallengesScreen() {
               loadMapBySlug(challengeRow.map_slug).then(levelData => {
                 if (!levelData) { showToast('⚠️ Map not found'); return; }
                 levelData.slug = challengeRow.map_slug;
-                pendingChallengeResponse = { chainId: r.c.chainId, round: r.c.round, recipientId: null };
+                const baseName = (r.c.mapName || 'Challenge').replace(/\s+\d+\.\d+$/, '');
+                pendingChallengeResponse = {
+                  chainId: r.c.chainId,
+                  round: r.c.round,
+                  recipientId: null,
+                  baseName,
+                  updateExisting: true,        // patch this round, don't create new
+                  existingChallengeId: challengeRow.id
+                };
                 openBuilder();
                 loadLevelIntoBuilder(levelData);
-                showBuilderToast('Make it easier, then SAVE to resend.');
+                const saveBtn = document.getElementById('builderSaveBtn');
+                if (saveBtn) { saveBtn.textContent = '🔥 RESEND'; saveBtn.style.background = 'linear-gradient(180deg,rgba(80,10,10,0.98),rgba(50,5,5,0.99))'; saveBtn.style.borderColor = 'rgba(220,60,60,0.7)'; saveBtn.style.color = '#e63946'; }
+                const mapsBtn = document.getElementById('builderMapsBtn');
+                if (mapsBtn) mapsBtn.style.display = 'none';
               });
             });
           } catch(e) { showToast('⚠️ Could not load map'); }
