@@ -4753,16 +4753,20 @@ function endGame(reason){
     return;
   }
 
-  // Rating triggers - show after a short delay so win card is visible first
+  // Rating triggers - only show if not already rated
   if (shouldRateMap) {
     setTimeout(async () => {
       const slug = currentLevelData.slug;
-      if (slug) showStarRating(slug, 'map', null);
+      if (!slug) return;
+      const existing = await fetchMyRating(slug, 'map').catch(() => null);
+      if (!existing) showStarRating(slug, 'map', null);
     }, 1200);
   } else if (shouldRateSeries) {
     setTimeout(async () => {
       const slug = activeSeries.slug;
-      if (slug) showStarRating(slug, 'series', null);
+      if (!slug) return;
+      const existing = await fetchMyRating(slug, 'series').catch(() => null);
+      if (!existing) showStarRating(slug, 'series', null);
     }, 1500);
   }
 
