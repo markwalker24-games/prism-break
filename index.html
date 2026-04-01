@@ -6574,13 +6574,13 @@ function showChallengesScreen() {
         return;
       }
       hideMessage();
+      _challengeScreenActive = false;
       try {
         const challengeRow = await loadChallengeRound(r.c.chainId, r.c.round);
         if (!challengeRow) { showToast('⚠️ Challenge not found'); showModeSelect(); return; }
         const levelData = await loadMapBySlug(challengeRow.map_slug);
         if (!levelData) { showToast('⚠️ Challenge map not found'); showModeSelect(); return; }
         levelData.slug = challengeRow.map_slug;
-        _challengeScreenActive = false;
         if (r.isMyTurn) {
           activeChallengeCtx = { chainId: r.c.chainId, round: r.c.round, challengeId: challengeRow.id, senderCreatorId: challengeRow.sender_id };
           startGame(levelData);
@@ -6596,9 +6596,17 @@ function showChallengesScreen() {
 
   // Sync from cloud in background and refresh only if still on this screen
   let _challengeScreenActive = true;
-  syncChallenges().then(() => {
-    if (_challengeScreenActive && document.getElementById('challengesBackBtn')) {
-      showChallengesScreen();
+  fetchMyChallenges().then(rows => {
+    if (!_challengeScreenActive) return;
+    if (!rows.length) return;
+    // Quick check - if counts differ, re-render
+    const current = getLocalChallenges();
+    if (rows.length !== current.length) {
+      syncChallenges().then(() => {
+        if (_challengeScreenActive && document.getElementById('challengesBackBtn')) {
+          showChallengesScreen();
+        }
+      });
     }
   }).catch(() => {});
 
