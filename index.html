@@ -6704,27 +6704,39 @@ function showChallengesScreen() {
 // Called any time a challenge round map is available locally
 async function upsertChallengeSeriesLocally(chainId, baseName, newMapSlug, newMapName) {
   try {
-    // Fetch all rounds for this chain from Supabase in order
+    // Fetch all rounds for this chain, ordered by round then created_at
     const res = await fetch(
-      `${SUPA_URL}/rest/v1/challenges?chain_id=eq.${chainId}&order=round.asc&select=round,map_slug`,
+      `${SUPA_URL}/rest/v1/challenges?chain_id=eq.${chainId}&order=round.asc,created_at.desc&select=round,map_slug,created_at`,
       { headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` } }
     );
     if (!res.ok) return;
-    const rounds = await res.json();
+    const rows = await res.json();
 
-    // Fetch map data for each round
+    // Deduplicate: one entry per round number, keep the first (latest created_at due to desc order)
+    const seenRounds = new Set();
+    const uniqueRounds = [];
+    for (const r of rows) {
+      if (!seenRounds.has(r.round)) {
+        seenRounds.add(r.round);
+        uniqueRounds.push(r);
+      }
+    }
+    // Re-sort ascending by round
+    uniqueRounds.sort((a, b) => a.round - b.round);
+
+    // Fetch map data for each unique round
     const levels = [];
-    for (const r of rounds) {
-      // Try local first
-      const local = savedLevels().find(l => l.slug === r.map_slug);
+    for (const r of uniqueRounds) {
+      const mapName = r.round === 1 ? baseName : `${baseName} ${r.round}.0`;
+      // Try local first by slug or name
+      const local = savedLevels().find(l => l.slug === r.map_slug || l.name === mapName);
       if (local) {
-        levels.push(local);
+        levels.push({ ...local, name: mapName, _challenge: true });
       } else {
         try {
           const data = await loadMapBySlug(r.map_slug);
           if (data) {
-            // Auto-name: baseName, baseName 2.0, baseName 3.0...
-            data.name = r.round === 1 ? baseName : `${baseName} ${r.round}.0`;
+            data.name = mapName;
             data.slug = r.map_slug;
             data._challenge = true;
             levels.push(data);
@@ -6735,18 +6747,15 @@ async function upsertChallengeSeriesLocally(chainId, baseName, newMapSlug, newMa
 
     if (!levels.length) return;
 
-    // Save/update the series locally
-    const seriesName = baseName;
     const existing = savedSeries().find(s => s._challengeChainId === chainId);
     const seriesObj = {
-      name: seriesName,
+      name: existing ? existing.name : baseName,
       description: `Challenge chain · ${levels.length} round${levels.length !== 1 ? 's' : ''}`,
       levels,
       is_public: false,
       _challengeChainId: chainId,
       _isChallengeSeries: true,
     };
-    if (existing) seriesObj.name = existing.name; // preserve if renamed
     saveSeries(seriesObj);
   } catch(e) { console.warn('upsertChallengeSeriesLocally failed:', e); }
 }
