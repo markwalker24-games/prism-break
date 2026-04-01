@@ -4448,6 +4448,14 @@ document.getElementById('builderSaveBtn').addEventListener('click',()=>{
       isKey:b.isKey, isLock:b.isLock, isDiamond:b.isDiamond||false,
       isWhite:b.isWhite||false, isSkull:b.isSkull||false, isReverse:b.isReverse||false, isBomb:b.isBomb||false, hit:0, cooldown:0 })) };
 
+  // Fire-back mode - bypass all dialogs, auto-name and save
+  if (pendingChallengeResponse) {
+    pendingSaveBricks = saveable;
+    document.getElementById('levelNameInput').value = pendingChallengeResponse.baseName || 'Challenge';
+    document.getElementById('confirmSaveBtn').click();
+    return;
+  }
+
   // If editing an existing level, warn before overwriting
   if(builderCurrentLevelName){
     // Check if the loaded map is owned by this user
@@ -4488,11 +4496,6 @@ document.getElementById('builderSaveBtn').addEventListener('click',()=>{
       document.getElementById('saveOverlay').style.display='flex';
     });
     ov.querySelector('#saveCancel').addEventListener('click',()=>ov.remove());
-  } else if (pendingChallengeResponse) {
-    // Fire-back mode - skip name dialog, trigger save directly with placeholder name
-    pendingSaveBricks = saveable;
-    document.getElementById('levelNameInput').value = pendingChallengeResponse.baseName || 'Challenge';
-    document.getElementById('confirmSaveBtn').click();
   } else {
     openSaveDialog(saveable);
   }
