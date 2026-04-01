@@ -6055,41 +6055,33 @@ async function publishMap(mapSlug, isPublic) {
 
 async function fetchLeaderboard() {
   try {
-    // Get all records for public maps
-    // Join records with maps where is_public=true, group by initials
-    const res = await fetch(
-      `${SUPA_URL}/rest/v1/records?select=initials,slug,maps!inner(is_public)&maps.is_public=eq.true`,
-      { headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` } }
-    );
-    if (!res.ok) {
-      // Fallback: fetch all records + all public map slugs separately
-      const [recordsRes, mapsRes] = await Promise.all([
-        fetch(`${SUPA_URL}/rest/v1/records?select=initials,slug`, {
-          headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` }
-        }),
-        fetch(`${SUPA_URL}/rest/v1/maps?is_public=eq.true&select=slug`, {
-          headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` }
-        })
-      ]);
-      if (!recordsRes.ok || !mapsRes.ok) return [];
-      const records = await recordsRes.json();
-      const publicMaps = await mapsRes.json();
-      const publicSlugs = new Set(publicMaps.map(m => m.slug));
-      // Count records per initials on public maps only
-      const counts = {};
-      records.forEach(r => {
-        if (publicSlugs.has(r.slug)) {
-          counts[r.initials] = (counts[r.initials] || 0) + 1;
-        }
-      });
-      return Object.entries(counts)
-        .map(([initials, count]) => ({ initials, count }))
-        .sort((a, b) => b.count - a.count)
-        .slice(0, 20);
-    }
-    const data = await res.json();
+    const [recordsRes, mapsRes] = await Promise.all([
+      fetch(`${SUPA_URL}/rest/v1/records?select=initials,slug`, {
+        headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` }
+      }),
+      fetch(`${SUPA_URL}/rest/v1/maps?is_public=eq.true&select=slug`, {
+        headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` }
+      })
+    ]);
+
+    if (!recordsRes.ok || !mapsRes.ok) return [];
+
+    const records = await recordsRes.json();
+    const publicMaps = await mapsRes.json();
+
+    console.log('[leaderboard] records:', records.length, 'public maps:', publicMaps.length);
+
+    // If no public maps, just count all records
+    const publicSlugs = new Set(publicMaps.map(m => m.slug));
+    const usePublicFilter = publicSlugs.size > 0;
+
     const counts = {};
-    data.forEach(r => { counts[r.initials] = (counts[r.initials] || 0) + 1; });
+    records.forEach(r => {
+      if (!usePublicFilter || publicSlugs.has(r.slug)) {
+        counts[r.initials] = (counts[r.initials] || 0) + 1;
+      }
+    });
+
     return Object.entries(counts)
       .map(([initials, count]) => ({ initials, count }))
       .sort((a, b) => b.count - a.count)
