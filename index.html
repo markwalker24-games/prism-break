@@ -4518,8 +4518,8 @@ document.getElementById('confirmSaveBtn').addEventListener('click', async ()=>{
     // Auto-name: "MapName 2.0", "MapName 3.0" etc
     const autoName = baseName ? `${baseName} ${round}.0` : name;
     try {
-      const bricks = Array.isArray(pendingSaveBricks) ? pendingSaveBricks : (pendingSaveBricks.bricks || []);
-      const slug = await upsertMapToCloud({ name: autoName, bricks, creator_id: CREATOR_ID });
+      const fullData = { ...pendingSaveBricks, name: autoName, creator_id: CREATOR_ID };
+      const slug = await upsertMapToCloud(fullData);
       await createNextRound(chainId, round, slug, CREATOR_ID, recipientId);
       // Save to local challenges as sender of this new round
       const all = getLocalChallenges();
