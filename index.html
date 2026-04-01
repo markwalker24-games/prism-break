@@ -4705,11 +4705,11 @@ function endGame(reason){
   // Show star rating for any map/series the player didn't create, not testing
   const isOwnMap = currentLevelData && currentLevelData.creator_id === CREATOR_ID;
   const isOwnSeries = activeSeries && activeSeries.creator_id === CREATOR_ID;
-  const shouldRateMap = !testingLevel && !isOwnMap && currentLevelData && currentLevelData.name && !isSeriesComplete;
-  const shouldRateSeries = !testingLevel && isSeriesComplete && activeSeries && !isOwnSeries;
+  const shouldRateMap = !testingLevel && !isOwnMap && !isChallengeMap && currentLevelData && currentLevelData.name && !isSeriesComplete;
+  const shouldRateSeries = !testingLevel && !isChallengeMap && isSeriesComplete && activeSeries && !isOwnSeries;
 
   // Only track records for named maps (not random games)
-  if(!testingLevel && currentLevelData && currentLevelData.name){
+  if(!testingLevel && !isChallengeMap && currentLevelData && currentLevelData.name){
     (async ()=>{
       // Use stored slug directly if available, fall back to name lookup
       let slug = currentLevelData.slug || null;
