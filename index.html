@@ -2735,9 +2735,9 @@ function openLevelSelect(autoOpen){
   document.getElementById('levelSelectOverlay').style.display='flex';
   renderLevelList(autoOpen); // render with local data first
 
-  // Throttle all cloud fetches to once per 60 seconds
+  // Throttle all cloud fetches to once per 10 seconds
   const now = Date.now();
-  const shouldFetch = !window._lastLevelSelectSync || (now - window._lastLevelSelectSync > 60000);
+  const shouldFetch = !window._lastLevelSelectSync || (now - window._lastLevelSelectSync > 10000);
   if (!shouldFetch) return;
   window._lastLevelSelectSync = now;
 
@@ -2785,6 +2785,7 @@ function openLevelSelect(autoOpen){
 }
 function closeLevelSelect(){
   _levelSelectOpenState = {};
+  window._lastLevelSelectSync = null; // reset so next open fetches fresh
   document.getElementById('levelSelectOverlay').style.display='none';
   if(gameRunning){ paused=false; showTopBarBtns(true); }
   else { showModeSelect(); }
