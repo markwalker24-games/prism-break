@@ -5071,8 +5071,6 @@ function endGame(reason){
   if(ballLaunched && gameStartTime) totalElapsed += (performance.now() - gameStartTime) / 1000;
   gameStartTime = 0;
   const elapsed = totalElapsed;
-  const timeScore=Math.max(100, Math.round(10000 - elapsed*100));
-  score=timeScore; scoreDisplay.textContent=score;
   const timeStr=elapsed.toFixed(1)+'s';
 
   const card=(inner)=>`<div style="
@@ -5199,12 +5197,9 @@ function endGame(reason){
     ${seriesInfo}
     ${seriesCompleteBanner}
     <div style="height:1px;background:linear-gradient(90deg,transparent,rgba(180,140,50,0.3),transparent);width:100%;margin:2px 0;"></div>
-    <div style="display:flex;gap:20px;justify-content:center;">
-      <div><div style="color:rgba(180,150,80,0.5);font-size:10px;font-family:'Cinzel',serif;letter-spacing:1px;margin-bottom:3px">YOUR TIME</div>
-           <div style="color:#e8d5a0;font-size:16px;font-weight:700">${timeStr}</div></div>
-      <div style="width:1px;background:rgba(180,140,50,0.2)"></div>
-      <div><div style="color:rgba(180,150,80,0.5);font-size:10px;font-family:'Cinzel',serif;letter-spacing:1px;margin-bottom:3px">SCORE</div>
-           <div style="color:#f5c842;font-size:16px;font-weight:700">${score}</div></div>
+    <div style="display:flex;justify-content:center;">
+      <div style="text-align:center;"><div style="color:rgba(180,150,80,0.5);font-size:10px;font-family:'Cinzel',serif;letter-spacing:1px;margin-bottom:3px">YOUR TIME</div>
+           <div style="color:#e8d5a0;font-size:20px;font-weight:700">${timeStr}</div></div>
     </div>
     ${recordPlaceholder}
     <div style="display:flex;flex-direction:column;gap:8px;width:100%;margin-top:4px;">
@@ -6595,18 +6590,104 @@ function showLeaderboard() {
       rowsEl.innerHTML = '<div style="color:rgba(180,140,60,0.4);font-size:12px;font-family:Lato,sans-serif;text-align:center;padding:16px 0;">No records yet.<br>Be the first!</div>';
       return;
     }
-    const myInitials = LS.get('pb_initials') || '';
-    rowsEl.innerHTML = entries.map((e, i) => {
-      const isMe = myInitials && e.initials === myInitials;
+    const myName = _currentUser ? getDisplayName().split(' ')[0] : (LS.get('pb_initials') || '');
+    rowsEl.innerHTML = '';
+    entries.forEach((e, i) => {
+      const isMe = myName && e.initials === myName;
       const medals = ['🥇','🥈','🥉'];
       const rank = i < 3 ? medals[i] : `#${i+1}`;
-      return `<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:${isMe?'rgba(245,200,66,0.08)':'rgba(0,0,0,0.2)'};border:1px solid ${isMe?'rgba(245,200,66,0.3)':'rgba(200,160,60,0.1)'};border-radius:3px;">
+      const row = document.createElement('div');
+      row.style.cssText = `display:flex;align-items:center;gap:10px;padding:8px 10px;background:${isMe?'rgba(245,200,66,0.08)':'rgba(0,0,0,0.2)'};border:1px solid ${isMe?'rgba(245,200,66,0.3)':'rgba(200,160,60,0.1)'};border-radius:3px;cursor:pointer;transition:border-color 0.15s;`;
+      row.innerHTML = `
         <span style="font-size:${i<3?'18':'13'}px;min-width:24px;text-align:center;">${rank}</span>
-        <span style="font-family:'Cinzel',serif;font-size:16px;font-weight:700;color:${isMe?'#f5c842':'#e8d5a0'};letter-spacing:3px;flex:1;">${e.initials}</span>
+        <span style="font-family:'Cinzel',serif;font-size:15px;font-weight:700;color:${isMe?'#f5c842':'#e8d5a0'};flex:1;">${e.initials}</span>
         <span style="font-family:'Lato',sans-serif;font-size:12px;color:rgba(200,160,60,0.7);">${e.count} record${e.count!==1?'s':''}</span>
-      </div>`;
-    }).join('');
+        <span style="color:rgba(200,160,60,0.4);font-size:10px;">›</span>
+      `;
+      row.addEventListener('mouseenter', () => row.style.borderColor = 'rgba(200,160,60,0.4)');
+      row.addEventListener('mouseleave', () => row.style.borderColor = isMe ? 'rgba(245,200,66,0.3)' : 'rgba(200,160,60,0.1)');
+      row.addEventListener('click', () => showPlayerRecords(e.initials, isMe, ov));
+      rowsEl.appendChild(row);
+    });
   });
+}
+
+async function showPlayerRecords(playerName, isMe, parentOv) {
+  // Fetch all records held by this player
+  const res = await fetch(
+    `${SUPA_URL}/rest/v1/records?initials=eq.${encodeURIComponent(playerName)}&select=slug,time_seconds&order=time_seconds.asc`,
+    { headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` } }
+  );
+  if (!res.ok) { showToast('Could not load records'); return; }
+  const records = await res.json();
+
+  // Fetch map names for these slugs
+  const slugList = records.map(r => r.slug).join(',');
+  const mapsRes = await fetch(
+    `${SUPA_URL}/rest/v1/maps?slug=in.(${slugList})&select=slug,name,data`,
+    { headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` } }
+  );
+  const maps = mapsRes.ok ? await mapsRes.json() : [];
+  const mapsBySlug = {};
+  maps.forEach(m => { mapsBySlug[m.slug] = m; });
+
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:510;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;';
+
+  const panel = document.createElement('div');
+  panel.style.cssText = "background:linear-gradient(160deg,#1a1206,#0f0a04);border:1px solid rgba(200,160,60,0.5);border-radius:4px;padding:24px 20px;width:min(320px,100%);display:flex;flex-direction:column;gap:10px;box-shadow:0 8px 40px rgba(0,0,0,0.8);max-height:85vh;overflow-y:auto;";
+
+  const title = document.createElement('div');
+  title.style.cssText = 'text-align:center;';
+  title.innerHTML = `
+    <div style="font-family:'Cinzel',serif;font-size:15px;font-weight:700;color:#f5c842;letter-spacing:1px;">${isMe ? 'Your Records' : `${playerName}'s Records`}</div>
+    <div style="color:rgba(200,160,60,0.5);font-size:10px;font-family:'Cinzel',serif;letter-spacing:1px;margin-top:3px;">${isMe ? 'Maps where you hold the record' : 'Tap a map to play and dethrone them'}</div>
+    <div style="height:1px;background:linear-gradient(90deg,transparent,rgba(200,160,60,0.3),transparent);margin-top:10px;"></div>
+  `;
+  panel.appendChild(title);
+
+  if (!records.length) {
+    const empty = document.createElement('div');
+    empty.style.cssText = 'color:rgba(180,140,60,0.4);font-size:12px;font-family:Lato,sans-serif;text-align:center;padding:16px 0;';
+    empty.textContent = 'No records found.';
+    panel.appendChild(empty);
+  } else {
+    records.forEach(r => {
+      const mapData = mapsBySlug[r.slug];
+      const mapName = mapData ? mapData.name : r.slug;
+      const row = document.createElement('div');
+      row.style.cssText = `display:flex;align-items:center;gap:10px;padding:8px 10px;background:rgba(0,0,0,0.2);border:1px solid rgba(200,160,60,0.1);border-radius:3px;${!isMe ? 'cursor:pointer;' : ''}`;
+      row.innerHTML = `
+        <div style="flex:1;min-width:0;">
+          <div style="font-family:'Cinzel',serif;font-size:12px;font-weight:700;color:#e8d5a0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${mapName}</div>
+          <div style="color:rgba(200,160,60,0.6);font-size:11px;font-family:'Lato',sans-serif;">⏱ ${formatTime(r.time_seconds)}</div>
+        </div>
+        ${!isMe ? `<span style="color:rgba(200,160,60,0.4);font-size:10px;">Play ›</span>` : ''}
+      `;
+      if (!isMe && mapData) {
+        row.addEventListener('mouseenter', () => row.style.borderColor = 'rgba(200,160,60,0.4)');
+        row.addEventListener('mouseleave', () => row.style.borderColor = 'rgba(200,160,60,0.1)');
+        row.addEventListener('click', () => {
+          ov.remove();
+          parentOv.remove();
+          const levelData = { ...mapData.data, name: mapData.name, slug: mapData.slug, creator_id: mapData.creator_id };
+          showMapPreview(levelData);
+          document.getElementById('levelSelectOverlay').style.display = 'flex';
+        });
+      }
+      panel.appendChild(row);
+    });
+  }
+
+  const backBtn = document.createElement('button');
+  backBtn.style.cssText = "background:none;border:none;color:rgba(180,140,60,0.4);font-family:'Cinzel',serif;font-size:12px;cursor:pointer;letter-spacing:1px;padding:6px;";
+  backBtn.textContent = '← BACK';
+  backBtn.addEventListener('click', () => ov.remove());
+  panel.appendChild(backBtn);
+
+  ov.appendChild(panel);
+  document.body.appendChild(ov);
+  ov.addEventListener('click', e => { if(e.target===ov) ov.remove(); });
 }
 
 
