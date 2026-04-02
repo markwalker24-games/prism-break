@@ -2168,25 +2168,13 @@ function updateFinale(dt){
 }
 
 function triggerBlackoutFinale(){
-  if(finaleTriggered) return; // guard against re-entry from bomb detonation
+  if(finaleTriggered) return;
+  finaleTriggered=true;
   gameRunning=false;
-  activeBombs=[];  // cancel any pending bomb detonations
+  activeBombs=[];
   fallingBricks=[];
-  finaleTriggered=false;
   bricks=[];
-  toFall.forEach(b=>{
-    // Ensure enough upward pop so brick clears bottom before falling back down
-    const distToBottom = Math.max(0, H - b.y);
-    const minPop = Math.sqrt(2 * 0.4 * distToBottom) + 2;
-    fallingBricks.push({
-      x:b.x, y:b.y,
-      vx:(Math.random()-0.5)*2,
-      vy:-(minPop + Math.random()*3),
-      color:b.isSteel?'#8a9bb0':b.isPaint?b.color:b.color||'#888',
-      w:b.w||BRICK_W, h:b.h||BRICK_H,
-      exploded:false
-    });
-  });
+  setTimeout(()=>{ endGame('clear'); }, 600);
 }
 
 // roundRect polyfill for older Safari
