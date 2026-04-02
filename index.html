@@ -2989,7 +2989,7 @@ function renderLevelList(autoOpen){
   const featuredName = getFeaturedSeriesName();
   const allSeries = savedSeries();
   const allLevels = savedLevels();
-  const allSeriesLevelNames = new Set(allSeries.flatMap(s => s.levels.map(l => l.name)));
+  const allSeriesLevelNames = new Set(allSeries.filter(s => !s._isChallengeSeries).flatMap(s => s.levels.map(l => l.name)));
 
   // ── Categorise series ──────────────────────────────────────────
   const featuredSeriesObj = allSeries.find(s => s.name === featuredName);
