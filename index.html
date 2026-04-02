@@ -2355,6 +2355,14 @@ function hideMessage(){ msgBox.style.display='none'; msgBox.style.pointerEvents=
 function startGame(levelData, forcedMode){
   selfDestructBtn.style.display='block';
   showTopBarBtns(true);
+
+  // Show how-to-play for first 2 plays
+  const howtoCount = parseInt(LS.get('pb_howto_count') || '0', 10);
+  if (howtoCount < 2) {
+    LS.set('pb_howto_count', String(howtoCount + 1));
+    setTimeout(() => showHowToPlay(), 1000);
+  }
+
   // Show edit button only for custom/saved levels (levelData has a name and bricks)
   const editBtn = document.getElementById('editMapBtn');
   currentLevelData = levelData || null;
@@ -2951,21 +2959,32 @@ function renderLevelList(autoOpen){
   function buildAccordion(key, label, levels, opts = {}) {
     const { accent='rgba(200,160,60,0.5)', nameColor='#f5c842', badge='',
             progressLocked=false, isSeries=true, seriesObj=null,
-            showShareBtn=false, showPublishBtn=false } = opts;
+            showShareBtn=false, showPublishBtn=false, sublabel=false } = opts;
 
     const isOpen = !!openState[key];
     const progress = progressLocked ? getSeriesProgress(label) : Infinity;
 
     const header = document.createElement('div');
-    header.style.cssText = `width:100%;display:flex;align-items:center;justify-content:space-between;padding:10px 12px;cursor:pointer;border-radius:4px;box-sizing:border-box;background:${isOpen?'rgba(30,22,8,0.97)':'rgba(18,13,4,0.95)'};border:1px solid ${isOpen?accent:'rgba(140,100,30,0.25)'};margin-bottom:${isOpen?'0':'5px'};border-bottom-left-radius:${isOpen?'0':'4px'};border-bottom-right-radius:${isOpen?'0':'4px'};transition:all 0.15s;`;
+    if (sublabel) {
+      header.style.cssText = `width:100%;display:flex;align-items:center;justify-content:space-between;padding:7px 4px 7px 10px;cursor:pointer;box-sizing:border-box;border-left:2px solid ${accent};margin:2px 0 ${isOpen?'4px':'8px'} 4px;transition:all 0.15s;`;
+    } else {
+      header.style.cssText = `width:100%;display:flex;align-items:center;justify-content:space-between;padding:10px 12px;cursor:pointer;border-radius:4px;box-sizing:border-box;background:${isOpen?'rgba(30,22,8,0.97)':'rgba(18,13,4,0.95)'};border:1px solid ${isOpen?accent:'rgba(140,100,30,0.25)'};margin-bottom:${isOpen?'0':'5px'};border-bottom-left-radius:${isOpen?'0':'4px'};border-bottom-right-radius:${isOpen?'0':'4px'};transition:all 0.15s;`;
+    }
 
     const nameWrap = document.createElement('div');
     nameWrap.style.cssText = 'display:flex;align-items:center;gap:7px;min-width:0;flex:1;flex-wrap:wrap;';
-    nameWrap.innerHTML = `
-      <span style="color:${nameColor};font-family:'Cinzel',serif;font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${label}</span>
-      ${badge}
-      <span style="color:rgba(180,140,60,0.5);font-family:'Lato',sans-serif;font-size:11px;white-space:nowrap;">${levels.length} map${levels.length!==1?'s':''}</span>
-    `;
+    if (sublabel) {
+      nameWrap.innerHTML = `
+        <span style="color:${nameColor};font-family:'Lato',sans-serif;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;opacity:0.8;white-space:nowrap;">${label}</span>
+        ${badge}
+      `;
+    } else {
+      nameWrap.innerHTML = `
+        <span style="color:${nameColor};font-family:'Cinzel',serif;font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${label}</span>
+        ${badge}
+        <span style="color:rgba(180,140,60,0.5);font-family:'Lato',sans-serif;font-size:11px;white-space:nowrap;">${levels.length} map${levels.length!==1?'s':''}</span>
+      `;
+    }
 
     const right = document.createElement('div');
     right.style.cssText = 'display:flex;align-items:center;gap:6px;flex-shrink:0;';
@@ -3011,6 +3030,9 @@ function renderLevelList(autoOpen){
     list.appendChild(header);
 
     if (!isOpen) return;
+
+    // Sublabel group headers with no levels don't render a panel - inner content built externally
+    if (sublabel && !levels.length) return;
 
     const panel = document.createElement('div');
     panel.style.cssText = makePanelStyle(accent);
@@ -3197,32 +3219,51 @@ function renderLevelList(autoOpen){
         'rgba(14,10,22,0.95)', 'rgba(20,14,32,0.97)',
         '#c4a8f0', 'rgba(180,150,220,0.6)',
         () => {
-          // My series
-          mySeries.forEach((s, i) => {
-            const isReceived = isReceivedSeries(s);
-            const isAdmin = !!s._adminImport;
-            const isChallengeSeries = !!s._isChallengeSeries;
-            let badge = '';
-            if (isChallengeSeries) badge = `<span style="background:rgba(220,60,60,0.12);border:1px solid rgba(220,60,60,0.4);color:#e63946;font-family:'Cinzel',serif;font-size:9px;padding:1px 6px;border-radius:2px;">🔥 CHALLENGE</span>`;
-            else if (isAdmin) badge = `<span style="background:rgba(220,60,60,0.12);border:1px solid rgba(220,60,60,0.4);color:#e66;font-family:'Cinzel',serif;font-size:9px;padding:1px 6px;border-radius:2px;">✦ AI GENERATED</span>`;
-            else if (isReceived) badge = `<span style="background:rgba(46,196,182,0.1);border:1px solid rgba(46,196,182,0.35);color:#2ec4b6;font-family:'Cinzel',serif;font-size:9px;padding:1px 6px;border-radius:2px;">SHARED</span>`;
-            buildAccordion('my_' + i, s.name, s.levels, {
-              accent: isChallengeSeries ? 'rgba(220,60,60,0.35)' : 'rgba(155,93,229,0.3)',
-              nameColor: isChallengeSeries ? '#e63946' : '#c4a8f0',
-              badge,
-              progressLocked: isReceived,
-              isSeries: true,
-              seriesObj: s,
-              showShareBtn: !isReceived && !isChallengeSeries,
-              showPublishBtn: !isChallengeSeries,
-            });
-          });
+          // Split series into challenge vs regular
+          const challengeSeries = mySeries.filter(s => s._isChallengeSeries);
+          const regularSeries = mySeries.filter(s => !s._isChallengeSeries);
 
-          // My standalone maps
+          // ── My Series ──────────────────────────────────────────
+          if (regularSeries.length) {
+            buildAccordion('my_series_group', 'My Series', [], {
+              sublabel: true,
+              accent: 'rgba(200,200,210,0.4)',
+              nameColor: '#d0d0d8',
+              badge: `<span style="color:rgba(180,150,220,0.5);font-size:11px;font-family:'Lato',sans-serif;">${regularSeries.reduce((n,s)=>n+s.levels.length,0)} maps</span>`,
+              progressLocked: false,
+              isSeries: false,
+              seriesObj: null,
+              showShareBtn: false,
+              showPublishBtn: false,
+            });
+            // If that accordion is open, build its inner content
+            if (openState['my_series_group']) {
+              regularSeries.forEach((s, i) => {
+                const isReceived = isReceivedSeries(s);
+                const isAdmin = !!s._adminImport;
+                let badge = '';
+                if (isAdmin) badge = `<span style="background:rgba(220,60,60,0.12);border:1px solid rgba(220,60,60,0.4);color:#e66;font-family:'Cinzel',serif;font-size:9px;padding:1px 6px;border-radius:2px;">✦ AI GENERATED</span>`;
+                else if (isReceived) badge = `<span style="background:rgba(46,196,182,0.1);border:1px solid rgba(46,196,182,0.35);color:#2ec4b6;font-family:'Cinzel',serif;font-size:9px;padding:1px 6px;border-radius:2px;">SHARED</span>`;
+                buildAccordion('my_' + i, s.name, s.levels, {
+                  accent: 'rgba(155,93,229,0.3)',
+                  nameColor: '#c4a8f0',
+                  badge,
+                  progressLocked: isReceived,
+                  isSeries: true,
+                  seriesObj: s,
+                  showShareBtn: !isReceived,
+                  showPublishBtn: true,
+                });
+              });
+            }
+          }
+
+          // ── My Standalone Maps ─────────────────────────────────
           if (additionalMaps.length) {
-            buildAccordion('additional', 'My Maps', additionalMaps, {
-              accent: 'rgba(155,93,229,0.3)',
-              nameColor: '#c4a8f0',
+            buildAccordion('additional', 'My Standalone Maps', additionalMaps, {
+              sublabel: true,
+              accent: 'rgba(200,200,210,0.4)',
+              nameColor: '#d0d0d8',
               badge: '',
               progressLocked: false,
               isSeries: false,
@@ -3232,9 +3273,39 @@ function renderLevelList(autoOpen){
             });
           }
 
-          // Shared with me
+          // ── My Challenges ──────────────────────────────────────
+          if (challengeSeries.length) {
+            buildAccordion('my_challenges_group', 'My Challenges', [], {
+              sublabel: true,
+              accent: 'rgba(220,60,60,0.35)',
+              nameColor: '#e63946',
+              badge: `<span style="color:rgba(220,100,100,0.5);font-size:11px;font-family:'Lato',sans-serif;">${challengeSeries.length} chain${challengeSeries.length!==1?'s':''}</span>`,
+              progressLocked: false,
+              isSeries: false,
+              seriesObj: null,
+              showShareBtn: false,
+              showPublishBtn: false,
+            });
+            if (openState['my_challenges_group']) {
+              challengeSeries.forEach((s, i) => {
+                buildAccordion('my_ch_' + i, s.name, s.levels, {
+                  accent: 'rgba(220,60,60,0.3)',
+                  nameColor: '#e63946',
+                  badge: `<span style="background:rgba(220,60,60,0.12);border:1px solid rgba(220,60,60,0.4);color:#e63946;font-family:'Cinzel',serif;font-size:9px;padding:1px 6px;border-radius:2px;">🔥 CHALLENGE</span>`,
+                  progressLocked: false,
+                  isSeries: true,
+                  seriesObj: s,
+                  showShareBtn: false,
+                  showPublishBtn: false,
+                });
+              });
+            }
+          }
+
+          // ── Shared with Me ─────────────────────────────────────
           if (receivedMaps.length) {
             buildAccordion('shared_with_me', 'Shared with Me', receivedMaps, {
+              sublabel: true,
               accent: 'rgba(46,196,182,0.3)',
               nameColor: '#2ec4b6',
               badge: `<span style="background:rgba(46,196,182,0.1);border:1px solid rgba(46,196,182,0.35);color:#2ec4b6;font-family:'Cinzel',serif;font-size:9px;padding:1px 6px;border-radius:2px;">SHARED</span>`,
@@ -6842,13 +6913,13 @@ function showChallengesScreen() {
   issueBtn.id = 'issueChallengeBtn';
   issueBtn.style.cssText = "width:100%;background:none;border:1px solid rgba(220,60,60,0.4);color:rgba(220,80,80,0.8);font-family:'Cinzel',serif;font-weight:600;font-size:12px;letter-spacing:1px;padding:11px;cursor:pointer;border-radius:3px;margin-bottom:14px;";
   issueBtn.textContent = 'ISSUE A CHALLENGE';
-  issueBtn.addEventListener('click', () => {
-    hideMessage();
-    openLevelSelect();
-    // Show a toast guiding them
-    setTimeout(() => showToast('Pick one of your maps to challenge a friend!'), 400);
-  });
   container.appendChild(issueBtn);
+
+  if (rows.length) {
+    const divider = document.createElement('div');
+    divider.style.cssText = 'height:1px;background:linear-gradient(90deg,transparent,rgba(220,60,60,0.2),transparent);margin-bottom:12px;';
+    container.appendChild(divider);
+  }
 
   if (!rows.length) {
     const empty = document.createElement('div');
