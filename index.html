@@ -7072,29 +7072,7 @@ async function showChallengesScreen() {
     });
   });
 
-  // Sync from cloud in background and refresh only once
-  let _challengeScreenActive = true;
-  if (!window._challengeScreenRefreshing) {
-    window._challengeScreenRefreshing = true;
-    fetchMyChallenges().then(rows => {
-      if (!_challengeScreenActive) { window._challengeScreenRefreshing = false; return; }
-      if (!rows.length) { window._challengeScreenRefreshing = false; return; }
-      const current = getLocalChallenges();
-      if (rows.length !== current.length) {
-        syncChallenges().then(() => {
-          window._challengeScreenRefreshing = false;
-          if (_challengeScreenActive && document.getElementById('challengesBackBtn')) {
-            showChallengesScreen();
-          }
-        });
-      } else {
-        window._challengeScreenRefreshing = false;
-      }
-    }).catch(() => { window._challengeScreenRefreshing = false; });
-  }
-
   document.getElementById('challengesBackBtn').addEventListener('click', () => {
-    _challengeScreenActive = false;
     window._challengeScreenRefreshing = false;
     hideMessage(); showModeSelect();
   });
