@@ -675,13 +675,59 @@ async function syncMyDataFromCloud(userId) {
   }
 }
 
+// =====================================================================
+// PROFILES
+// =====================================================================
+async function upsertMyProfile(user) {
+  const displayName = user.user_metadata?.full_name ||
+                      user.user_metadata?.name ||
+                      user.email?.split('@')[0] || 'Player';
+  await fetch(`${SUPA_URL}/rest/v1/profiles`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'apikey': SUPA_KEY,
+      'Authorization': `Bearer ${SUPA_KEY}`,
+      'Prefer': 'resolution=merge-duplicates'
+    },
+    body: JSON.stringify({
+      id: user.id,
+      display_name: displayName,
+      email: user.email,
+      avatar_url: user.user_metadata?.avatar_url || null,
+    })
+  });
+}
+
+const _profileCache = {};
+
+async function fetchProfiles(userIds) {
+  const toFetch = userIds.filter(id => id && !_profileCache[id]);
+  if (toFetch.length) {
+    try {
+      const res = await fetch(
+        `${SUPA_URL}/rest/v1/profiles?id=in.(${toFetch.map(id => `"${id}"`).join(',')})&select=id,display_name,email`,
+        { headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` } }
+      );
+      if (res.ok) {
+        const rows = await res.json();
+        rows.forEach(r => { _profileCache[r.id] = r.display_name || r.email?.split('@')[0] || 'Player'; });
+      }
+    } catch(e) {}
+  }
+  return userIds.reduce((acc, id) => {
+    acc[id] = _profileCache[id] || null;
+    return acc;
+  }, {});
+}
+
 async function initAuth() {
   const { data: { session } } = await _supaClient.auth.getSession();
   if (session) {
     _currentUser = session.user;
     window._currentUser = session.user;
     LS.set('pb_creator_id', session.user.id);
-    // Sync maps on session restore (e.g. returning user, new device)
+    upsertMyProfile(session.user).catch(() => {});
     syncMyDataFromCloud(session.user.id);
   }
   _supaClient.auth.onAuthStateChange((event, session) => {
@@ -690,8 +736,10 @@ async function initAuth() {
       window._currentUser = session.user;
       LS.set('pb_creator_id', session.user.id);
       updateAuthUI();
-      // Sync maps on fresh sign-in
-      if (event === 'SIGNED_IN') syncMyDataFromCloud(session.user.id);
+      if (event === 'SIGNED_IN') {
+        upsertMyProfile(session.user).catch(() => {});
+        syncMyDataFromCloud(session.user.id);
+      }
     } else {
       _currentUser = null;
       window._currentUser = null;
@@ -6873,7 +6921,7 @@ function showChallengeWaitingPopup(c, onEditMap) {
   ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
 }
 
-function showChallengesScreen() {
+async function showChallengesScreen() {
   const challenges = getLocalChallenges();
   const rows = challenges.map(c => {
     const iMSent = c.senderId === CREATOR_ID;
@@ -6886,8 +6934,13 @@ function showChallengesScreen() {
     else if (fireBack)      { statusText = '🔥 FIRE BACK';        statusColor = '#e63946'; clickable = true; }
     else if (isWaiting)     { statusText = '⏳ WAITING';          statusColor = 'rgba(200,160,60,0.7)'; clickable = false; }
     else if (awaitingFireBack) { statusText = '⏳ AWAITING FIRE BACK'; statusColor = 'rgba(200,160,60,0.7)'; clickable = false; }
-    return { c, statusText, statusColor, clickable, isMyTurn, fireBack, isWaiting, awaitingFireBack };
+    const opponentId = iMSent ? c.recipientId : c.senderId;
+    return { c, statusText, statusColor, clickable, isMyTurn, fireBack, isWaiting, awaitingFireBack, opponentId };
   }).filter(r => r !== null);
+
+  // Fetch opponent profiles
+  const opponentIds = [...new Set(rows.map(r => r.opponentId).filter(Boolean))];
+  const profiles = opponentIds.length ? await fetchProfiles(opponentIds) : {};
 
   const container = document.createElement('div');
   container.style.cssText = "width:min(340px,92vw);display:flex;flex-direction:column;gap:0;font-family:'Lato',sans-serif;";
@@ -6928,7 +6981,9 @@ function showChallengesScreen() {
       row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-radius:4px;background:rgba(20,5,5,0.95);border:1px solid ' + (r.clickable || r.isWaiting ? 'rgba(220,60,60,0.25)' : 'rgba(220,60,60,0.12)') + ';margin-bottom:6px;cursor:' + (r.clickable || r.isWaiting ? 'pointer' : 'default') + ';';
       const left = document.createElement('div');
       left.style.cssText = 'display:flex;flex-direction:column;gap:3px;';
-      left.innerHTML = '<div style="color:#e8d5a0;font-family:Cinzel,serif;font-size:13px;font-weight:700;">' + (r.c.mapName || 'Challenge Map') + '</div><div style="color:rgba(200,130,130,0.5);font-size:11px;">Round ' + r.c.round + '</div>';
+      const opponentName = profiles[r.opponentId] || null;
+      const vsLabel = opponentName ? `vs. ${opponentName}` : '';
+      left.innerHTML = '<div style="color:#e8d5a0;font-family:Cinzel,serif;font-size:13px;font-weight:700;">' + (r.c.mapName || 'Challenge Map') + '</div><div style="color:rgba(200,130,130,0.5);font-size:11px;">' + (vsLabel ? `${vsLabel} · ` : '') + 'Round ' + r.c.round + '</div>';
       const right = document.createElement('div');
       right.style.cssText = "color:" + r.statusColor + ";font-family:'Cinzel',serif;font-size:10px;font-weight:700;letter-spacing:0.5px;";
       right.textContent = r.statusText;
