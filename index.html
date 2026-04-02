@@ -617,6 +617,11 @@ const _supaClient = supabase.createClient(
 let _currentUser = null; // set after session check
 
 async function syncMyDataFromCloud(userId) {
+  // Validate userId is a proper UUID before making requests
+  if (!userId || !/^[0-9a-f-]{36}$/i.test(userId)) {
+    console.warn('syncMyDataFromCloud: invalid userId', userId);
+    return;
+  }
   try {
     showToast('Syncing your maps...');
 
@@ -731,7 +736,7 @@ async function initAuth() {
       updateAuthUI();
       if (event === 'SIGNED_IN') {
         upsertMyProfile(session.user).catch(() => {});
-        syncMyDataFromCloud(session.user.id);
+        setTimeout(() => syncMyDataFromCloud(session.user.id), 1000);
       }
     } else {
       _currentUser = null;
