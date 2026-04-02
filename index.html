@@ -551,6 +551,7 @@ let lives=3;
 let controlsReversed=false;
 let fallingBricks=[];
 let finaleTriggered=false;
+let finaleTimeout=null;
 let gameMode=null; // 'escape' | 'blackout'
 let poisonBall=null; // {x,y,vx,vy,flaming,flameTimer,trail:[]}
 let ball={ x:0,y:0,vy:0,vx:0,color:'#ffffff',trail:[] };
@@ -2160,10 +2161,14 @@ function updateFinale(dt){
     finaleTriggered=true;
     setTimeout(()=>{ endGame('clear'); }, 600);
   }
+  // Safety: if finale runs too long, force end
+  if(!finaleTimeout) finaleTimeout = setTimeout(()=>{ if(!gameOver && !gameRunning){ endGame('clear'); } finaleTimeout=null; }, 5000);
 }
 
 function triggerBlackoutFinale(){
+  if(finaleTriggered) return; // guard against re-entry from bomb detonation
   gameRunning=false;
+  activeBombs=[];  // cancel any pending bomb detonations
   fallingBricks=[];
   finaleTriggered=false;
   bricks=[];
@@ -2372,7 +2377,7 @@ function startGame(levelData, forcedMode){
   editBtn.style.display = isCustomLevel ? 'block' : 'none';
   score=0; particles=[]; gameOver=false; ballLaunched=false; paused=false;
   gameStartTime=0; totalElapsed=0; portal=null; keysHeld=0; diamondsCollected=0; screenFlash=0;
-  lives=3; controlsReversed=false; fallingBricks=[]; finaleTriggered=false; bombsHeld=0; activeBombs=[]; bothSidesHeld=false; bothSidesTimestamp=0; isRespawning=false; poisonBall=null; blownUpKeys=[]; deathFreeze=false;
+  lives=3; controlsReversed=false; fallingBricks=[]; finaleTriggered=false; finaleTimeout=null; bombsHeld=0; activeBombs=[]; bothSidesHeld=false; bothSidesTimestamp=0; isRespawning=false; poisonBall=null; blownUpKeys=[]; deathFreeze=false;
   if(bothSidesReleaseTimer){ clearTimeout(bothSidesReleaseTimer); bothSidesReleaseTimer=null; }
   bombHud.style.display='none';
   renderLives();
