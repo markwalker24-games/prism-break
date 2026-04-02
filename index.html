@@ -101,7 +101,7 @@
   /* Level list */
   #levelList {
     display:flex; flex-wrap:wrap; gap:8px;
-    max-height:55vh; overflow-y:auto;
+    max-height:none; overflow-y:visible;
     justify-content:flex-start;
   }
   .level-thumb-card {
@@ -379,9 +379,12 @@
     <!-- Divider -->
     <div style="height:1px;background:rgba(200,160,60,0.15);margin:8px 16px;"></div>
     <!-- Buttons -->
-    <div style="display:flex;gap:8px;padding:10px 16px 16px;">
+    <div style="display:flex;gap:8px;padding:10px 16px;flex-wrap:wrap;">
       <button id="mapPreviewBack" style="flex:1;background:none;border:1px solid rgba(180,140,60,0.3);color:rgba(200,160,60,0.6);font-family:'Cinzel',serif;font-size:12px;font-weight:600;letter-spacing:1px;padding:12px;cursor:pointer;border-radius:3px;">BACK</button>
       <button id="mapPreviewPlay" style="flex:2;background:linear-gradient(180deg,rgba(60,45,20,0.95),rgba(35,25,10,0.98));border:1px solid rgba(245,200,66,0.6);border-bottom:2px solid rgba(80,50,10,0.9);color:#f5c842;font-family:'Cinzel',serif;font-size:14px;font-weight:700;letter-spacing:2px;padding:12px;cursor:pointer;border-radius:3px;">▶ PLAY</button>
+    </div>
+    <div id="mapPreviewChallengeWrap" style="display:none;padding:0 16px 16px;">
+      <button id="mapPreviewChallenge" style="width:100%;background:none;border:1px solid rgba(220,60,60,0.4);color:rgba(220,80,80,0.8);font-family:'Cinzel',serif;font-size:12px;font-weight:600;letter-spacing:1px;padding:10px;cursor:pointer;border-radius:3px;">CHALLENGE A FRIEND</button>
     </div>
   </div>
 </div>
@@ -2652,9 +2655,9 @@ document.getElementById('editMapBtn').addEventListener('click', ()=>{
 // =====================================================================
 // LEVEL SELECT
 // =====================================================================
-function openLevelSelect(){
+function openLevelSelect(autoOpen){
   document.getElementById('levelSelectOverlay').style.display='flex';
-  renderLevelList(); // render with local data first
+  renderLevelList(autoOpen); // render with local data first
   // Fetch public series, public maps, and challenges in parallel
   Promise.all([
     fetchPublicSeries(),
@@ -2703,6 +2706,7 @@ function openLevelSelect(){
   }).catch(() => {});
 }
 function closeLevelSelect(){
+  _levelSelectOpenState = {};
   document.getElementById('levelSelectOverlay').style.display='none';
   if(gameRunning){ paused=false; showTopBarBtns(true); }
   else { showModeSelect(); }
@@ -2779,6 +2783,11 @@ function showMapPreview(lv, opts = {}) {
     ratingEl.style.color = 'rgba(200,160,60,0.3)';
   }
 
+  // Show challenge button only for owned maps
+  const isOwned = !lv.creator_id || lv.creator_id === CREATOR_ID;
+  const challengeWrap = document.getElementById('mapPreviewChallengeWrap');
+  challengeWrap.style.display = isOwned ? 'block' : 'none';
+
   document.getElementById('mapPreviewOverlay').style.display = 'flex';
 }
 
@@ -2800,6 +2809,57 @@ document.getElementById('mapPreviewPlay').addEventListener('click', () => {
   closeLevelSelect();
   if (seriesObj) { activeSeries = seriesObj; activeSeriesIdx = seriesIdx; }
   startGame(lv);
+});
+
+document.getElementById('mapPreviewChallenge').addEventListener('click', async () => {
+  if (!_mapPreviewPendingPlay) return;
+  const { lv } = _mapPreviewPendingPlay;
+  closeMapPreview();
+  closeLevelSelect();
+  const btn = document.getElementById('mapPreviewChallenge');
+
+  try {
+    let slug = lv.slug || null;
+    if (!slug) {
+      try { slug = await upsertMapToCloud(lv); lv.slug = slug; } catch(e) {}
+    }
+    if (!slug) { showToast('⚠️ Could not upload map'); return; }
+    const { chainId, round } = await createChallenge(slug, null);
+    const all = getLocalChallenges();
+    all.unshift({ chainId, round, challengeId: null, mapSlug: slug, mapName: lv.name, senderId: CREATOR_ID, beaten: false, ts: Date.now() });
+    LS.set('pb_challenges', JSON.stringify(all.slice(0, 50)));
+    upsertChallengeSeriesLocally(chainId, lv.name, slug, lv.name).catch(() => {});
+    const url = getChallengeUrl(chainId, round);
+    const msgs = [
+      `I built a Prism Break map and I bet you can't beat it. 😏\n${url}`,
+      `Think you can crack this? First one to beat it fires back. 🔥\n${url}`,
+      `I made this map. Beat it and make it harder. 🔥\n${url}`,
+    ];
+    const msg = msgs[Math.floor(Math.random() * msgs.length)];
+    const ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:700;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;';
+    const panel = document.createElement('div');
+    panel.style.cssText = "background:linear-gradient(160deg,#1a0a0a,#120808);border:1px solid rgba(220,60,60,0.5);border-radius:4px;padding:24px 20px;width:min(340px,100%);display:flex;flex-direction:column;gap:14px;font-family:'Lato',sans-serif;";
+    panel.innerHTML = `
+      <div style="font-family:'Cinzel',serif;font-size:15px;font-weight:600;color:#e63946;text-align:center;letter-spacing:1px;">CHALLENGE ISSUED</div>
+      <div style="color:rgba(220,150,150,0.7);font-size:12px;text-align:center;">Share the link with your friend.</div>
+      <textarea id="challengeInitCopyArea" readonly rows="4" style="width:100%;box-sizing:border-box;background:rgba(10,4,4,0.9);border:1px solid rgba(180,60,60,0.4);color:#e8d5a0;font-family:'Lato',sans-serif;font-size:12px;padding:10px;border-radius:3px;resize:none;line-height:1.6;cursor:text;" onclick="this.select()">${msg}</textarea>
+      <div id="challengeInitCopyStatus" style="color:rgba(180,150,80,0.7);font-size:12px;text-align:center;">Message copied to clipboard!</div>
+      <button id="challengeInitTextBtn" style="width:100%;background:linear-gradient(180deg,rgba(80,10,10,0.98),rgba(50,5,5,0.99));border:1px solid rgba(220,60,60,0.7);border-bottom:2px solid rgba(80,10,10,0.9);color:#e63946;font-family:'Cinzel',serif;font-weight:700;font-size:14px;letter-spacing:1px;padding:14px;cursor:pointer;border-radius:3px;">TEXT THEM</button>
+      <button id="challengeInitDoneBtn" style="width:100%;background:none;border:none;color:rgba(180,100,100,0.4);font-family:'Cinzel',serif;font-size:12px;cursor:pointer;padding:4px;letter-spacing:1px;">DONE</button>
+    `;
+    ov.appendChild(panel);
+    document.body.appendChild(ov);
+    copyToClipboard(msg,
+      () => { panel.querySelector('#challengeInitCopyStatus').textContent = 'Copied! Just hit Text Them.'; panel.querySelector('#challengeInitCopyStatus').style.color = 'rgba(180,210,80,0.8)'; },
+      () => { panel.querySelector('#challengeInitCopyArea').select(); panel.querySelector('#challengeInitCopyStatus').textContent = 'Auto-copy failed — select and copy above'; }
+    );
+    panel.querySelector('#challengeInitTextBtn').addEventListener('click', () => {
+      window.location.href = `sms:?body=${encodeURIComponent(msg)}`;
+    });
+    panel.querySelector('#challengeInitDoneBtn').addEventListener('click', () => { ov.remove(); showModeSelect(); });
+    ov.addEventListener('click', e => { if (e.target === ov) { ov.remove(); showModeSelect(); } });
+  } catch(e) { showToast('⚠️ Challenge failed: ' + (e.message || '')); }
 });
 
 function drawLevelThumbnail(canvas, levelData){
@@ -2841,7 +2901,9 @@ function drawLevelThumbnail(canvas, levelData){
   ctx.fill();
 }
 
-function renderLevelList(){
+let _levelSelectOpenState = {};
+
+function renderLevelList(autoOpen){
   let list = document.getElementById('levelList');
   list.innerHTML = '';
 
@@ -2868,7 +2930,11 @@ function renderLevelList(){
     return;
   }
 
-  const openState = {};
+  const openState = _levelSelectOpenState;
+  if (autoOpen === 'my_library') {
+    openState['my_library_outer'] = true;
+    openState['additional'] = true;
+  }
 
   // ── Shared helpers ─────────────────────────────────────────────
   function sectionLabel(text, color='rgba(200,160,60,0.55)') {
@@ -2937,7 +3003,11 @@ function renderLevelList(){
 
     header.appendChild(nameWrap);
     header.appendChild(right);
-    header.addEventListener('click', () => { openState[key] = !openState[key]; renderAccordions(); });
+    header.addEventListener('click', () => {
+      openState[key] = !openState[key];
+      renderAccordions();
+
+    });
     list.appendChild(header);
 
     if (!isOpen) return;
@@ -3028,7 +3098,11 @@ function renderLevelList(){
       </div>
       <div style="color:${chevronColor};font-size:10px;opacity:0.7;transform:${isOpen?'rotate(180deg)':'none'};transition:transform 0.2s;">▼</div>
     `;
-    header.addEventListener('click', () => { openState[key] = !openState[key]; renderAccordions(); });
+    header.addEventListener('click', () => {
+      openState[key] = !openState[key];
+      renderAccordions();
+
+    });
     list.appendChild(header);
 
     if (isOpen) {
@@ -3111,7 +3185,9 @@ function renderLevelList(){
     }
 
     // ── ZONE 3: MY LIBRARY ───────────────────────────────────────
-    list.appendChild(zoneHeader('MY LIBRARY', 'rgba(200,180,240,0.7)', 'rgba(155,93,229,0.3)'));
+    const myLibraryZoneHeader = zoneHeader('MY LIBRARY', 'rgba(200,180,240,0.7)', 'rgba(155,93,229,0.3)');
+    myLibraryZoneHeader.id = 'myLibraryZone';
+    list.appendChild(myLibraryZoneHeader);
     const totalLibrary = mySeries.reduce((n,s)=>n+s.levels.length,0) + additionalMaps.length + receivedMaps.length;
     buildOuterAccordion(
       'my_library_outer',
@@ -3181,6 +3257,14 @@ function renderLevelList(){
   }
 
   renderAccordions();
+
+  if (openState['my_library_outer']) {
+    const zone = document.getElementById('myLibraryZone');
+    const panel = document.querySelector('#levelSelectOverlay .panel');
+    if (zone && panel) {
+      panel.scrollTop = zone.offsetTop;
+    }
+  }
 }
 
 
@@ -6748,10 +6832,28 @@ function showChallengesScreen() {
   hdr.innerHTML = '<div style="font-family:Cinzel,serif;font-size:18px;font-weight:700;color:#e63946;letter-spacing:2px;text-shadow:0 0 16px rgba(220,60,60,0.4);">🔥 CHALLENGES</div><div style="height:1px;background:linear-gradient(90deg,transparent,rgba(220,60,60,0.4),transparent);margin-top:8px;"></div>';
   container.appendChild(hdr);
 
+  const tagline = document.createElement('div');
+  tagline.style.cssText = "color:rgba(200,150,150,0.6);font-family:'Lato',sans-serif;font-size:12px;text-align:center;line-height:1.6;margin-bottom:12px;";
+  tagline.textContent = 'Create a map. Send it to a friend. They beat it and make it harder. You beat that and make it harder. See who taps out first.';
+  container.appendChild(tagline);
+
+  // Issue a Challenge button
+  const issueBtn = document.createElement('button');
+  issueBtn.id = 'issueChallengeBtn';
+  issueBtn.style.cssText = "width:100%;background:none;border:1px solid rgba(220,60,60,0.4);color:rgba(220,80,80,0.8);font-family:'Cinzel',serif;font-weight:600;font-size:12px;letter-spacing:1px;padding:11px;cursor:pointer;border-radius:3px;margin-bottom:14px;";
+  issueBtn.textContent = 'ISSUE A CHALLENGE';
+  issueBtn.addEventListener('click', () => {
+    hideMessage();
+    openLevelSelect();
+    // Show a toast guiding them
+    setTimeout(() => showToast('Pick one of your maps to challenge a friend!'), 400);
+  });
+  container.appendChild(issueBtn);
+
   if (!rows.length) {
     const empty = document.createElement('div');
-    empty.style.cssText = 'color:rgba(220,60,60,0.35);font-size:13px;text-align:center;padding:24px 0;line-height:1.8;';
-    empty.innerHTML = 'No active challenges.<br><span style="font-size:11px;color:rgba(200,130,130,0.4);">Send one from a map in the Map Builder.</span>';
+    empty.style.cssText = 'color:rgba(220,60,60,0.35);font-size:13px;text-align:center;padding:16px 0 8px;line-height:1.8;';
+    empty.innerHTML = 'No active challenges yet.<br><span style="font-size:11px;color:rgba(200,130,130,0.35);">Pick a map above and send one to a friend.</span>';
     container.appendChild(empty);
   } else {
     rows.forEach((r, i) => {
@@ -6777,6 +6879,15 @@ function showChallengesScreen() {
   container.appendChild(backBtn);
 
   showMessage(container.outerHTML);
+
+  // Wire up Issue a Challenge button (listeners don't survive outerHTML serialization)
+  const issueBtnLive = document.getElementById('issueChallengeBtn');
+  if (issueBtnLive) {
+    issueBtnLive.addEventListener('click', () => {
+      hideMessage();
+      openLevelSelect('my_library');
+    });
+  }
 
   rows.forEach((r, i) => {
     if (!r.clickable && !r.isWaiting) return;
