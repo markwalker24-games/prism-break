@@ -5053,18 +5053,18 @@ function showModeSelect(){
     font-family:'Lato',sans-serif;
   ">
     <!-- Title -->
-    <div style="position:relative;text-align:center;margin-bottom:2px;">
+    <div id="homeAuthIndicator" style="text-align:right;margin-bottom:4px;cursor:pointer;" onclick="(window._currentUser ? showConfirmOverlay('Sign out of Prism Break?', ()=>signOut(), 'SIGN OUT', 'CANCEL') : signInWithGoogle())">
+      ${_currentUser
+        ? `<span style="font-family:'Lato',sans-serif;font-size:10px;color:rgba(245,200,66,0.7);letter-spacing:0.5px;">👤 ${getDisplayName()}</span>`
+        : `<span style="font-family:'Lato',sans-serif;font-size:10px;color:rgba(245,200,66,0.5);letter-spacing:0.5px;">Sign In</span>`
+      }
+    </div>
+    <div style="text-align:center;margin-bottom:2px;">
       <div style="
         font-family:'Cinzel Decorative',serif;font-size:22px;font-weight:700;
         color:#f5c842;letter-spacing:3px;
         text-shadow:0 0 20px rgba(245,200,66,0.5),0 2px 4px rgba(0,0,0,0.8);
       ">PRISM BREAK</div>
-      <div id="homeAuthIndicator" style="position:absolute;top:0;right:0;cursor:pointer;" onclick="(window._currentUser ? showConfirmOverlay('Sign out of Prism Break?', ()=>signOut(), 'SIGN OUT', 'CANCEL') : signInWithGoogle())">
-        ${_currentUser
-          ? `<span style="font-family:'Lato',sans-serif;font-size:10px;color:rgba(245,200,66,0.7);letter-spacing:0.5px;">👤 ${getDisplayName()}</span>`
-          : `<span style="font-family:'Lato',sans-serif;font-size:10px;color:rgba(245,200,66,0.5);letter-spacing:0.5px;">Sign In</span>`
-        }
-      </div>
       <div style="height:1px;background:linear-gradient(90deg,transparent,rgba(200,160,60,0.5),transparent);margin-top:8px;"></div>
     </div>
 
