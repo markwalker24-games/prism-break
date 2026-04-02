@@ -5253,6 +5253,7 @@ function endGame(reason){
       if(isNewRecord){
         // New record!
         recordEl.innerHTML = `<span style="color:#f5c842;font-family:'Cinzel',serif;font-size:12px;letter-spacing:0.5px;">🏆 New Time to Beat!</span>`;
+        showToast(`Saving record... slug: ${slug ? slug.slice(0,20) : 'NULL'}`);
         promptInitialsAndSaveRecord(slug, elapsed, ()=>{
           const name = _currentUser ? getDisplayName() : getStoredInitials();
           if(recordEl) recordEl.innerHTML = `<span style="color:#f5c842;font-size:12px;font-family:'Cinzel',serif;">🏆 Time to Beat: <strong>${name}</strong> — ${formatTime(elapsed)}</span>`;
@@ -6302,33 +6303,27 @@ async function fetchRecord(slug){
 
 async function saveRecord(slug, initials, timeSeconds){
   try {
-    // Fetch current record first - only save if new time is faster or no record exists
     const current = await fetchRecord(slug);
     if(current && current.time_seconds <= timeSeconds){
-      console.log('Not a new record - current:', current.time_seconds, 'new:', timeSeconds);
-      return; // existing record is still faster
+      return;
     }
 
     if(current){
-      // Update existing record with faster time
       const patch = await fetch(`${SUPA_URL}/rest/v1/records?slug=eq.${encodeURIComponent(slug)}`, {
         method: 'PATCH',
         headers: { 'Content-Type':'application/json','apikey':SUPA_KEY,'Authorization':`Bearer ${SUPA_KEY}`,'Prefer':'return=minimal' },
         body: JSON.stringify({ initials: initials, time_seconds: timeSeconds })
       });
-      if(patch.ok) console.log('Record updated:', initials, timeSeconds);
-      else { const e=await patch.text(); console.error('Record update failed:', e); }
+      if(!patch.ok) { const e=await patch.text(); console.error('Record update failed:', e); showToast('⚠️ Record save failed: ' + e.slice(0,60)); }
     } else {
-      // Insert new record
       const post = await fetch(`${SUPA_URL}/rest/v1/records`, {
         method: 'POST',
         headers: { 'Content-Type':'application/json','apikey':SUPA_KEY,'Authorization':`Bearer ${SUPA_KEY}`,'Prefer':'return=minimal' },
         body: JSON.stringify({ slug, initials: initials, time_seconds: timeSeconds })
       });
-      if(post.ok) console.log('Record inserted:', initials, timeSeconds);
-      else { const e=await post.text(); console.error('Record insert failed:', e); }
+      if(!post.ok) { const e=await post.text(); console.error('Record insert failed:', e); showToast('⚠️ Record save failed: ' + e.slice(0,60)); }
     }
-  } catch(e){ console.warn('Record save failed:', e); }
+  } catch(e){ console.warn('Record save failed:', e); showToast('⚠️ Record save error'); }
 }
 
 function formatTime(seconds){
