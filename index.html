@@ -5253,7 +5253,6 @@ function endGame(reason){
       if(isNewRecord){
         // New record!
         recordEl.innerHTML = `<span style="color:#f5c842;font-family:'Cinzel',serif;font-size:12px;letter-spacing:0.5px;">🏆 New Time to Beat!</span>`;
-        showToast(`Saving record... slug: ${slug ? slug.slice(0,20) : 'NULL'}`);
         promptInitialsAndSaveRecord(slug, elapsed, ()=>{
           const name = _currentUser ? getDisplayName() : getStoredInitials();
           if(recordEl) recordEl.innerHTML = `<span style="color:#f5c842;font-size:12px;font-family:'Cinzel',serif;">🏆 Time to Beat: <strong>${name}</strong> — ${formatTime(elapsed)}</span>`;
