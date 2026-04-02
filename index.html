@@ -4161,10 +4161,10 @@ function openMapsPanel(defaultTab='maps') {
 
     // ── IN A SERIES ─────────────────────────────────────────────
     // Group series maps by series name, preserve series order
-    const seriesGroups = {}; // seriesName -> {maps:[], isOpen:bool}
+    const seriesGroups = {}; // seriesName -> {maps:[], isOpen:bool, isChallenge:bool}
     const seriesOrder = [];
     savedSeries().forEach(s => {
-      if (!seriesGroups[s.name]) { seriesGroups[s.name] = { maps: [], isOpen: false }; seriesOrder.push(s.name); }
+      if (!seriesGroups[s.name]) { seriesGroups[s.name] = { maps: [], isOpen: false, isChallenge: !!s._isChallengeSeries }; seriesOrder.push(s.name); }
       s.levels.forEach(l => {
         const full = saved.find(x => x.name === l.name) || l;
         if (!seriesGroups[s.name].maps.find(m => m.name === full.name)) {
@@ -4184,12 +4184,16 @@ function openMapsPanel(defaultTab='maps') {
         const group = seriesGroups[sName];
         if (!group || !group.maps.length) return;
         const isOpen = !!window._builderSeriesOpen[sName];
+        const isChallenge = !!group.isChallenge;
 
         // Series header - collapsible
         const hdr = document.createElement('div');
-        hdr.style.cssText = `display:flex;align-items:center;justify-content:space-between;padding:7px 10px;cursor:pointer;border-radius:3px;background:rgba(18,13,4,0.95);border:1px solid rgba(140,100,30,0.25);margin-bottom:${isOpen?'0':'6px'};border-bottom-left-radius:${isOpen?'0':'3px'};border-bottom-right-radius:${isOpen?'0':'3px'};`;
-        hdr.innerHTML = `<span style="font-family:'Cinzel',serif;font-size:11px;font-weight:700;color:#c9a84c;">${sName}</span>`
-          + `<span style="color:rgba(200,160,60,0.5);font-size:10px;">${isOpen ? '▲' : '▼'}</span>`;
+        const borderColor = isChallenge ? 'rgba(220,60,60,0.45)' : 'rgba(140,100,30,0.25)';
+        const bgColor = isChallenge ? 'rgba(30,5,5,0.95)' : 'rgba(18,13,4,0.95)';
+        const nameColor = isChallenge ? '#e63946' : '#c9a84c';
+        hdr.style.cssText = `display:flex;align-items:center;justify-content:space-between;padding:7px 10px;cursor:pointer;border-radius:3px;background:${bgColor};border:1px solid ${borderColor};margin-bottom:${isOpen?'0':'6px'};border-bottom-left-radius:${isOpen?'0':'3px'};border-bottom-right-radius:${isOpen?'0':'3px'};`;
+        hdr.innerHTML = `<span style="font-family:'Cinzel',serif;font-size:11px;font-weight:700;color:${nameColor};">${sName}</span>`
+          + `<span style="color:${isChallenge ? 'rgba(220,60,60,0.5)' : 'rgba(200,160,60,0.5)'};font-size:10px;">${isOpen ? '▲' : '▼'}</span>`;
         hdr.addEventListener('click', () => {
           window._builderSeriesOpen[sName] = !window._builderSeriesOpen[sName];
           openMapsPanel('maps');
@@ -4199,7 +4203,7 @@ function openMapsPanel(defaultTab='maps') {
         if (isOpen) {
           const panel = document.createElement('div');
           panel.dataset.seriesPanel = sName;
-          panel.style.cssText = 'display:grid;grid-template-columns:repeat(3,1fr);gap:8px;width:100%;border:1px solid rgba(140,100,30,0.25);border-top:none;border-bottom-left-radius:3px;border-bottom-right-radius:3px;padding:8px;box-sizing:border-box;background:rgba(10,8,4,0.97);margin-bottom:6px;';
+          panel.style.cssText = `display:grid;grid-template-columns:repeat(3,1fr);gap:8px;width:100%;border:1px solid ${borderColor};border-top:none;border-bottom-left-radius:3px;border-bottom-right-radius:3px;padding:8px;box-sizing:border-box;background:rgba(10,8,4,0.97);margin-bottom:6px;`;
           body.appendChild(panel);
           seriesGrid = panel;
         }
