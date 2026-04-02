@@ -4672,15 +4672,16 @@ function showBuilderToast(msg){ showToast(msg); }
 document.getElementById('confirmSaveBtn').addEventListener('click', async ()=>{
   const name=document.getElementById('levelNameInput').value.trim();
   if(!name){ alert('Please enter a name!'); return; }
-  saveLevel(name, pendingSaveBricks);
-  document.getElementById('saveOverlay').style.display='none';
-  builderCurrentLevelName=name;
 
   // If this is a challenge response, create next round automatically
   if (pendingChallengeResponse) {
     const { chainId, round, recipientId, baseName, updateExisting, existingChallengeId } = pendingChallengeResponse;
     pendingChallengeResponse = null;
-    const autoName = baseName ? `${baseName} ${round}.0` : name;
+    const autoName = baseName ? (round === 1 ? baseName : `${baseName} ${round}.0`) : name;
+    // Save locally under the versioned name, not the original
+    saveLevel(autoName, pendingSaveBricks);
+    document.getElementById('saveOverlay').style.display='none';
+    builderCurrentLevelName = autoName;
     try {
       const fullData = { ...pendingSaveBricks, name: autoName, creator_id: CREATOR_ID };
       const slug = await upsertMapToCloud(fullData);
@@ -4719,6 +4720,9 @@ document.getElementById('confirmSaveBtn').addEventListener('click', async ()=>{
       showBuilderToast('Could not save - try again');
     }
   } else {
+    saveLevel(name, pendingSaveBricks);
+    document.getElementById('saveOverlay').style.display='none';
+    builderCurrentLevelName = name;
     showBuilderToast(`"${name}" saved!`);
   }
 });
