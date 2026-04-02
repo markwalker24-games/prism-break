@@ -702,6 +702,8 @@ const _profileCache = {};
 async function fetchProfiles(userIds) {
   const toFetch = userIds.filter(id => id && !_profileCache[id]);
   if (toFetch.length) {
+    // Mark as attempted immediately to prevent retry loops
+    toFetch.forEach(id => { _profileCache[id] = null; });
     try {
       const res = await fetch(
         `${SUPA_URL}/rest/v1/profiles?id=in.(${toFetch.join(',')})&select=id,display_name,email`,
@@ -2707,15 +2709,17 @@ document.getElementById('editMapBtn').addEventListener('click', ()=>{
 function openLevelSelect(autoOpen){
   document.getElementById('levelSelectOverlay').style.display='flex';
   renderLevelList(autoOpen); // render with local data first
-  // Fetch public series and public maps in parallel (throttle challenges sync)
+
+  // Throttle all cloud fetches to once per 60 seconds
   const now = Date.now();
-  const shouldSyncChallenges = !window._lastChallengeSync || (now - window._lastChallengeSync > 60000);
-  if (shouldSyncChallenges) window._lastChallengeSync = now;
+  const shouldFetch = !window._lastLevelSelectSync || (now - window._lastLevelSelectSync > 60000);
+  if (!shouldFetch) return;
+  window._lastLevelSelectSync = now;
 
   Promise.all([
     fetchPublicSeries(),
     fetchPublicMaps(),
-    shouldSyncChallenges ? syncChallenges() : Promise.resolve()
+    syncChallenges()
   ]).then(([cloudPublic, cloudMaps, _]) => {
     let changed = false;
 
@@ -7018,7 +7022,7 @@ async function showChallengesScreen() {
       if (r.isWaiting) {
         showChallengeWaitingPopup(r.c, () => {
           // Edit Map callback - update existing round, not create new one
-          _challengeScreenActive = false;
+          // challenge screen left
           hideMessage();
           try {
             loadChallengeRound(r.c.chainId, r.c.round).then(challengeRow => {
@@ -7048,7 +7052,7 @@ async function showChallengesScreen() {
         return;
       }
       hideMessage();
-      _challengeScreenActive = false;
+      // challenge screen left
       try {
         const challengeRow = await loadChallengeRound(r.c.chainId, r.c.round);
         if (!challengeRow) { showToast('⚠️ Challenge not found'); showModeSelect(); return; }
