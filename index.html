@@ -4493,8 +4493,11 @@ function openMapsPanel(defaultTab='maps') {
     } else {
       all.forEach(s=>{
         const isFeatured = s.name === featuredName;
+        const isChallenge = !!s._isChallengeSeries;
         const row=document.createElement('div');
-        row.style.cssText=`display:flex;flex-direction:column;background:${isFeatured?'#1a1206':'#1a1a2e'};border:1px solid ${isFeatured?'rgba(200,160,60,0.4)':'#333'};padding:10px 10px;border-radius:3px;gap:8px;`;
+        const rowBg = isFeatured ? '#1a1206' : isChallenge ? '#1a0505' : '#1a1a2e';
+        const rowBorder = isFeatured ? 'rgba(200,160,60,0.4)' : isChallenge ? 'rgba(220,60,60,0.45)' : '#333';
+        row.style.cssText=`display:flex;flex-direction:column;background:${rowBg};border:1px solid ${rowBorder};padding:10px 10px;border-radius:3px;gap:8px;`;
 
         const locked = isFeatured && !adminMode;
 
@@ -4502,7 +4505,7 @@ function openMapsPanel(defaultTab='maps') {
         hdr2.style.cssText='display:flex;align-items:center;gap:7px;flex-wrap:wrap;';
         hdr2.innerHTML=`
           <div style="flex:1;min-width:0;display:flex;align-items:center;gap:7px;flex-wrap:wrap;">
-            <div class="usName" style="color:${isFeatured?'#f5c842':'#ffd700'};font-size:14px;font-family:'Lato',sans-serif;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${locked?'':'cursor:pointer;'}" ${locked?'':' title="Tap to rename"'}>${s.name}</div>
+            <div class="usName" style="color:${isFeatured?'#f5c842':isChallenge?'#e63946':'#ffd700'};font-size:14px;font-family:'Lato',sans-serif;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${locked?'':'cursor:pointer;'}" ${locked?'':' title="Tap to rename"'}>${s.name}</div>
             ${isFeatured?`<span style="background:rgba(245,200,66,0.15);border:1px solid rgba(245,200,66,0.4);color:#f5c842;font-family:'Cinzel',serif;font-size:9px;padding:1px 6px;border-radius:2px;white-space:nowrap;flex-shrink:0;">⭐ FEATURED</span>`:''}
             <div class="seriesCount" style="color:#666;font-size:12px;font-family:'Lato',sans-serif;">${s.levels.length} map${s.levels.length!==1?'s':''}</div>
           </div>
