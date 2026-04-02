@@ -612,12 +612,73 @@ const _supaClient = supabase.createClient(
 
 let _currentUser = null; // set after session check
 
+async function syncMyDataFromCloud(userId) {
+  try {
+    showToast('Syncing your maps...');
+
+    // Fetch all my maps from Supabase
+    const mapsRes = await fetch(
+      `${SUPA_URL}/rest/v1/maps?creator_id=eq.${encodeURIComponent(userId)}&select=slug,name,data,is_public&order=created_at.desc&limit=200`,
+      { headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` } }
+    );
+
+    // Fetch all my series from Supabase
+    const seriesRes = await fetch(
+      `${SUPA_URL}/rest/v1/series?creator_id=eq.${encodeURIComponent(userId)}&select=*&order=created_at.desc&limit=100`,
+      { headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` } }
+    );
+
+    if (mapsRes.ok) {
+      const cloudMaps = await mapsRes.json();
+      const existingLevels = savedLevels();
+      let changed = false;
+
+      cloudMaps.forEach(cm => {
+        if (!cm.data || !cm.name) return;
+        const fullEntry = {
+          ...cm.data,
+          name: cm.name,
+          slug: cm.slug,
+          creator_id: userId,
+          is_public: cm.is_public || false,
+        };
+        const idx = existingLevels.findIndex(l => l.name === cm.name || l.slug === cm.slug);
+        if (idx >= 0) {
+          existingLevels[idx] = { ...existingLevels[idx], ...fullEntry };
+        } else {
+          existingLevels.push(fullEntry);
+        }
+        changed = true;
+      });
+
+      if (changed) LS.set('cc_levels', JSON.stringify(existingLevels));
+    }
+
+    if (seriesRes.ok) {
+      const cloudSeries = await seriesRes.json();
+      cloudSeries.forEach(cs => {
+        if (!cs.name) return;
+        let levels;
+        try { levels = typeof cs.levels === 'string' ? JSON.parse(cs.levels) : cs.levels; } catch(e) { return; }
+        const seriesObj = { ...cs, levels, creator_id: userId };
+        saveSeries(seriesObj);
+      });
+    }
+
+    showToast('✓ Your maps are synced!');
+  } catch(e) {
+    console.warn('syncMyDataFromCloud failed:', e);
+  }
+}
+
 async function initAuth() {
   const { data: { session } } = await _supaClient.auth.getSession();
   if (session) {
     _currentUser = session.user;
     window._currentUser = session.user;
     LS.set('pb_creator_id', session.user.id);
+    // Sync maps on session restore (e.g. returning user, new device)
+    syncMyDataFromCloud(session.user.id);
   }
   _supaClient.auth.onAuthStateChange((event, session) => {
     if (session) {
@@ -625,6 +686,8 @@ async function initAuth() {
       window._currentUser = session.user;
       LS.set('pb_creator_id', session.user.id);
       updateAuthUI();
+      // Sync maps on fresh sign-in
+      if (event === 'SIGNED_IN') syncMyDataFromCloud(session.user.id);
     } else {
       _currentUser = null;
       window._currentUser = null;
