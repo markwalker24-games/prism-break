@@ -1887,10 +1887,10 @@ function detonateBomb(bomb){
     }
   }
 
-  // Check if ball is in blast zone
+  // Check if ball is in blast zone - but not if finale already triggered
   const ballCol=Math.round((ball.x-BRICK_W/2)/BRICK_W);
   const ballRow=Math.round((ball.y-BRICK_H/2)/BRICK_H);
-  if(affected.has(`${ballCol},${ballRow}`)){
+  if(affected.has(`${ballCol},${ballRow}`) && !finaleTriggered){
     killBall();
   }
   pattern.forEach(([c,r])=>{
@@ -2091,13 +2091,7 @@ function update(dt){
   }
   ball.trail.push({x:ball.x,y:ball.y});
   if(ball.trail.length>8) ball.trail.shift();
-  // Win condition: blackout = clear all colored bricks
-  if(gameMode==='blackout'){
-    if(bricks.every(b=>b.isPaint||b.isSteel||b.isLock||b.isKey||b.isDiamond||b.isWhite||b.isSkull||b.isReverse||b.isBomb)){
-      triggerBlackoutFinale();
-      return;
-    }
-  }
+
   // Tick active bombs - collect detonations first, then process
   const toDetonate=[];
   activeBombs=activeBombs.filter(bomb=>{
@@ -2106,6 +2100,14 @@ function update(dt){
     return true;
   });
   toDetonate.forEach(bomb=>detonateBomb(bomb));
+
+  // Win condition: blackout = clear all colored bricks (check AFTER detonations)
+  if(gameMode==='blackout' && !finaleTriggered && !gameOver){
+    if(bricks.every(b=>b.isPaint||b.isSteel||b.isLock||b.isKey||b.isDiamond||b.isWhite||b.isSkull||b.isReverse||b.isBomb)){
+      triggerBlackoutFinale();
+      return;
+    }
+  }
 
   // Update poison ball - freeze during respawn
   if(poisonBall && gameMode==='blackout' && !isRespawning) updatePoisonBall(dt);
@@ -2154,7 +2156,7 @@ function updateFinale(dt){
       }
     }
   }
-  fallingBricks=fallingBricks.filter(fb=>fb.y<H+200);
+  fallingBricks=fallingBricks.filter(fb=>fb.y < H+200 && !isNaN(fb.y));
   for(let p of particles){ p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=0.12*dt;p.life-=0.035*dt; }
   particles=particles.filter(p=>p.life>0);
   if(fallingBricks.length===0 && !gameOver && !finaleTriggered){
@@ -2181,7 +2183,7 @@ function triggerBlackoutFinale(){
       vx:(Math.random()-0.5)*2,
       vy:-(minPop + Math.random()*3),
       color:b.isSteel?'#8a9bb0':b.isPaint?b.color:b.color||'#888',
-      w:b.w, h:b.h,
+      w:b.w||BRICK_W, h:b.h||BRICK_H,
       exploded:false
     });
   });
