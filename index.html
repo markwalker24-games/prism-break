@@ -704,7 +704,7 @@ async function fetchProfiles(userIds) {
   if (toFetch.length) {
     try {
       const res = await fetch(
-        `${SUPA_URL}/rest/v1/profiles?id=in.(${toFetch.map(id => `"${id}"`).join(',')})&select=id,display_name,email`,
+        `${SUPA_URL}/rest/v1/profiles?id=in.(${toFetch.join(',')})&select=id,display_name,email`,
         { headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` } }
       );
       if (res.ok) {
@@ -2707,11 +2707,15 @@ document.getElementById('editMapBtn').addEventListener('click', ()=>{
 function openLevelSelect(autoOpen){
   document.getElementById('levelSelectOverlay').style.display='flex';
   renderLevelList(autoOpen); // render with local data first
-  // Fetch public series, public maps, and challenges in parallel
+  // Fetch public series and public maps in parallel (throttle challenges sync)
+  const now = Date.now();
+  const shouldSyncChallenges = !window._lastChallengeSync || (now - window._lastChallengeSync > 60000);
+  if (shouldSyncChallenges) window._lastChallengeSync = now;
+
   Promise.all([
     fetchPublicSeries(),
     fetchPublicMaps(),
-    syncChallenges()
+    shouldSyncChallenges ? syncChallenges() : Promise.resolve()
   ]).then(([cloudPublic, cloudMaps, _]) => {
     let changed = false;
 
@@ -7217,10 +7221,7 @@ async function syncChallenges() {
     synced.forEach(c => {
       if (!chains[c.chainId]) chains[c.chainId] = c;
     });
-    Object.values(chains).forEach(c => {
-      const baseName = (c.mapName || 'Challenge').replace(/\s+\d+\.\d+$/, '');
-      upsertChallengeSeriesLocally(c.chainId, baseName, c.mapSlug, c.mapName).catch(() => {});
-    });
+    // Note: series are rebuilt when challenges are created/fired back, not on every sync
   } catch(e) { console.warn('syncChallenges failed:', e); }
 }
 
