@@ -1760,6 +1760,9 @@ function resolveBrick(b){
     bricks.splice(bricks.indexOf(b),1);
     const remaining=bricks.filter(x=>x.isDiamond).length;
     if(remaining===0 && gameMode==='escape'){
+      // Stop the timer immediately - freeze elapsed time right now
+      if(ballLaunched && gameStartTime) totalElapsed += (performance.now() - gameStartTime) / 1000;
+      gameStartTime = 0;
       const allBricks=[...bricks];
       bricks=[];
       allBricks.forEach(rb=>{
@@ -5179,7 +5182,7 @@ function endGame(reason){
     `;
   } else {
     buttons=`
-      <button id="endNextBtn" style="${btnStyle('#2ec4b6','rgba(5,25,28,0.95)')}">▶ Next Level</button>
+      ${hasNext ? `<button id="endNextBtn" style="${btnStyle('#2ec4b6','rgba(5,25,28,0.95)')}">▶ Next Level</button>` : ''}
       ${middleBtn}
       <button id="endPlayAgainBtn" style="${btnStyle(titleColor,'rgba(10,15,30,0.95)')}">↺ Play It Again</button>
       <button id="endMenuBtn" style="${ghostBtn}">Home</button>
