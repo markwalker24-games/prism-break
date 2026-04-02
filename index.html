@@ -727,6 +727,7 @@ async function initAuth() {
     _currentUser = session.user;
     window._currentUser = session.user;
     LS.set('pb_creator_id', session.user.id);
+    CREATOR_ID = session.user.id;
     upsertMyProfile(session.user).catch(() => {});
     syncMyDataFromCloud(session.user.id);
   }
@@ -735,6 +736,7 @@ async function initAuth() {
       _currentUser = session.user;
       window._currentUser = session.user;
       LS.set('pb_creator_id', session.user.id);
+      CREATOR_ID = session.user.id;
       updateAuthUI();
       if (event === 'SIGNED_IN') {
         upsertMyProfile(session.user).catch(() => {});
@@ -743,6 +745,7 @@ async function initAuth() {
     } else {
       _currentUser = null;
       window._currentUser = null;
+      CREATOR_ID = getCreatorId();
       updateAuthUI();
     }
   });
@@ -801,7 +804,8 @@ function getCreatorId() {
   }
   return id;
 }
-const CREATOR_ID = getCreatorId();
+// CREATOR_ID is a variable that updates when auth resolves
+let CREATOR_ID = getCreatorId();
 
 function slugify(name) {
   return name.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,40)
