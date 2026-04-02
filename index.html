@@ -682,12 +682,15 @@ async function upsertMyProfile(user) {
   const displayName = user.user_metadata?.full_name ||
                       user.user_metadata?.name ||
                       user.email?.split('@')[0] || 'Player';
-  await fetch(`${SUPA_URL}/rest/v1/profiles`, {
+  // Use the session access token so RLS allows the insert
+  const { data: { session } } = await _supaClient.auth.getSession();
+  const token = session?.access_token || SUPA_KEY;
+  const res = await fetch(`${SUPA_URL}/rest/v1/profiles`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'apikey': SUPA_KEY,
-      'Authorization': `Bearer ${SUPA_KEY}`,
+      'Authorization': `Bearer ${token}`,
       'Prefer': 'resolution=merge-duplicates'
     },
     body: JSON.stringify({
@@ -697,6 +700,7 @@ async function upsertMyProfile(user) {
       avatar_url: user.user_metadata?.avatar_url || null,
     })
   });
+  if (!res.ok) console.warn('Profile upsert failed:', res.status, await res.text());
 }
 
 const _profileCache = {};
