@@ -5197,10 +5197,16 @@ function endGame(reason){
           const existing = await fetch(`${SUPA_URL}/rest/v1/maps?name=eq.${encodeURIComponent(currentLevelData.name)}&select=slug&limit=1`, {
             headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` }
           });
-          if(existing.ok){ const rows=await existing.json(); if(rows.length){ slug=rows[0].slug; currentLevelData.slug=slug; } console.log('Map slug found:', slug); }
+          if(existing.ok){ const rows=await existing.json(); if(rows.length){ slug=rows[0].slug; currentLevelData.slug=slug; } }
         } catch(e){ console.warn('Slug lookup failed:', e); }
-      } else {
-        console.log('Using stored slug:', slug);
+      }
+      // If still no slug, upload the map now to get one
+      if(!slug){
+        try {
+          slug = await upsertMapToCloud(currentLevelData);
+          currentLevelData.slug = slug;
+          console.log('Map uploaded for record tracking, slug:', slug);
+        } catch(e){ console.warn('Map upload for record failed:', e); }
       }
 
       if(!slug){ console.log('No slug found for map, skipping record'); return; }
