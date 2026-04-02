@@ -5221,8 +5221,8 @@ function endGame(reason){
         // New record!
         recordEl.innerHTML = `<span style="color:#f5c842;font-family:'Cinzel',serif;font-size:12px;letter-spacing:0.5px;">🏆 New Time to Beat!</span>`;
         promptInitialsAndSaveRecord(slug, elapsed, ()=>{
-          const initials = getStoredInitials();
-          if(recordEl) recordEl.innerHTML = `<span style="color:#f5c842;font-size:12px;font-family:'Cinzel',serif;">🏆 Time to Beat: <strong>${initials}</strong> — ${formatTime(elapsed)}</span>`;
+          const name = _currentUser ? getDisplayName() : getStoredInitials();
+          if(recordEl) recordEl.innerHTML = `<span style="color:#f5c842;font-size:12px;font-family:'Cinzel',serif;">🏆 Time to Beat: <strong>${name}</strong> — ${formatTime(elapsed)}</span>`;
         });
       } else {
         // Show current record
@@ -6245,6 +6245,11 @@ document.getElementById('howToPlayBtn').addEventListener('click', showHowToPlay)
 // =====================================================================
 let currentMapRecord = null; // loaded when game starts, shown on HUD
 function getStoredInitials(){
+  // Use first name from Google display name if signed in
+  if (_currentUser) {
+    const name = getDisplayName();
+    return name.split(' ')[0];
+  }
   return LS.get('pb_initials') || '';
 }
 function setStoredInitials(val){
@@ -6276,7 +6281,7 @@ async function saveRecord(slug, initials, timeSeconds){
       const patch = await fetch(`${SUPA_URL}/rest/v1/records?slug=eq.${encodeURIComponent(slug)}`, {
         method: 'PATCH',
         headers: { 'Content-Type':'application/json','apikey':SUPA_KEY,'Authorization':`Bearer ${SUPA_KEY}`,'Prefer':'return=minimal' },
-        body: JSON.stringify({ initials: initials.toUpperCase(), time_seconds: timeSeconds })
+        body: JSON.stringify({ initials: initials, time_seconds: timeSeconds })
       });
       if(patch.ok) console.log('Record updated:', initials, timeSeconds);
       else { const e=await patch.text(); console.error('Record update failed:', e); }
@@ -6285,7 +6290,7 @@ async function saveRecord(slug, initials, timeSeconds){
       const post = await fetch(`${SUPA_URL}/rest/v1/records`, {
         method: 'POST',
         headers: { 'Content-Type':'application/json','apikey':SUPA_KEY,'Authorization':`Bearer ${SUPA_KEY}`,'Prefer':'return=minimal' },
-        body: JSON.stringify({ slug, initials: initials.toUpperCase(), time_seconds: timeSeconds })
+        body: JSON.stringify({ slug, initials: initials, time_seconds: timeSeconds })
       });
       if(post.ok) console.log('Record inserted:', initials, timeSeconds);
       else { const e=await post.text(); console.error('Record insert failed:', e); }
@@ -6299,41 +6304,36 @@ function formatTime(seconds){
   return m > 0 ? `${m}:${s}` : `${seconds.toFixed(1)}s`;
 }
 
-function promptInitialsAndSaveRecord(slug, elapsed, onDone){
-  const stored = getStoredInitials();
-  if(stored){
-    // Already have initials - save immediately
-    saveRecord(slug, stored, elapsed).then(onDone);
+async function promptInitialsAndSaveRecord(slug, elapsed, onDone){
+  // If signed in, save immediately using their name
+  if (_currentUser) {
+    const initials = getStoredInitials();
+    await saveRecord(slug, initials, elapsed);
+    if (onDone) onDone();
     return;
   }
-  // Ask for initials
+  // Not signed in - prompt to sign in
   const ov = document.createElement('div');
   ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:600;display:flex;align-items:center;justify-content:center;';
   const panel = document.createElement('div');
-  panel.style.cssText = "background:linear-gradient(160deg,#2a1f10,#1c160d);border:1px solid rgba(200,160,60,0.5);border-radius:4px;padding:28px 22px;width:min(280px,88vw);display:flex;flex-direction:column;align-items:center;gap:14px;box-shadow:0 8px 40px rgba(0,0,0,0.8);font-family:'Lato',sans-serif;";
+  panel.style.cssText = "background:linear-gradient(160deg,#2a1f10,#1c160d);border:1px solid rgba(200,160,60,0.5);border-radius:4px;padding:28px 22px;width:min(300px,88vw);display:flex;flex-direction:column;align-items:center;gap:14px;box-shadow:0 8px 40px rgba(0,0,0,0.8);font-family:'Lato',sans-serif;";
   panel.innerHTML = `
     <div style="font-size:28px;">🏆</div>
     <div style="font-family:'Cinzel',serif;font-size:14px;color:#f5c842;letter-spacing:1px;text-align:center;">NEW TIME TO BEAT!</div>
-    <div style="color:rgba(200,170,90,0.7);font-size:12px;text-align:center;line-height:1.6;">Enter your initials to claim the record.</div>
-    <input id="initialsInput" maxlength="3" placeholder="AAA"
-      style="width:100px;text-align:center;background:rgba(10,8,4,0.9);border:1px solid rgba(200,160,60,0.6);color:#f5c842;font-family:'Cinzel',serif;font-size:28px;font-weight:700;letter-spacing:8px;padding:10px;border-radius:3px;outline:none;text-transform:uppercase;box-sizing:border-box;">
-    <button id="initialsSubmit" style="width:100%;background:linear-gradient(180deg,rgba(60,45,20,0.95),rgba(35,25,10,0.98));border:1px solid rgba(245,200,66,0.6);border-bottom:2px solid rgba(80,50,10,0.9);color:#f5c842;font-family:'Cinzel',serif;font-weight:600;font-size:13px;letter-spacing:1px;padding:12px;cursor:pointer;border-radius:3px;">CLAIM THE RECORD</button>
+    <div style="color:rgba(200,170,90,0.7);font-size:12px;text-align:center;line-height:1.8;">Sign in to claim the record and appear on the leaderboard.</div>
+    <button id="recordSignInBtn" style="width:100%;background:linear-gradient(180deg,rgba(60,45,20,0.95),rgba(35,25,10,0.98));border:1px solid rgba(245,200,66,0.6);border-bottom:2px solid rgba(80,50,10,0.9);color:#f5c842;font-family:'Cinzel',serif;font-weight:600;font-size:13px;letter-spacing:1px;padding:12px;cursor:pointer;border-radius:3px;">SIGN IN WITH GOOGLE</button>
+    <button id="recordSkipBtn" style="background:none;border:none;color:rgba(180,140,60,0.4);font-family:'Cinzel',serif;font-size:11px;cursor:pointer;letter-spacing:1px;">SKIP</button>
   `;
   ov.appendChild(panel);
   document.body.appendChild(ov);
-  const input = panel.querySelector('#initialsInput');
-  setTimeout(()=>input.focus(), 100);
-  input.addEventListener('input', ()=>{ input.value = input.value.toUpperCase().replace(/[^A-Z]/g,''); });
-
-  const submit = ()=>{
-    const val = input.value.trim().toUpperCase().slice(0,3);
-    if(!val) return;
-    setStoredInitials(val);
+  panel.querySelector('#recordSignInBtn').addEventListener('click', () => {
     ov.remove();
-    saveRecord(slug, val, elapsed).then(onDone);
-  };
-  panel.querySelector('#initialsSubmit').addEventListener('click', submit);
-  input.addEventListener('keydown', e=>{ if(e.key==='Enter') submit(); });
+    signInWithGoogle();
+  });
+  panel.querySelector('#recordSkipBtn').addEventListener('click', () => {
+    ov.remove();
+    if (onDone) onDone();
+  });
 }
 
 
