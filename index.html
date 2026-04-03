@@ -2588,6 +2588,12 @@ function startGame(levelData, forcedMode){
   selfDestructBtn.style.display='block';
   showTopBarBtns(true);
 
+  // Show controls orientation on very first game ever
+  if (!LS.get('pb_controls_shown')) {
+    LS.set('pb_controls_shown', '1');
+    setTimeout(() => showControlsTip(), 800);
+  }
+
   // Show how-to-play for first 2 plays
   const howtoCount = parseInt(LS.get('pb_howto_count') || '0', 10);
   if (howtoCount < 2) {
@@ -6053,6 +6059,46 @@ function showNextTip() {
   document.body.appendChild(ov);
 }
 
+function showControlsTip() {
+  gameRunning = false;
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.82);z-index:600;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;';
+
+  const panel = document.createElement('div');
+  panel.style.cssText = "background:linear-gradient(160deg,#0f0c18,#08060f);border:1px solid rgba(180,140,255,0.35);border-radius:4px;padding:28px 22px;width:min(300px,88vw);display:flex;flex-direction:column;align-items:center;gap:14px;box-shadow:0 8px 40px rgba(0,0,0,0.8);font-family:'Lato',sans-serif;text-align:center;";
+
+  panel.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:center;gap:16px;width:100%;">
+      <div style="flex:1;background:rgba(255,255,255,0.06);border:1px solid rgba(180,140,255,0.2);border-radius:8px;padding:14px 8px;display:flex;flex-direction:column;align-items:center;gap:6px;">
+        <div style="font-size:28px;">👈</div>
+        <div style="font-family:'Cinzel',serif;font-size:11px;color:#c8a8ff;letter-spacing:1px;">LEFT SIDE</div>
+        <div style="font-size:11px;color:rgba(200,180,240,0.6);">go left</div>
+      </div>
+      <div style="font-size:22px;color:rgba(180,140,255,0.3);">|</div>
+      <div style="flex:1;background:rgba(255,255,255,0.06);border:1px solid rgba(180,140,255,0.2);border-radius:8px;padding:14px 8px;display:flex;flex-direction:column;align-items:center;gap:6px;">
+        <div style="font-size:28px;">👉</div>
+        <div style="font-family:'Cinzel',serif;font-size:11px;color:#c8a8ff;letter-spacing:1px;">RIGHT SIDE</div>
+        <div style="font-size:11px;color:rgba(200,180,240,0.6);">go right</div>
+      </div>
+    </div>
+    <div style="font-family:'Cinzel',serif;font-size:14px;font-weight:700;color:#e8d5ff;letter-spacing:1px;">HOW TO MOVE</div>
+    <div style="color:rgba(200,180,240,0.75);font-size:12px;line-height:1.9;">
+      Tap the left side of the screen to go left.<br>
+      Tap the right side to go right.<br>
+      <strong style="color:#c8a8ff;">Hold your finger down</strong> to keep moving.<br>
+      <span style="color:rgba(220,100,100,0.8);">Don't swipe — just tap and hold.</span>
+    </div>
+    <button id="controlsTipGotIt" style="width:100%;background:linear-gradient(180deg,rgba(60,40,100,0.98),rgba(40,25,70,0.99));border:1px solid rgba(180,140,255,0.5);color:#c8a8ff;font-family:'Cinzel',serif;font-weight:700;font-size:13px;letter-spacing:1px;padding:12px;cursor:pointer;border-radius:3px;">GOT IT</button>
+  `;
+
+  ov.appendChild(panel);
+  document.body.appendChild(ov);
+  panel.querySelector('#controlsTipGotIt').addEventListener('click', () => {
+    ov.remove();
+    gameRunning = true;
+  });
+}
+
 function showToast(msg,color='#ffd700'){
   const t=document.createElement('div');
   t.style.cssText=`position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:#0f0f1a;border:1px solid ${color};color:${color};font-family:'Press Start 2P',monospace;font-size:7px;padding:10px 16px;border-radius:4px;z-index:500;pointer-events:none;white-space:nowrap;`;
@@ -7039,7 +7085,7 @@ async function resetProgress() {
     } catch(e) { console.warn('Reset cloud progress failed:', e); }
   }
   // Wipe progress keys
-  ['pb_total_diamonds','pb_spent_diamonds','pb_unlocked','pb_completed_maps','pb_quest_index','pb_shown_tips'].forEach(k => LS.remove(k));
+  ['pb_total_diamonds','pb_spent_diamonds','pb_unlocked','pb_completed_maps','pb_quest_index','pb_shown_tips','pb_controls_shown'].forEach(k => LS.remove(k));
   // Wipe all series progress keys (pb_progress_<seriesName>)
   try {
     // Clear by known series names first
