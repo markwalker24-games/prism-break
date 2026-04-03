@@ -6958,8 +6958,21 @@ async function resetProgress() {
       });
     } catch(e) { console.warn('Reset cloud progress failed:', e); }
   }
-  // Wipe all progress keys from localStorage
+  // Wipe progress keys
   ['pb_total_diamonds','pb_spent_diamonds','pb_unlocked','pb_completed_maps','pb_quest_index'].forEach(k => LS.remove(k));
+  // Wipe all series progress keys (pb_progress_<seriesName>)
+  try {
+    // Clear by known series names first
+    savedSeries().forEach(s => clearSeriesProgress(s.name));
+    HARDCODED_SERIES.forEach(s => clearSeriesProgress(s.name));
+    // Also scan all keys as fallback
+    const keys = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith('pb_progress_')) keys.push(k);
+    }
+    keys.forEach(k => localStorage.removeItem(k));
+  } catch(e) { console.warn('Series progress clear failed:', e); }
   updateTotalDiamondDisplay();
   showModeSelect();
   showToast('Progress reset. Fresh start! 💎', '#00eeff');
