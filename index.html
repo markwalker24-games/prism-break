@@ -720,10 +720,9 @@ async function upsertMyProfile(user) {
 
 const _profileCache = {};
 
-async function fetchProfiles(userIds) {
-  const toFetch = userIds.filter(id => id && !_profileCache[id]);
+async function fetchProfiles(userIds, bypassCache = false) {
+  const toFetch = userIds.filter(id => id && (bypassCache || !_profileCache[id]));
   if (toFetch.length) {
-    // Mark as attempted immediately to prevent retry loops
     toFetch.forEach(id => { _profileCache[id] = null; });
     try {
       const res = await fetch(
@@ -733,8 +732,8 @@ async function fetchProfiles(userIds) {
       if (res.ok) {
         const rows = await res.json();
         rows.forEach(r => { _profileCache[r.id] = r.display_name || r.email?.split('@')[0] || 'Player'; });
-      }
-    } catch(e) {}
+      } else { console.warn('fetchProfiles failed:', res.status); }
+    } catch(e) { console.warn('fetchProfiles error:', e); }
   }
   return userIds.reduce((acc, id) => {
     acc[id] = _profileCache[id] || null;
@@ -7223,7 +7222,7 @@ async function showChallengesScreen() {
   const opponentIds = [...new Set(rows.map(r => r.opponentId).filter(Boolean))];
   console.log('[challenges] opponentIds:', opponentIds);
   console.log('[challenges] rows sample:', rows.map(r => ({ mapName: r.c.mapName, senderId: r.c.senderId, recipientId: r.c.recipientId, opponentId: r.opponentId })));
-  const profiles = opponentIds.length ? await fetchProfiles(opponentIds) : {};
+  const profiles = opponentIds.length ? await fetchProfiles(opponentIds, true) : {};
   console.log('[challenges] profiles:', profiles);
 
   const container = document.createElement('div');
