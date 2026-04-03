@@ -532,6 +532,7 @@ let activeBombs=[]; // [{x,y,timer,col,row}] - placed bombs counting down
 let bothSidesHeld=false; // tracks if both sides pressed simultaneously
 let isRespawning=false;
 let lives=3;
+let usedContinue=false; // can only continue once per game
 let controlsReversed=false;
 let fallingBricks=[];
 let finaleTriggered=false;
@@ -601,6 +602,11 @@ function isUnlocked(feature) {
   if (adminMode) return true;
   return getUnlockedFeatures().has(feature);
 }
+function spendDiamonds(count) {
+  LS.set('pb_spent_diamonds', String(getSpentDiamonds() + count));
+  syncProgressToCloud().catch(() => {});
+}
+
 function spendToUnlock(feature) {
   const cost = UNLOCK_COSTS[feature];
   if (!cost) return false;
@@ -2610,7 +2616,7 @@ function startGame(levelData, forcedMode){
   editBtn.style.display = isCustomLevel ? 'block' : 'none';
   score=0; particles=[]; gameOver=false; ballLaunched=false; paused=false;
   gameStartTime=0; totalElapsed=0; portal=null; keysHeld=0; diamondsCollected=0; screenFlash=0;
-  lives=3; controlsReversed=false; fallingBricks=[]; finaleTriggered=false; finaleTimeout=null; bombsHeld=0; activeBombs=[]; bothSidesHeld=false; bothSidesTimestamp=0; isRespawning=false; poisonBall=null; blownUpKeys=[]; deathFreeze=false;
+  lives=3; usedContinue=false; controlsReversed=false; fallingBricks=[]; finaleTriggered=false; finaleTimeout=null; bombsHeld=0; activeBombs=[]; bothSidesHeld=false; bothSidesTimestamp=0; isRespawning=false; poisonBall=null; blownUpKeys=[]; deathFreeze=false;
   if(bothSidesReleaseTimer){ clearTimeout(bothSidesReleaseTimer); bothSidesReleaseTimer=null; }
   bombHud.style.display='none';
   renderLives();
@@ -3946,6 +3952,15 @@ function builderApplyTool(cell){
   if(selectedTool.type==='eraser'){
     if(idx>=0) builderBricks.splice(idx,1);
   } else {
+    // Cap diamonds at 5 per map
+    if (selectedTool.type === 'diamond') {
+      const existingDiamonds = builderBricks.filter(b => b.isDiamond).length;
+      const replacingDiamond = idx >= 0 && builderBricks[idx].isDiamond;
+      if (existingDiamonds >= 5 && !replacingDiamond) {
+        showBuilderToast('Max 5 diamonds per map');
+        return;
+      }
+    }
     const entry={ col:cell.c, row:cell.r,
       color:selectedTool.color||COLORS[0],
       isPaint:selectedTool.type==='paint',
@@ -5231,6 +5246,8 @@ document.getElementById('confirmSaveBtn').addEventListener('click', async ()=>{
       if (saveBtn) { saveBtn.textContent = '💾 SAVE'; saveBtn.style.background = ''; saveBtn.style.borderColor = ''; saveBtn.style.color = ''; }
       const mapsBtn = document.getElementById('builderMapsBtn');
       if (mapsBtn) mapsBtn.style.display = '';
+      const clearBtnRestore = document.getElementById('builderClearBtn');
+      if (clearBtnRestore) clearBtnRestore.style.display = '';
       // Update the auto-growing challenge series
       upsertChallengeSeriesLocally(chainId, baseName || autoName, slug, autoName).catch(() => {});
       closeBuilder();
@@ -5291,15 +5308,32 @@ function endGame(reason){
   ">${inner}</div>`;
 
   if(reason==='dead'){
+    const CONTINUE_COST = 5;
+    const canContinue = !usedContinue && getAvailableDiamonds() >= CONTINUE_COST;
     showMessage(card(`
       <div style="font-size:40px;filter:drop-shadow(0 0 10px rgba(255,40,0,0.6))">💀</div>
       <div style="font-family:'Cinzel',serif;font-size:18px;color:#e55;letter-spacing:1px;text-shadow:0 0 12px rgba(220,50,30,0.5)">GAME OVER</div>
       <div style="color:rgba(180,140,80,0.65);font-size:12px">No lives remaining</div>
       <div style="display:flex;flex-direction:column;gap:8px;width:100%;margin-top:8px;">
+        ${!usedContinue ? `<button id="gameOverContinueBtn" style="width:100%;padding:13px;border-radius:3px;cursor:pointer;font-family:'Cinzel',serif;font-size:13px;font-weight:700;letter-spacing:0.5px;color:${canContinue ? '#00eeff' : 'rgba(0,180,200,0.3)'};background:${canContinue ? 'rgba(0,30,40,0.95)' : 'rgba(10,10,15,0.95)'};border:1px solid ${canContinue ? 'rgba(0,238,255,0.5)' : 'rgba(0,100,120,0.2)'};box-shadow:${canContinue ? '0 0 12px rgba(0,238,255,0.2)' : 'none'};touch-action:manipulation;">💎 CONTINUE — ${CONTINUE_COST} 💎</button>` : ''}
         <button id="gameOverRetryBtn" style="width:100%;padding:13px;border-radius:3px;cursor:pointer;font-family:'Cinzel',serif;font-size:13px;font-weight:600;letter-spacing:0.5px;color:#ff8866;background:rgba(40,10,5,0.95);border:1px solid rgba(200,80,50,0.5);box-shadow:0 0 8px rgba(200,80,50,0.15);touch-action:manipulation;">↺ Try Again</button>
         <button id="gameOverMenuBtn" style="background:none;border:none;color:rgba(180,140,60,0.5);font-family:'Cinzel',serif;font-size:11px;cursor:pointer;letter-spacing:1px;padding:6px;touch-action:manipulation;">Main Menu</button>
       </div>
     `));
+    if (!usedContinue) {
+      document.getElementById('gameOverContinueBtn').addEventListener('click', () => {
+        if (!canContinue) {
+          showToast(`Need ${CONTINUE_COST} 💎 to continue`, '#00eeff');
+          return;
+        }
+        usedContinue = true;
+        spendDiamonds(CONTINUE_COST);
+        updateTotalDiamondDisplay();
+        hideMessage();
+        lives = 1;
+        restartGame();
+      });
+    }
     document.getElementById('gameOverRetryBtn').addEventListener('click',()=>{ hideMessage(); restartGame(); });
     document.getElementById('gameOverMenuBtn').addEventListener('click',()=>{ hideMessage(); showModeSelect(); });
     return;
@@ -7664,6 +7698,8 @@ function showChallengeWinCTA(chainId, round, challengeId, senderCreatorId, level
     if (saveBtn) { saveBtn.textContent = '🔥 FIRE BACK'; saveBtn.style.background = 'linear-gradient(180deg,rgba(80,10,10,0.98),rgba(50,5,5,0.99))'; saveBtn.style.borderColor = 'rgba(220,60,60,0.7)'; saveBtn.style.color = '#e63946'; }
     const mapsBtn = document.getElementById('builderMapsBtn');
     if (mapsBtn) mapsBtn.style.display = 'none';
+    const clearBtn2 = document.getElementById('builderClearBtn');
+    if (clearBtn2) clearBtn2.style.display = 'none';
   });
 
   panel.querySelector('#challengeSkipBtn').addEventListener('click', () => {
@@ -7901,6 +7937,8 @@ async function showChallengesScreen() {
                 if (saveBtn) { saveBtn.textContent = '🔥 RESEND'; saveBtn.style.background = 'linear-gradient(180deg,rgba(80,10,10,0.98),rgba(50,5,5,0.99))'; saveBtn.style.borderColor = 'rgba(220,60,60,0.7)'; saveBtn.style.color = '#e63946'; }
                 const mapsBtn = document.getElementById('builderMapsBtn');
                 if (mapsBtn) mapsBtn.style.display = 'none';
+    const clearBtn2 = document.getElementById('builderClearBtn');
+    if (clearBtn2) clearBtn2.style.display = 'none';
               });
             });
           } catch(e) { showToast('⚠️ Could not load map'); }
@@ -7928,6 +7966,8 @@ async function showChallengesScreen() {
             if (saveBtn) { saveBtn.textContent = '🔥 FIRE BACK'; saveBtn.style.background = 'linear-gradient(180deg,rgba(80,10,10,0.98),rgba(50,5,5,0.99))'; saveBtn.style.borderColor = 'rgba(220,60,60,0.7)'; saveBtn.style.color = '#e63946'; }
             const mapsBtn = document.getElementById('builderMapsBtn');
             if (mapsBtn) mapsBtn.style.display = 'none';
+    const clearBtn2 = document.getElementById('builderClearBtn');
+    if (clearBtn2) clearBtn2.style.display = 'none';
           });
         }
       } catch(e) { showToast('⚠️ Could not load challenge'); showModeSelect(); }
