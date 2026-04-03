@@ -5586,7 +5586,11 @@ function showModeSelect(){
     badge.style.display = 'inline-block';
   }
 
-  document.getElementById('modeChallenges').addEventListener('click', () => { hideMessage(); showChallengesScreen(); });
+  document.getElementById('modeChallenges').addEventListener('click', async () => {
+    hideMessage();
+    await syncChallenges();
+    showChallengesScreen();
+  });
 
   // Featured quest button (series index 0 only)
   const featuredBtn = document.getElementById('modeHardcoded0');
@@ -7120,6 +7124,8 @@ function showChallengeWaitingPopup(c, onEditMap) {
 
 async function showChallengesScreen() {
   const challenges = getLocalChallenges();
+  // Clear profile cache so we get fresh names
+  Object.keys(_profileCache).forEach(k => { if (_profileCache[k] === null) delete _profileCache[k]; });
   const rows = challenges.map(c => {
     const iMSent = c.senderId === CREATOR_ID;
     const isMyTurn = !iMSent && !c.beaten;
