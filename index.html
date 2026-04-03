@@ -721,18 +721,23 @@ async function upsertMyProfile(user) {
 const _profileCache = {};
 
 async function fetchProfiles(userIds, bypassCache = false) {
-  const toFetch = userIds.filter(id => id && (bypassCache || !_profileCache[id]));
+  const toFetch = userIds.filter(id => id && id.length > 10 && (bypassCache || !_profileCache[id]));
   if (toFetch.length) {
     toFetch.forEach(id => { _profileCache[id] = null; });
     try {
-      const res = await fetch(
-        `${SUPA_URL}/rest/v1/profiles?id=in.(${toFetch.join(',')})&select=id,display_name,email`,
-        { headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` } }
-      );
-      if (res.ok) {
-        const rows = await res.json();
-        rows.forEach(r => { _profileCache[r.id] = r.display_name || r.email?.split('@')[0] || 'Player'; });
-      } else { console.warn('fetchProfiles failed:', res.status); }
+      // Fetch each profile individually to avoid in.() syntax issues
+      await Promise.all(toFetch.map(async id => {
+        try {
+          const res = await fetch(
+            `${SUPA_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(id)}&select=id,display_name,email&limit=1`,
+            { headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` } }
+          );
+          if (res.ok) {
+            const rows = await res.json();
+            if (rows.length) _profileCache[id] = rows[0].display_name || rows[0].email?.split('@')[0] || 'Player';
+          }
+        } catch(e) {}
+      }));
     } catch(e) { console.warn('fetchProfiles error:', e); }
   }
   return userIds.reduce((acc, id) => {
