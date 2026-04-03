@@ -1903,6 +1903,7 @@ function resolveBrick(b){
     spawnParticles(b.x+b.w/2,b.y+b.h/2,'#cc00ff',18);
     screenFlash=5;
     bricks.splice(bricks.indexOf(b),1);
+    queueBrickTip('reverse', 'images/brick_reverse.png', 'Reverse Brick!', 'Your controls are now reversed! Left goes right, right goes left. Hit another one to flip back — or just adapt. 😈');
   }
   else if(b.isWhite){
     if(ball.color==='#ffffff'){
@@ -1918,6 +1919,7 @@ function resolveBrick(b){
     for(let i=0;i<6;i++) spawnDiamondBurst(b.x+b.w/2, b.y+b.h/2);
     screenFlash=8;
     bricks.splice(bricks.indexOf(b),1);
+    queueBrickTip('diamond', 'images/brick_diamond.png', 'Diamond!', 'Diamonds are your currency. Collect them to unlock new game modes and features. You\'ll earn them at the end of each map you complete for the first time.');
     const remaining=bricks.filter(x=>x.isDiamond).length;
     if(remaining===0 && gameMode==='escape'){
       // Stop the timer immediately - freeze elapsed time right now
@@ -6628,13 +6630,19 @@ async function loadActiveSeries() {
       // Keep hardcoded synced for local progress tracking
       HARDCODED_SERIES.length = 0;
       cloud.forEach(s => HARDCODED_SERIES.push(s));
+      // Persist to localStorage
+      HARDCODED_SERIES.forEach(hs => { saveSeries(hs); });
+      // Re-init quest order if needed
+      if (!getQuestOrder().length && HARDCODED_SERIES[0]) {
+        setQuestOrder([HARDCODED_SERIES[0].name]);
+      }
     }
   } catch(e) {
     console.warn('Could not load cloud series, using hardcoded:', e);
   }
 }
 
-// Init: load cloud series, seed hardcoded only if nothing stored yet
+// Init: seed hardcoded series if nothing stored yet, restore local state
 (function initSeries(){
   // Only seed hardcoded if user has no series stored yet (first ever load)
   const existing = savedSeries();
@@ -6648,17 +6656,6 @@ async function loadActiveSeries() {
   if(!getQuestOrder().length && HARDCODED_SERIES[0]) {
     setQuestOrder([HARDCODED_SERIES[0].name]);
   }
-  // Load from cloud - this will overwrite local with latest pushed version
-  loadActiveSeries().then(()=>{
-    // After cloud load, persist the updated series to localStorage
-    HARDCODED_SERIES.forEach(hs=>{ saveSeries(hs); });
-    const featured = LS.get('pb_featured_series');
-    if(featured) setFeaturedSeriesName(featured);
-    // Re-init quest order after cloud load if still empty
-    if(!getQuestOrder().length && HARDCODED_SERIES[0]) {
-      setQuestOrder([HARDCODED_SERIES[0].name]);
-    }
-  }).catch(()=>{});
 })();
 
 // How to Play overlay
@@ -8031,11 +8028,15 @@ async function syncChallenges() {
 
 // Kick off the game loop and show home screen
 requestAnimationFrame(loop);
-loadQuestOrderFromCloud().catch(() => {});
-initAuth().then(() => {
-  updateAuthUI();
-  updateTotalDiamondDisplay();
-  showModeSelect();
+Promise.all([
+  loadQuestOrderFromCloud().catch(() => {}),
+  loadActiveSeries().catch(() => {})
+]).then(() => {
+  initAuth().then(() => {
+    updateAuthUI();
+    updateTotalDiamondDisplay();
+    showModeSelect();
+  });
 });
 
 </script>
