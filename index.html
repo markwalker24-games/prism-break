@@ -219,7 +219,7 @@
 <body>
 
 <div id="topbar">
-  <div id="ui">SCORE: <span id="scoreDisplay">0</span> &nbsp; <span style="color:#ffd700">🔑</span> <span id="keyDisplay" style="color:#ffd700">0</span> &nbsp; <span id="bombHud" style="color:#ff6600;display:none">💣 <span id="bombDisplay">0</span></span> &nbsp; <span id="diamondHud" style="color:#00eeff;display:none">💎 <span id="diamondDisplay">0</span>/<span id="diamondTotal">0</span></span></div>
+  <div id="ui"><span style="color:#00eeff;">💎</span> <span id="totalDiamondDisplay" style="color:#00eeff;font-weight:700;">0</span> &nbsp; <span style="color:#ffd700">🔑</span> <span id="keyDisplay" style="color:#ffd700">0</span> &nbsp; <span id="bombHud" style="color:#ff6600;display:none">💣 <span id="bombDisplay">0</span></span> &nbsp; <span id="diamondHud" style="color:#00eeff;display:none">💎 <span id="diamondDisplay">0</span>/<span id="diamondTotal">0</span></span></div>
   <div style="display:flex;align-items:center;gap:8px;">
     <div id="livesDisplay" style="display:flex;gap:4px;align-items:center;"></div>
     <button id="selfDestructBtn" title="Self Destruct" style="
@@ -256,19 +256,6 @@
     </button>
   </div>
   <div style="display:flex;align-items:center;gap:6px;">
-    <button id="authBtn" title="Sign in with Google" style="
-      background:linear-gradient(160deg,rgba(40,28,8,0.95),rgba(25,17,5,0.98));
-      border:1px solid rgba(180,140,50,0.45);
-      border-bottom:2px solid rgba(80,50,10,0.8);
-      border-radius:4px; cursor:pointer;
-      padding:4px 8px;
-      display:flex; align-items:center; justify-content:center;
-      touch-action:manipulation;
-      -webkit-tap-highlight-color:transparent;
-      box-shadow:0 0 6px rgba(200,160,60,0.12);
-      color:#f5c842; font-family:'Lato',sans-serif; font-size:11px; font-weight:700;
-      white-space:nowrap; flex-shrink:0;
-    "><span style="font-size:11px;">Sign In</span></button>
     <button id="howToPlayBtn" title="How to Play" style="
       background:linear-gradient(160deg,rgba(40,28,8,0.95),rgba(25,17,5,0.98));
       border:1px solid rgba(180,140,50,0.45);
@@ -481,7 +468,7 @@ const canvas      = document.getElementById('gameCanvas');
 const ctx         = canvas.getContext('2d');
 const bCanvas     = document.getElementById('builderCanvas');
 const bCtx        = bCanvas.getContext('2d');
-const scoreDisplay= document.getElementById('scoreDisplay');
+const scoreDisplay= { textContent: 0 }; // removed from UI but keep reference to avoid errors
 const keyDisplay  = document.getElementById('keyDisplay');
 const diamondDisplay = document.getElementById('diamondDisplay');
 const diamondTotal   = document.getElementById('diamondTotal');
@@ -579,6 +566,62 @@ const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsI
 
 // Base URL for share links
 const GAME_URL = 'https://prismbreak.app/';
+
+// =====================================================================
+// DIAMOND PROGRESSION SYSTEM
+// =====================================================================
+const UNLOCK_COSTS = {
+  challenge_builder: 10,  // fire back on challenges
+  breakout:          20,
+  full_builder:      30,  // full map builder + issue challenges
+  blackout:          40,
+  choose_map:        50,
+};
+const CHALLENGE_DIAMOND_CAP = 3;
+
+function getTotalDiamonds() {
+  return parseInt(LS.get('pb_total_diamonds') || '0', 10);
+}
+function getSpentDiamonds() {
+  return parseInt(LS.get('pb_spent_diamonds') || '0', 10);
+}
+function getAvailableDiamonds() {
+  return getTotalDiamonds() - getSpentDiamonds();
+}
+function addDiamonds(count) {
+  const newTotal = getTotalDiamonds() + count;
+  LS.set('pb_total_diamonds', String(newTotal));
+  return newTotal;
+}
+function getUnlockedFeatures() {
+  try { return new Set(JSON.parse(LS.get('pb_unlocked') || '[]')); } catch(e) { return new Set(); }
+}
+function isUnlocked(feature) {
+  return getUnlockedFeatures().has(feature);
+}
+function spendToUnlock(feature) {
+  const cost = UNLOCK_COSTS[feature];
+  if (!cost) return false;
+  if (isUnlocked(feature)) return true; // already unlocked
+  if (getAvailableDiamonds() < cost) return false; // can't afford
+  // Deduct and unlock
+  LS.set('pb_spent_diamonds', String(getSpentDiamonds() + cost));
+  const unlocked = getUnlockedFeatures();
+  unlocked.add(feature);
+  LS.set('pb_unlocked', JSON.stringify([...unlocked]));
+  return true;
+}
+function getCompletedMaps() {
+  try { return new Set(JSON.parse(LS.get('pb_completed_maps') || '[]')); } catch(e) { return new Set(); }
+}
+function markMapCompleted(slug) {
+  const completed = getCompletedMaps();
+  completed.add(slug);
+  LS.set('pb_completed_maps', JSON.stringify([...completed]));
+}
+function hasCompletedMap(slug) {
+  return getCompletedMaps().has(slug);
+}
 function getShareUrl(slug) {
   return `${GAME_URL}?map=${slug}`;
 }
@@ -734,7 +777,10 @@ async function fetchProfiles(userIds, bypassCache = false) {
           );
           if (res.ok) {
             const rows = await res.json();
-            if (rows.length) _profileCache[id] = rows[0].display_name || rows[0].email?.split('@')[0] || 'Player';
+            if (rows.length) {
+              const fullName = rows[0].display_name || rows[0].email?.split('@')[0] || 'Player';
+              _profileCache[id] = fullName.split(' ')[0];
+            }
           }
         } catch(e) {}
       }));
@@ -796,6 +842,11 @@ function getDisplayName() {
          _currentUser.user_metadata?.name ||
          _currentUser.email?.split('@')[0] ||
          'Player';
+}
+
+function updateTotalDiamondDisplay() {
+  const el = document.getElementById('totalDiamondDisplay');
+  if (el) el.textContent = getAvailableDiamonds();
 }
 
 function updateAuthUI() {
@@ -2385,12 +2436,6 @@ function draw(){
     screenFlash--;
   }
   if(gameRunning){
-    const modeLabel=gameMode==='escape'?'🌀 BREAK OUT':'💥 BLACK OUT';
-    const modeColor=gameMode==='escape'?'#ffd700':'#2ec4b6';
-    ctx.fillStyle=modeColor;
-    ctx.font='6px "Press Start 2P",monospace';
-    ctx.textAlign='left';
-    ctx.fillText(modeLabel, 6, 14);
     // Reversed controls indicator
     if(controlsReversed){
       const t=performance.now()*0.004;
@@ -5270,6 +5315,26 @@ function endGame(reason){
 
       if(!slug){ console.log('No slug found for map, skipping record'); return; }
 
+      // Award diamonds on completion
+      // Auto-generated arcade maps award every time; named maps award once per slug
+      const isRandomGame = !currentLevelData || !currentLevelData.name;
+      const alreadyCompleted = !isRandomGame && hasCompletedMap(slug);
+      if (!testingLevel && !alreadyCompleted) {
+        const diamondsInMap = currentLevelData.bricks ? currentLevelData.bricks.filter(b => b.isDiamond).length : 0;
+        let diamondsEarned = diamondsInMap;
+        // Blackout gets a flat 5 diamonds (no diamonds in map by design)
+        if (gameMode === 'blackout') diamondsEarned = 5;
+        // Cap challenge diamonds
+        if (isChallengeMap) diamondsEarned = Math.min(diamondsEarned, CHALLENGE_DIAMOND_CAP);
+        // Award at least 1 diamond for completing any map
+        diamondsEarned = Math.max(diamondsEarned, 1);
+        // Only mark named maps as completed (not random arcade games)
+        if (!isRandomGame) markMapCompleted(slug);
+        const newTotal = addDiamonds(diamondsEarned);
+        updateTotalDiamondDisplay();
+        setTimeout(() => showDiamondAlert(diamondsEarned), 800);
+      }
+
       const record = await fetchRecord(slug);
       const recordEl = document.getElementById('recordDisplay');
       if(!recordEl) return;
@@ -5355,6 +5420,15 @@ function endGame(reason){
 
     document.getElementById('endChallengeFireBackBtn').addEventListener('click',()=>{
       if(!activeChallengeCtx) return;
+      if(!isUnlocked('challenge_builder')){
+        showSpendConfirm('challenge_builder', 'Challenge Builder', () => {
+          requireSignIn(() => {
+            activeChallengeCtx = null;
+            showChallengeWinCTA(chainId, round, challengeId, senderCreatorId, capturedLevel);
+          });
+        });
+        return;
+      }
       const { chainId, round, challengeId, senderCreatorId } = activeChallengeCtx;
       const capturedLevel = currentLevelData;
       requireSignIn(() => {
@@ -5477,6 +5551,11 @@ function showModeSelect(){
         color:#f5c842;letter-spacing:3px;
         text-shadow:0 0 20px rgba(245,200,66,0.5),0 2px 4px rgba(0,0,0,0.8);
       ">PRISM BREAK</div>
+      <div style="margin-top:6px;display:flex;align-items:center;justify-content:center;gap:6px;">
+        <span style="font-size:16px;filter:drop-shadow(0 0 6px rgba(0,238,255,0.6));">💎</span>
+        <span style="font-family:'Cinzel',serif;font-size:14px;font-weight:700;color:#00eeff;letter-spacing:1px;">${getAvailableDiamonds()}</span>
+        <span style="font-family:'Lato',sans-serif;font-size:10px;color:rgba(0,200,220,0.5);letter-spacing:1px;">DIAMONDS</span>
+      </div>
       <div style="height:1px;background:linear-gradient(90deg,transparent,rgba(200,160,60,0.5),transparent);margin-top:8px;"></div>
     </div>
 
@@ -5486,16 +5565,17 @@ function showModeSelect(){
     <!-- Choose Map - same section as quest -->
     <button id="modeSelectLevel" style="
       width:100%;
-      background:linear-gradient(160deg,rgba(25,18,8,0.95),rgba(15,10,4,0.97));
-      border:1px solid rgba(180,140,50,0.3);
+      background:${isUnlocked('choose_map') ? 'linear-gradient(160deg,rgba(25,18,8,0.95),rgba(15,10,4,0.97))' : 'rgba(10,10,15,0.97)'};
+      border:1px solid ${isUnlocked('choose_map') ? 'rgba(180,140,50,0.3)' : 'rgba(100,100,120,0.3)'};
       box-shadow:0 2px 12px rgba(0,0,0,0.4),inset 0 1px 0 rgba(255,220,100,0.08);
-      color:rgba(200,170,90,0.85);
+      color:${isUnlocked('choose_map') ? 'rgba(200,170,90,0.85)' : 'rgba(150,150,180,0.5)'};
       font-family:'Cinzel',serif;font-size:13px;font-weight:600;letter-spacing:1px;
       padding:12px 14px;cursor:pointer;border-radius:4px;
       display:flex;align-items:center;justify-content:center;gap:10px;
-      touch-action:manipulation;">
-      <span style="font-size:16px;opacity:0.7">📜</span>
+      touch-action:manipulation;${isUnlocked('choose_map') ? '' : 'opacity:0.5;'}">
+      <span style="font-size:16px;opacity:0.7">${isUnlocked('choose_map') ? '📜' : '🔒'}</span>
       <span>CHOOSE MAP</span>
+      ${!isUnlocked('choose_map') ? `<span style="font-size:11px;color:rgba(0,238,255,0.5);font-family:'Lato',sans-serif;font-weight:400;">${UNLOCK_COSTS.choose_map} 💎</span>` : ''}
     </button>
 
     <!-- Challenges -->
@@ -5532,12 +5612,13 @@ function showModeSelect(){
     <!-- Divider -->
     <div style="display:flex;align-items:center;gap:8px;margin:2px 0;">
       <div style="flex:1;height:1px;background:linear-gradient(90deg,transparent,rgba(180,140,50,0.3));"></div>
-      <span style="color:rgba(180,140,60,0.5);font-size:10px;font-family:'Cinzel',serif;letter-spacing:2px;white-space:nowrap;">ADVENTURE</span>
+      <span style="color:rgba(180,140,60,0.5);font-size:10px;font-family:'Cinzel',serif;letter-spacing:2px;white-space:nowrap;">ARCADE</span>
       <div style="flex:1;height:1px;background:linear-gradient(270deg,transparent,rgba(180,140,50,0.3));"></div>
     </div>
 
     <!-- Break Out / Black Out -->
     <div style="display:flex;gap:8px;">
+      ${isUnlocked('breakout') ? `
       <button id="modeBreakout" style="
         flex:1;
         background:linear-gradient(160deg,rgba(10,25,45,0.97),rgba(5,15,30,0.98));
@@ -5550,8 +5631,20 @@ function showModeSelect(){
         <canvas id="breakoutIcon" width="40" height="26" style="width:40px;height:26px;border-radius:3px;filter:drop-shadow(0 0 8px rgba(60,180,255,0.4))"></canvas>
         <span>BREAK OUT</span>
         <span style="font-size:10px;color:rgba(120,180,255,0.6);font-family:'Lato',sans-serif;font-weight:400;letter-spacing:0">Collect all diamonds</span>
-        <span style="font-size:9px;color:rgba(80,140,220,0.45);font-family:'Lato',sans-serif;font-weight:400;letter-spacing:1px">PUZZLE MODE</span>
-      </button>
+      </button>` : `
+      <button id="modeBreakout" style="
+        flex:1;opacity:0.5;
+        background:rgba(10,10,15,0.97);
+        border:1px solid rgba(100,100,120,0.3);
+        color:rgba(150,150,180,0.6);font-family:'Cinzel',serif;font-size:12px;font-weight:600;letter-spacing:0.5px;
+        padding:14px 8px;cursor:pointer;border-radius:4px;
+        display:flex;flex-direction:column;align-items:center;gap:6px;
+        touch-action:manipulation;">
+        <span style="font-size:20px;">🔒</span>
+        <span>BREAK OUT</span>
+        <span style="font-size:10px;color:rgba(0,238,255,0.5);font-family:'Lato',sans-serif;">${UNLOCK_COSTS.breakout} 💎</span>
+      </button>`}
+      ${isUnlocked('blackout') ? `
       <button id="modeBlackout" style="
         flex:1;
         background:linear-gradient(160deg,rgba(35,10,5,0.97),rgba(20,5,3,0.98));
@@ -5564,8 +5657,19 @@ function showModeSelect(){
         <canvas id="blackoutIcon" width="40" height="26" style="width:40px;height:26px;border-radius:3px;filter:drop-shadow(0 0 8px rgba(255,100,40,0.4))"></canvas>
         <span>BLACK OUT</span>
         <span style="font-size:10px;color:rgba(255,140,80,0.6);font-family:'Lato',sans-serif;font-weight:400;letter-spacing:0">Clear all bricks</span>
-        <span style="font-size:9px;color:rgba(200,100,50,0.45);font-family:'Lato',sans-serif;font-weight:400;letter-spacing:1px">ARCADE MODE</span>
-      </button>
+      </button>` : `
+      <button id="modeBlackout" style="
+        flex:1;opacity:0.5;
+        background:rgba(10,10,15,0.97);
+        border:1px solid rgba(100,100,120,0.3);
+        color:rgba(150,150,180,0.6);font-family:'Cinzel',serif;font-size:12px;font-weight:600;letter-spacing:0.5px;
+        padding:14px 8px;cursor:pointer;border-radius:4px;
+        display:flex;flex-direction:column;align-items:center;gap:6px;
+        touch-action:manipulation;">
+        <span style="font-size:20px;">🔒</span>
+        <span>BLACK OUT</span>
+        <span style="font-size:10px;color:rgba(0,238,255,0.5);font-family:'Lato',sans-serif;">${UNLOCK_COSTS.blackout} 💎</span>
+      </button>`}
     </div>
 
     <!-- Divider -->
@@ -5576,6 +5680,7 @@ function showModeSelect(){
     </div>
 
     <!-- Map Builder -->
+    ${isUnlocked('full_builder') ? `
     <button id="modeBuilder" style="
       width:100%;
       background:linear-gradient(160deg,rgba(40,28,8,0.97),rgba(25,17,5,0.98));
@@ -5592,7 +5697,18 @@ function showModeSelect(){
         <path d="M17 13v8M13 17h8"/>
       </svg>
       <span>MAP BUILDER</span>
-    </button>
+    </button>` : `
+    <button id="modeBuilder" style="
+      width:100%;opacity:0.5;
+      background:rgba(10,10,15,0.97);
+      border:1px solid rgba(100,100,120,0.3);
+      color:rgba(150,150,180,0.6);font-family:'Cinzel',serif;font-size:13px;font-weight:600;letter-spacing:1px;
+      padding:13px 12px;cursor:pointer;border-radius:4px;
+      display:flex;align-items:center;justify-content:center;gap:10px;
+      touch-action:manipulation;">
+      <span>🔒 MAP BUILDER</span>
+      <span style="font-size:11px;color:rgba(0,238,255,0.5);font-family:'Lato',sans-serif;font-weight:400;">${UNLOCK_COSTS.full_builder} 💎</span>
+    </button>`}
 
   </div>`;
 
@@ -5630,12 +5746,24 @@ function showModeSelect(){
       hideMessage(); playSeries(live);
     });
   }
-  document.getElementById('modeBreakout').addEventListener('click',()=>{ hideMessage(); startGame(null,'escape'); });
-  document.getElementById('modeBlackout').addEventListener('click',()=>{ hideMessage(); startGame(null,'blackout'); });
-  document.getElementById('modeBuilder').addEventListener('click',()=>{ hideMessage(); openBuilder(); });
+  document.getElementById('modeBreakout').addEventListener('click',()=>{
+    if(!isUnlocked('breakout')){ showSpendConfirm('breakout', 'Breakout Mode', ()=>{ hideMessage(); startGame(null,'escape'); }); return; }
+    hideMessage(); startGame(null,'escape');
+  });
+  document.getElementById('modeBlackout').addEventListener('click',()=>{
+    if(!isUnlocked('blackout')){ showSpendConfirm('blackout', 'Blackout Mode', ()=>{ hideMessage(); startGame(null,'blackout'); }); return; }
+    hideMessage(); startGame(null,'blackout');
+  });
+  document.getElementById('modeBuilder').addEventListener('click',()=>{
+    if(!isUnlocked('full_builder')){ showSpendConfirm('full_builder', 'Map Builder', ()=>{ hideMessage(); openBuilder(); }); return; }
+    hideMessage(); openBuilder();
+  });
   document.getElementById('modeLeaderboard').addEventListener('click', () => showLeaderboard());
 
-document.getElementById('modeSelectLevel').addEventListener('click',()=>{ hideMessage(); openLevelSelect(); });
+document.getElementById('modeSelectLevel').addEventListener('click',()=>{
+  if(!isUnlocked('choose_map')){ showSpendConfirm('choose_map', 'Choose Map', ()=>{ hideMessage(); openLevelSelect(); }); return; }
+  hideMessage(); openLevelSelect();
+});
 
   // Draw lock image on breakout icon - wait for image if not yet loaded
   const drawBreakoutIcon = ()=>{
@@ -6592,6 +6720,64 @@ async function fetchLeaderboard() {
   } catch(e) { console.warn('fetchLeaderboard failed:', e); return []; }
 }
 
+function showSpendConfirm(feature, featureName, onUnlocked) {
+  const cost = UNLOCK_COSTS[feature];
+  const available = getAvailableDiamonds();
+  const canAfford = available >= cost;
+
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:700;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;';
+  const panel = document.createElement('div');
+  panel.style.cssText = "background:linear-gradient(160deg,#0a0f1a,#060a12);border:1px solid rgba(0,238,255,0.4);border-radius:4px;padding:28px 22px;width:min(300px,88vw);display:flex;flex-direction:column;align-items:center;gap:14px;box-shadow:0 8px 40px rgba(0,0,0,0.8);font-family:'Lato',sans-serif;text-align:center;";
+  panel.innerHTML = `
+    <div style="font-size:32px;">💎</div>
+    <div style="font-family:'Cinzel',serif;font-size:15px;font-weight:700;color:#00eeff;letter-spacing:1px;">UNLOCK ${featureName.toUpperCase()}</div>
+    <div style="color:rgba(0,200,220,0.7);font-size:13px;line-height:1.8;">
+      Trade <strong style="color:#00eeff;">${cost} 💎</strong><br>
+      <span style="font-size:11px;color:rgba(0,180,200,0.5);">You have ${available} 💎 available</span>
+    </div>
+    ${canAfford ? `
+      <button id="spendConfirmBtn" style="width:100%;background:linear-gradient(180deg,rgba(0,60,80,0.98),rgba(0,40,60,0.99));border:1px solid rgba(0,238,255,0.6);border-bottom:2px solid rgba(0,80,100,0.9);color:#00eeff;font-family:'Cinzel',serif;font-weight:700;font-size:13px;letter-spacing:1px;padding:13px;cursor:pointer;border-radius:3px;">TRADE ${cost} 💎</button>
+    ` : `
+      <div style="color:rgba(220,100,100,0.7);font-size:12px;">Not enough diamonds.<br>Keep playing to earn more!</div>
+    `}
+    <button id="spendCancelBtn" style="background:none;border:none;color:rgba(0,180,200,0.4);font-family:'Cinzel',serif;font-size:11px;cursor:pointer;letter-spacing:1px;">CANCEL</button>
+  `;
+  ov.appendChild(panel);
+  document.body.appendChild(ov);
+
+  if (canAfford) {
+    panel.querySelector('#spendConfirmBtn').addEventListener('click', () => {
+      ov.remove();
+      spendToUnlock(feature);
+      updateTotalDiamondDisplay();
+      showModeSelect(); // refresh home screen to show unlocked state
+      onUnlocked();
+    });
+  }
+  panel.querySelector('#spendCancelBtn').addEventListener('click', () => ov.remove());
+  ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+}
+
+function showDiamondAlert(earned) {
+  const available = getAvailableDiamonds();
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:600;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;';
+  const panel = document.createElement('div');
+  panel.style.cssText = "background:linear-gradient(160deg,#0a0f1a,#060a12);border:1px solid rgba(0,238,255,0.4);border-radius:4px;padding:24px 20px;width:min(280px,88vw);display:flex;flex-direction:column;align-items:center;gap:10px;box-shadow:0 8px 40px rgba(0,0,0,0.8);font-family:'Lato',sans-serif;text-align:center;";
+  panel.innerHTML = `
+    <div style="font-size:36px;filter:drop-shadow(0 0 12px rgba(0,238,255,0.6));">💎</div>
+    <div style="font-family:'Cinzel',serif;font-size:16px;font-weight:700;color:#00eeff;letter-spacing:1px;">+${earned} DIAMOND${earned !== 1 ? 'S' : ''}!</div>
+    <div style="color:rgba(0,200,220,0.6);font-size:12px;">${available} 💎 available</div>
+    <button id="diamondAlertClose" style="width:100%;background:none;border:1px solid rgba(0,238,255,0.3);color:rgba(0,200,220,0.7);font-family:'Cinzel',serif;font-size:12px;padding:10px;cursor:pointer;border-radius:3px;margin-top:4px;letter-spacing:1px;">NICE!</button>
+  `;
+  ov.appendChild(panel);
+  document.body.appendChild(ov);
+  panel.querySelector('#diamondAlertClose').addEventListener('click', () => ov.remove());
+  ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+  setTimeout(() => ov.remove(), 4000);
+}
+
 function showLeaderboard() {
   const ov = document.createElement('div');
   ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:500;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;';
@@ -7225,10 +7411,7 @@ async function showChallengesScreen() {
 
   // Fetch opponent profiles
   const opponentIds = [...new Set(rows.map(r => r.opponentId).filter(Boolean))];
-  console.log('[challenges] opponentIds:', opponentIds);
-  console.log('[challenges] rows sample:', rows.map(r => ({ mapName: r.c.mapName, senderId: r.c.senderId, recipientId: r.c.recipientId, opponentId: r.opponentId })));
   const profiles = opponentIds.length ? await fetchProfiles(opponentIds, true) : {};
-  console.log('[challenges] profiles:', profiles);
 
   const container = document.createElement('div');
   container.style.cssText = "width:min(340px,92vw);display:flex;flex-direction:column;gap:0;font-family:'Lato',sans-serif;";
@@ -7240,7 +7423,7 @@ async function showChallengesScreen() {
   container.appendChild(hdr);
 
   const tagline = document.createElement('div');
-  tagline.style.cssText = "color:rgba(200,150,150,0.6);font-family:'Lato',sans-serif;font-size:12px;text-align:center;line-height:1.6;margin-bottom:12px;";
+  tagline.style.cssText = "color:rgba(200,150,150,0.7);font-family:'Lato',sans-serif;font-size:14px;text-align:center;line-height:1.7;margin-bottom:12px;";
   tagline.textContent = 'Create a map. Send it to a friend. They beat it and make it harder. You beat that and make it harder. See who taps out first.';
   container.appendChild(tagline);
 
@@ -7270,7 +7453,7 @@ async function showChallengesScreen() {
       const left = document.createElement('div');
       left.style.cssText = 'display:flex;flex-direction:column;gap:3px;';
       const opponentName = profiles[r.opponentId] || null;
-      const vsLabel = opponentName ? `vs. ${opponentName}` : (r.opponentId ? `vs. ${r.opponentId.slice(0,8)}...` : '');
+      const vsLabel = opponentName ? `vs. ${opponentName}` : '';
       left.innerHTML = '<div style="color:#e8d5a0;font-family:Cinzel,serif;font-size:13px;font-weight:700;">' + (r.c.mapName || 'Challenge Map') + '</div><div style="color:rgba(200,130,130,0.5);font-size:11px;">' + (vsLabel ? `${vsLabel} · ` : '') + 'Round ' + r.c.round + '</div>';
       const right = document.createElement('div');
       right.style.cssText = "color:" + r.statusColor + ";font-family:'Cinzel',serif;font-size:10px;font-weight:700;letter-spacing:0.5px;";
@@ -7293,6 +7476,13 @@ async function showChallengesScreen() {
   const issueBtnLive = document.getElementById('issueChallengeBtn');
   if (issueBtnLive) {
     issueBtnLive.addEventListener('click', () => {
+      if (!isUnlocked('full_builder')) {
+        showSpendConfirm('full_builder', 'Issue Challenges', () => {
+          hideMessage();
+          openLevelSelect('my_library');
+        });
+        return;
+      }
       hideMessage();
       openLevelSelect('my_library');
     });
@@ -7502,6 +7692,7 @@ async function syncChallenges() {
 requestAnimationFrame(loop);
 initAuth().then(() => {
   updateAuthUI();
+  updateTotalDiamondDisplay();
   showModeSelect();
 });
 
