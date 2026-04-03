@@ -2417,7 +2417,7 @@ function draw(){
 // GAME CONTROL
 // =====================================================================
 function showMessage(html){
-  msgBox.innerHTML=`<div style="min-height:100%;display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;">${html}</div>`;
+  msgBox.innerHTML=`<div style="min-height:100%;display:flex;align-items:flex-start;justify-content:center;padding:16px 20px;box-sizing:border-box;">${html}</div>`;
   msgBox.style.display='block';
   msgBox.style.pointerEvents='auto';
 }
@@ -7123,9 +7123,9 @@ async function showChallengesScreen() {
   const rows = challenges.map(c => {
     const iMSent = c.senderId === CREATOR_ID;
     const isMyTurn = !iMSent && !c.beaten;
-    const fireBack = iMSent && c.beaten;
+    const fireBack = c.beaten; // always your turn to fire back after beating
     const isWaiting = iMSent && !c.beaten;
-    const awaitingFireBack = !iMSent && c.beaten;
+    const awaitingFireBack = false;
     let statusText, statusColor, clickable;
     if (isMyTurn)           { statusText = '🔴 YOUR TURN';        statusColor = '#e63946'; clickable = true; }
     else if (fireBack)      { statusText = '🔥 FIRE BACK';        statusColor = '#e63946'; clickable = true; }
