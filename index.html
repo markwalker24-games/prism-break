@@ -1962,7 +1962,7 @@ function resolveBrick(b){
     }
   }
   else if(b.isPaint){ ball.color=b.color; ball.trail=[]; b.cooldown=20;
-    queueBrickTip('paint', 'images/brick_paintred.png', 'Paint Brick!', 'These change your active color. You can only remove bricks that match your active color. To change back to white, use the 💥 self-destruct button in the top menu bar.');
+    queueBrickTip('paint', 'images/brick_paintred.png', 'Paint Brick!', 'These change your active color. You can only remove bricks that match your active color. To change back to white, use the 💀 self-destruct button in the top menu bar.');
   }
   else if(ball.color===b.color){
     spawnParticles(b.x+b.w/2,b.y+b.h/2,b.color);
@@ -6022,7 +6022,7 @@ function showNextTip() {
   swatch.style.cssText = 'display:flex;align-items:center;justify-content:center;';
   const img = document.createElement('img');
   img.src = tip.imgSrc;
-  img.style.cssText = 'width:80px;height:60px;object-fit:contain;image-rendering:pixelated;filter:drop-shadow(0 0 8px rgba(255,255,255,0.2));border-radius:4px;';
+  img.style.cssText = 'width:104px;height:60px;object-fit:fill;image-rendering:pixelated;filter:drop-shadow(0 0 8px rgba(255,255,255,0.2));border-radius:4px;';
   swatch.appendChild(img);
   panel.appendChild(swatch);
 
