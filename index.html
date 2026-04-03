@@ -382,9 +382,6 @@
     <div id="builderTop">
       <div id="builderTitle" style="display:flex;align-items:center;gap:6px;">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#c9a84c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="filter:drop-shadow(0 0 4px rgba(200,160,60,0.4));flex-shrink:0;display:block"><rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="3" width="8" height="8" rx="1"/><rect x="3" y="13" width="8" height="8" rx="1"/><path d="M17 13v8M13 17h8"/></svg>
-        <button id="adminStarBtn" title="Admin" style="background:none;border:none;cursor:pointer;padding:2px;line-height:0;flex-shrink:0;-webkit-tap-highlight-color:transparent;">
-          <svg id="adminStarSvg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="rgba(200,160,60,0.5)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transition:all 0.2s;display:block;"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-        </button>
       </div>
       <div id="builderActions">
         <button class="builder-btn" id="builderMapsBtn">📁 MAPS</button>
@@ -571,14 +568,16 @@ const GAME_URL = 'https://prismbreak.app/';
 // DIAMOND PROGRESSION SYSTEM
 // =====================================================================
 const UNLOCK_COSTS = {
-  challenge_builder: 10,  // fire back on challenges
+  choose_map:        5,
+  full_builder:      10, // full map builder + issue challenges
   breakout:          20,
-  full_builder:      30,  // full map builder + issue challenges
-  blackout:          40,
-  choose_map:        50,
+  blackout:          30,
 };
 const CHALLENGE_DIAMOND_CAP = 3;
 
+// =====================================================================
+// DIAMOND & PROGRESS SYSTEM - localStorage + Supabase sync
+// =====================================================================
 function getTotalDiamonds() {
   return parseInt(LS.get('pb_total_diamonds') || '0', 10);
 }
@@ -591,6 +590,7 @@ function getAvailableDiamonds() {
 function addDiamonds(count) {
   const newTotal = getTotalDiamonds() + count;
   LS.set('pb_total_diamonds', String(newTotal));
+  syncProgressToCloud().catch(() => {});
   return newTotal;
 }
 function getUnlockedFeatures() {
@@ -602,13 +602,13 @@ function isUnlocked(feature) {
 function spendToUnlock(feature) {
   const cost = UNLOCK_COSTS[feature];
   if (!cost) return false;
-  if (isUnlocked(feature)) return true; // already unlocked
-  if (getAvailableDiamonds() < cost) return false; // can't afford
-  // Deduct and unlock
+  if (isUnlocked(feature)) return true;
+  if (getAvailableDiamonds() < cost) return false;
   LS.set('pb_spent_diamonds', String(getSpentDiamonds() + cost));
   const unlocked = getUnlockedFeatures();
   unlocked.add(feature);
   LS.set('pb_unlocked', JSON.stringify([...unlocked]));
+  syncProgressToCloud().catch(() => {});
   return true;
 }
 function getCompletedMaps() {
@@ -621,6 +621,106 @@ function markMapCompleted(slug) {
 }
 function hasCompletedMap(slug) {
   return getCompletedMaps().has(slug);
+}
+
+async function getSupabaseToken() {
+  if (_supaClient) {
+    const { data } = await _supaClient.auth.getSession();
+    if (data?.session?.access_token) return data.session.access_token;
+  }
+  return SUPA_KEY;
+}
+
+async function syncProgressToCloud() {
+  if (!_currentUser) return;
+  try {
+    const token = await getSupabaseToken();
+    const res = await fetch(`${SUPA_URL}/rest/v1/user_progress`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': SUPA_KEY,
+        'Authorization': `Bearer ${token}`,
+        'Prefer': 'resolution=merge-duplicates'
+      },
+      body: JSON.stringify({
+        user_id: _currentUser.id,
+        total_diamonds: getTotalDiamonds(),
+        spent_diamonds: getSpentDiamonds(),
+        unlocked_features: [...getUnlockedFeatures()],
+        completed_map_slugs: [...getCompletedMaps()],
+        quest_index: getCurrentQuestIndex(),
+        updated_at: new Date().toISOString()
+      })
+    });
+    if (!res.ok) console.warn('Progress sync failed:', res.status, await res.text());
+  } catch(e) { console.warn('Progress sync error:', e); }
+}
+
+async function syncProgressFromCloud() {
+  if (!_currentUser) return;
+  try {
+    const token = await getSupabaseToken();
+    const res = await fetch(
+      `${SUPA_URL}/rest/v1/user_progress?user_id=eq.${_currentUser.id}&select=*&limit=1`,
+      { headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${token}` } }
+    );
+    if (!res.ok) return;
+    const rows = await res.json();
+    if (!rows.length) {
+      await syncProgressToCloud();
+      return;
+    }
+    const remote = rows[0];
+    // Merge: always take the higher diamond counts
+    const mergedTotal = Math.max(getTotalDiamonds(), remote.total_diamonds || 0);
+    const mergedSpent = Math.max(getSpentDiamonds(), remote.spent_diamonds || 0);
+    // Union of unlocked features and completed maps
+    const mergedUnlocked = new Set([...getUnlockedFeatures(), ...(remote.unlocked_features || [])]);
+    const mergedCompleted = new Set([...getCompletedMaps(), ...(remote.completed_map_slugs || [])]);
+    // Take furthest quest index
+    const mergedQuestIdx = Math.max(getCurrentQuestIndex(), remote.quest_index || 0);
+    // Write merged to localStorage
+    LS.set('pb_total_diamonds', String(mergedTotal));
+    LS.set('pb_spent_diamonds', String(mergedSpent));
+    LS.set('pb_unlocked', JSON.stringify([...mergedUnlocked]));
+    LS.set('pb_completed_maps', JSON.stringify([...mergedCompleted]));
+    LS.set('pb_quest_index', String(mergedQuestIdx));
+    // Push merged back to cloud
+    await syncProgressToCloud();
+    updateTotalDiamondDisplay();
+  } catch(e) { console.warn('syncProgressFromCloud error:', e); }
+}
+
+async function syncQuestOrderToCloud(order) {
+  try {
+    const token = await getSupabaseToken();
+    const res = await fetch(`${SUPA_URL}/rest/v1/app_config`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': SUPA_KEY,
+        'Authorization': `Bearer ${token}`,
+        'Prefer': 'resolution=merge-duplicates'
+      },
+      body: JSON.stringify({ key: 'quest_order', value: order, updated_at: new Date().toISOString() })
+    });
+    if (!res.ok) console.warn('Quest order sync failed:', res.status, await res.text());
+  } catch(e) { console.warn('Quest order sync error:', e); }
+}
+
+async function loadQuestOrderFromCloud() {
+  try {
+    const res = await fetch(
+      `${SUPA_URL}/rest/v1/app_config?key=eq.quest_order&select=value&limit=1`,
+      { headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` } }
+    );
+    if (!res.ok) return;
+    const rows = await res.json();
+    if (rows.length && Array.isArray(rows[0].value)) {
+      setQuestOrder(rows[0].value);
+    }
+  } catch(e) { console.warn('loadQuestOrderFromCloud error:', e); }
 }
 function getShareUrl(slug) {
   return `${GAME_URL}?map=${slug}`;
@@ -801,6 +901,7 @@ async function initAuth() {
     CREATOR_ID = session.user.id;
     upsertMyProfile(session.user).catch(() => {});
     syncMyDataFromCloud(session.user.id);
+    syncProgressFromCloud().then(() => { updateTotalDiamondDisplay(); showModeSelect(); }).catch(() => {});
   }
   _supaClient.auth.onAuthStateChange((event, session) => {
     if (session) {
@@ -812,6 +913,7 @@ async function initAuth() {
       if (event === 'SIGNED_IN') {
         upsertMyProfile(session.user).catch(() => {});
         setTimeout(() => syncMyDataFromCloud(session.user.id), 1000);
+        syncProgressFromCloud().then(() => { updateTotalDiamondDisplay(); showModeSelect(); }).catch(() => {});
       }
     } else {
       _currentUser = null;
@@ -3476,101 +3578,29 @@ document.getElementById('saveCloseBtn').addEventListener('click',closeSaveDialog
 // MAP BUILDER
 // =====================================================================
 let builderOpen=false;
-let adminMode = LS.get('pb_admin')==='1';
 
-// Password split so it's not a single obvious string in the source
-const _pw = "You'reagenius" + "forguessingthis!";
-function _checkPw(p){ return p===_pw; }
+const ADMIN_USER_ID = '31ff2c15-e86e-4685-9677-00ebfb0f6add';
+let adminMode = LS.get('pb_admin') === '1';
 
-function updateAdminStar(){
-  const svg = document.getElementById('adminStarSvg');
-  if(!svg) return;
-  if(adminMode){
-    svg.setAttribute('fill','#f5c842');
-    svg.setAttribute('stroke','#c9a84c');
-    svg.style.filter='drop-shadow(0 0 5px rgba(245,200,66,0.6))';
-  } else {
-    svg.setAttribute('fill','none');
-    svg.setAttribute('stroke','rgba(200,160,60,0.5)');
-    svg.style.filter='none';
-  }
+function isAdminUser() {
+  return _currentUser && _currentUser.id === ADMIN_USER_ID;
+}
+
+function updateAdminStar() {
+  // No longer used in builder - admin toggle is on home screen
   const importBtn = document.getElementById('builderImportBtn');
-  if(importBtn) importBtn.style.display = adminMode ? 'block' : 'none';
+  if (importBtn) importBtn.style.display = adminMode ? 'block' : 'none';
 }
 
-document.getElementById('adminStarBtn').addEventListener('click',()=>{
-  if(adminMode){
-    adminMode=false;
-    LS.set('pb_admin','0');
-    updateAdminStar();
-    showBuilderToast('Admin mode locked');
-    return;
-  }
-  showPinOverlay();
-});
-
-function showPinOverlay(){
-  const ov=document.createElement('div');
-  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:400;display:flex;align-items:center;justify-content:center;';
-
-  const panel=document.createElement('div');
-  panel.id='pinPanel';
-  panel.style.cssText="background:linear-gradient(160deg,#2a1f10,#1c160d);border:1px solid rgba(200,160,60,0.5);border-radius:4px;padding:28px 24px;width:min(300px,88vw);display:flex;flex-direction:column;align-items:center;gap:16px;box-shadow:0 8px 40px rgba(0,0,0,0.8);";
-  panel.innerHTML=`
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(200,160,60,0.7)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-    <div style="color:#c9a84c;font-family:'Cinzel',serif;font-size:13px;letter-spacing:2px;">ADMIN ACCESS</div>
-  `;
-
-  const input=document.createElement('input');
-  input.type='password';
-  input.placeholder='Enter password';
-  input.autocomplete='off';
-  input.style.cssText="width:100%;background:rgba(10,8,4,0.9);border:1px solid rgba(150,110,40,0.5);color:#e8d5a0;font-family:'Lato',sans-serif;font-size:14px;padding:10px 12px;border-radius:3px;outline:none;box-sizing:border-box;";
-  input.addEventListener('focus',()=>{ input.style.borderColor='rgba(245,200,66,0.7)'; });
-  input.addEventListener('blur',()=>{ input.style.borderColor='rgba(150,110,40,0.5)'; });
-
-  const submitBtn=document.createElement('button');
-  submitBtn.textContent='UNLOCK';
-  submitBtn.style.cssText="width:100%;background:linear-gradient(180deg,rgba(60,45,20,0.95),rgba(35,25,10,0.98));border:1px solid rgba(245,200,66,0.6);border-bottom:2px solid rgba(80,50,10,0.9);color:#f5c842;font-family:'Cinzel',serif;font-weight:600;font-size:13px;letter-spacing:1px;padding:12px;cursor:pointer;border-radius:3px;";
-
-  const cancelBtn=document.createElement('button');
-  cancelBtn.textContent='CANCEL';
-  cancelBtn.style.cssText="background:none;border:none;color:rgba(180,140,60,0.4);font-family:'Cinzel',serif;font-size:11px;cursor:pointer;letter-spacing:1px;";
-
-  panel.appendChild(input);
-  panel.appendChild(submitBtn);
-  panel.appendChild(cancelBtn);
-  ov.appendChild(panel);
-  document.body.appendChild(ov);
-  setTimeout(()=>input.focus(), 100);
-
-  function shake(){
-    panel.style.transition='transform 0.08s';
-    const seq=[8,-8,6,-6,4,-4,0];
-    let i=0;
-    const next=()=>{ panel.style.transform=`translateX(${seq[i]}px)`; i++; if(i<seq.length) setTimeout(next,60); };
-    next();
-    input.style.borderColor='#e63946';
-    input.value='';
-    setTimeout(()=>{ input.style.borderColor='rgba(150,110,40,0.5)'; }, 500);
-  }
-
-  function tryUnlock(){
-    if(_checkPw(input.value.trim())){
-      adminMode=true;
-      LS.set('pb_admin','1');
-      updateAdminStar();
-      ov.remove();
-      showBuilderToast('★ Admin mode unlocked');
-    } else {
-      shake();
-    }
-  }
-
-  submitBtn.addEventListener('click', tryUnlock);
-  input.addEventListener('keydown', e=>{ if(e.key==='Enter') tryUnlock(); });
-  cancelBtn.addEventListener('click', ()=>ov.remove());
+function toggleAdminMode() {
+  if (!isAdminUser()) return;
+  adminMode = !adminMode;
+  LS.set('pb_admin', adminMode ? '1' : '0');
+  updateAdminStar();
+  showModeSelect();
+  showToast(adminMode ? '★ Admin mode ON' : 'Admin mode off', adminMode ? '#f5c842' : '#aaa');
 }
+
 
 let builderBricks=[];
 let builderBallPos={ col:Math.floor(BRICK_COLS/2), row:Math.floor(BRICK_ROWS/2) };
@@ -4562,6 +4592,94 @@ function openMapsPanel(defaultTab='maps') {
 
     function rebuildSeriesTab(){ renderSeriesTab(); }
 
+    // QUEST MANAGEMENT (admin only)
+    if (adminMode) {
+      const questSection = document.createElement('div');
+      questSection.style.cssText = 'background:#0a0f1a;border:1px solid rgba(0,238,255,0.3);border-radius:4px;padding:12px;margin-bottom:12px;';
+
+      const questOrder = getQuestOrder();
+
+      const questHdr = document.createElement('div');
+      questHdr.style.cssText = "font-family:'Cinzel',serif;font-size:12px;font-weight:700;color:#00eeff;letter-spacing:1px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;";
+      questHdr.innerHTML = `<span>💎 QUEST ORDER</span><span style="font-size:10px;color:rgba(0,200,220,0.5);font-family:'Lato',sans-serif;font-weight:400;">Drag to reorder</span>`;
+      questSection.appendChild(questHdr);
+
+      if (!questOrder.length) {
+        const empty = document.createElement('div');
+        empty.style.cssText = "color:rgba(0,180,200,0.4);font-size:11px;font-family:'Lato',sans-serif;text-align:center;padding:8px 0;";
+        empty.textContent = 'No quest series yet. Use + below to add.';
+        questSection.appendChild(empty);
+      } else {
+        const questList = document.createElement('div');
+        questList.style.cssText = 'display:flex;flex-direction:column;gap:4px;margin-bottom:8px;';
+        let questDragSrc = null;
+
+        function rebuildQuestList() {
+          questList.innerHTML = '';
+          const order = getQuestOrder();
+          const currentIdx = getCurrentQuestIndex();
+          order.forEach((name, i) => {
+            const qrow = document.createElement('div');
+            qrow.dataset.idx = i;
+            const isCurrent = i === currentIdx;
+            qrow.style.cssText = `display:flex;align-items:center;gap:8px;background:${isCurrent ? 'rgba(0,60,80,0.5)' : 'rgba(0,0,0,0.3)'};border:1px solid ${isCurrent ? 'rgba(0,238,255,0.4)' : 'rgba(0,180,200,0.15)'};padding:7px 10px;border-radius:3px;cursor:grab;user-select:none;`;
+            qrow.draggable = true;
+            qrow.innerHTML = `
+              <span style="color:rgba(0,180,200,0.4);font-size:14px;">☰</span>
+              <span style="font-size:10px;color:${isCurrent ? '#00eeff' : 'rgba(0,180,200,0.4)'};font-family:'Cinzel',serif;min-width:16px;">${i+1}</span>
+              <span style="color:${isCurrent ? '#00eeff' : '#aaa'};font-size:12px;font-family:'Lato',sans-serif;flex:1;">${name}</span>
+              ${isCurrent ? '<span style="font-size:9px;color:#00eeff;font-family:\'Cinzel\',serif;letter-spacing:1px;">ACTIVE</span>' : ''}
+              <button class="questRemove" style="background:none;border:1px solid rgba(180,80,80,0.3);color:#e66;font-size:14px;line-height:1;padding:2px 7px;border-radius:3px;cursor:pointer;">−</button>
+            `;
+            qrow.addEventListener('dragstart', e => { questDragSrc = i; qrow.style.opacity = '0.4'; e.dataTransfer.effectAllowed = 'move'; });
+            qrow.addEventListener('dragend', () => { qrow.style.opacity = '1'; questDragSrc = null; });
+            qrow.addEventListener('dragover', e => { e.preventDefault(); qrow.style.borderColor = '#00eeff'; });
+            qrow.addEventListener('dragleave', () => { qrow.style.borderColor = isCurrent ? 'rgba(0,238,255,0.4)' : 'rgba(0,180,200,0.15)'; });
+            qrow.addEventListener('drop', e => {
+              e.preventDefault();
+              if (questDragSrc === null || questDragSrc === i) return;
+              const order = getQuestOrder();
+              const [moved] = order.splice(questDragSrc, 1);
+              order.splice(i, 0, moved);
+              setQuestOrder(order);
+              rebuildQuestList();
+            });
+            qrow.querySelector('.questRemove').addEventListener('click', e => {
+              e.stopPropagation();
+              removeSeriesFromQuest(name);
+              rebuildQuestList();
+            });
+            questList.appendChild(qrow);
+          });
+        }
+        rebuildQuestList();
+        questSection.appendChild(questList);
+      }
+
+      // + Add to Quest dropdown
+      const addableNames = all.filter(s => !isSeriesInQuest(s.name) && !s._isChallengeSeries).map(s => s.name);
+      if (addableNames.length) {
+        const addRow = document.createElement('div');
+        addRow.style.cssText = 'display:flex;gap:6px;align-items:center;';
+        const sel = document.createElement('select');
+        sel.style.cssText = "flex:1;background:#0a0f1a;border:1px solid rgba(0,238,255,0.3);color:#00eeff;font-family:'Lato',sans-serif;font-size:12px;padding:6px 8px;border-radius:3px;";
+        sel.innerHTML = `<option value="">Add series to quest...</option>` + addableNames.map(n => `<option value="${n}">${n}</option>`).join('');
+        const addBtn = document.createElement('button');
+        addBtn.style.cssText = "background:rgba(0,60,80,0.8);border:1px solid rgba(0,238,255,0.4);color:#00eeff;font-family:'Cinzel',serif;font-size:11px;padding:6px 12px;cursor:pointer;border-radius:3px;";
+        addBtn.textContent = '+ ADD';
+        addBtn.addEventListener('click', () => {
+          if (!sel.value) return;
+          addSeriesToQuest(sel.value);
+          renderSeriesTab();
+        });
+        addRow.appendChild(sel);
+        addRow.appendChild(addBtn);
+        questSection.appendChild(addRow);
+      }
+
+      body.appendChild(questSection);
+    }
+
     if(!all.length){
       const empty=document.createElement('div');
       empty.style.cssText=`color:#555;font-size:14px;font-family:'Lato',sans-serif;padding:6px 0;`;
@@ -5209,6 +5327,18 @@ function endGame(reason){
     : '';
   if(inSeries && !hasNext && activeSeries) saveSeriesProgress(activeSeries.name, activeSeries.levels.length - 1);
 
+  // Advance quest if player just completed a quest series
+  if(inSeries && !hasNext && activeSeries && isSeriesInQuest(activeSeries.name)) {
+    const questOrder = getQuestOrder();
+    const currentIdx = getCurrentQuestIndex();
+    if(questOrder[currentIdx] === activeSeries.name) {
+      const nextQuestName = advanceQuest();
+      if(nextQuestName) {
+        setTimeout(() => showToast(`🏆 Quest unlocked: ${nextQuestName}!`, '#00eeff'), 1500);
+      }
+    }
+  }
+
   // Middle CTA:
   // - Challenge map → MAKE IT HARDER as primary red CTA
   // - Creator of this map → share it and challenge a friend
@@ -5420,15 +5550,6 @@ function endGame(reason){
 
     document.getElementById('endChallengeFireBackBtn').addEventListener('click',()=>{
       if(!activeChallengeCtx) return;
-      if(!isUnlocked('challenge_builder')){
-        showSpendConfirm('challenge_builder', 'Challenge Builder', () => {
-          requireSignIn(() => {
-            activeChallengeCtx = null;
-            showChallengeWinCTA(chainId, round, challengeId, senderCreatorId, capturedLevel);
-          });
-        });
-        return;
-      }
       const { chainId, round, challengeId, senderCreatorId } = activeChallengeCtx;
       const capturedLevel = currentLevelData;
       requireSignIn(() => {
@@ -5544,6 +5665,7 @@ function showModeSelect(){
         ? `<span style="font-family:'Lato',sans-serif;font-size:10px;color:rgba(245,200,66,0.7);letter-spacing:0.5px;">👤 ${getDisplayName()}</span>`
         : `<span style="font-family:'Lato',sans-serif;font-size:10px;color:rgba(245,200,66,0.5);letter-spacing:0.5px;">Sign In</span>`
       }
+      ${isAdminUser() ? `<span onclick="event.stopPropagation();toggleAdminMode();" style="margin-left:8px;font-family:'Cinzel',serif;font-size:9px;cursor:pointer;padding:2px 6px;border-radius:2px;border:1px solid ${adminMode ? 'rgba(245,200,66,0.5)' : 'rgba(120,120,120,0.3)'};color:${adminMode ? '#f5c842' : 'rgba(150,150,150,0.5)'};">★ ${adminMode ? 'ADMIN' : 'ADMIN'}</span>` : ''}
     </div>
     <div style="text-align:center;margin-bottom:2px;">
       <div style="
@@ -5551,7 +5673,7 @@ function showModeSelect(){
         color:#f5c842;letter-spacing:3px;
         text-shadow:0 0 20px rgba(245,200,66,0.5),0 2px 4px rgba(0,0,0,0.8);
       ">PRISM BREAK</div>
-      <div style="margin-top:6px;display:flex;align-items:center;justify-content:center;gap:6px;">
+      <div id="homeDiamondCount" style="margin-top:6px;display:flex;align-items:center;justify-content:center;gap:6px;cursor:pointer;-webkit-tap-highlight-color:transparent;">
         <span style="font-size:16px;filter:drop-shadow(0 0 6px rgba(0,238,255,0.6));">💎</span>
         <span style="font-family:'Cinzel',serif;font-size:14px;font-weight:700;color:#00eeff;letter-spacing:1px;">${getAvailableDiamonds()}</span>
         <span style="font-family:'Lato',sans-serif;font-size:10px;color:rgba(0,200,220,0.5);letter-spacing:1px;">DIAMONDS</span>
@@ -5714,7 +5836,16 @@ function showModeSelect(){
 
   showMessage(html);
 
-  // Stone press effect
+  // Long-press diamond count to reset progress
+  const diamondEl = document.getElementById('homeDiamondCount');
+  if (diamondEl) {
+    let pressTimer = null;
+    const startPress = () => { pressTimer = setTimeout(() => showResetProgressOverlay(), 700); };
+    const cancelPress = () => clearTimeout(pressTimer);
+    diamondEl.addEventListener('pointerdown', startPress);
+    diamondEl.addEventListener('pointerup', cancelPress);
+    diamondEl.addEventListener('pointerleave', cancelPress);
+  }
   ['modeBreakout','modeBlackout','modeBuilder','modeSelectLevel','modeChallenges','modeHardcoded0'].forEach(id=>{
     const el = document.getElementById(id);
     if(!el) return;
@@ -6342,7 +6473,51 @@ async function seedQuestToCloud() {
 
 // Featured series name - persisted so it survives reloads
 function getFeaturedSeriesName(){
-  return LS.get('pb_featured_series') || (HARDCODED_SERIES[0] && HARDCODED_SERIES[0].name) || '';
+  // Return the current active quest based on player progress
+  const questOrder = getQuestOrder();
+  if (!questOrder.length) return LS.get('pb_featured_series') || (HARDCODED_SERIES[0] && HARDCODED_SERIES[0].name) || '';
+  const questIdx = getCurrentQuestIndex();
+  return questOrder[questIdx] || questOrder[questOrder.length - 1];
+}
+
+function getQuestOrder() {
+  try { return JSON.parse(LS.get('pb_quest_order') || '[]'); } catch(e) { return []; }
+}
+function setQuestOrder(order) {
+  LS.set('pb_quest_order', JSON.stringify(order));
+  if (adminMode) syncQuestOrderToCloud(order).catch(() => {});
+}
+function getCurrentQuestIndex() {
+  return parseInt(LS.get('pb_quest_index') || '0', 10);
+}
+function advanceQuest() {
+  const order = getQuestOrder();
+  const current = getCurrentQuestIndex();
+  if (current < order.length - 1) {
+    LS.set('pb_quest_index', String(current + 1));
+    syncProgressToCloud().catch(() => {});
+    return order[current + 1];
+  }
+  return null; // all quests complete
+}
+function isSeriesInQuest(seriesName) {
+  return getQuestOrder().includes(seriesName);
+}
+function addSeriesToQuest(seriesName) {
+  const order = getQuestOrder();
+  if (!order.includes(seriesName)) {
+    order.push(seriesName);
+    setQuestOrder(order);
+  }
+}
+function removeSeriesFromQuest(seriesName) {
+  const order = getQuestOrder().filter(n => n !== seriesName);
+  setQuestOrder(order);
+}
+function isQuestComplete() {
+  const order = getQuestOrder();
+  return order.length > 0 && getCurrentQuestIndex() >= order.length - 1 &&
+    getSeriesProgress(order[order.length - 1]) >= (savedSeries().find(s => s.name === order[order.length - 1])?.levels.length || 0);
 }
 function setFeaturedSeriesName(name){
   LS.set('pb_featured_series', name);
@@ -6381,12 +6556,20 @@ async function loadActiveSeries() {
   // Restore stored featured series order
   const storedFeatured = LS.get('pb_featured_series');
   if(storedFeatured) setFeaturedSeriesName(storedFeatured);
+  // Initialize quest order with Getting Started if not set yet
+  if(!getQuestOrder().length && HARDCODED_SERIES[0]) {
+    setQuestOrder([HARDCODED_SERIES[0].name]);
+  }
   // Load from cloud - this will overwrite local with latest pushed version
   loadActiveSeries().then(()=>{
     // After cloud load, persist the updated series to localStorage
     HARDCODED_SERIES.forEach(hs=>{ saveSeries(hs); });
     const featured = LS.get('pb_featured_series');
     if(featured) setFeaturedSeriesName(featured);
+    // Re-init quest order after cloud load if still empty
+    if(!getQuestOrder().length && HARDCODED_SERIES[0]) {
+      setQuestOrder([HARDCODED_SERIES[0].name]);
+    }
   }).catch(()=>{});
 })();
 
@@ -6718,6 +6901,65 @@ async function fetchLeaderboard() {
       .sort((a, b) => b.count - a.count)
       .slice(0, 20);
   } catch(e) { console.warn('fetchLeaderboard failed:', e); return []; }
+}
+
+function showResetProgressOverlay() {
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:700;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;';
+  const panel = document.createElement('div');
+  panel.style.cssText = "background:linear-gradient(160deg,#0a0f1a,#060a12);border:1px solid rgba(0,238,255,0.3);border-radius:4px;padding:28px 22px;width:min(310px,88vw);display:flex;flex-direction:column;gap:12px;box-shadow:0 8px 40px rgba(0,0,0,0.8);font-family:'Lato',sans-serif;";
+  panel.innerHTML = `
+    <div style="text-align:center;">
+      <div style="font-size:28px;">⚠️</div>
+      <div style="font-family:'Cinzel',serif;font-size:14px;font-weight:700;color:#00eeff;letter-spacing:1px;margin-top:8px;">RESET PROGRESS</div>
+    </div>
+    <div style="height:1px;background:rgba(0,238,255,0.15);"></div>
+    <div style="font-size:12px;color:rgba(200,200,220,0.8);line-height:1.8;">
+      <div style="color:#00eeff;font-family:'Cinzel',serif;font-size:11px;letter-spacing:1px;margin-bottom:6px;">THIS WILL RESET:</div>
+      <div>💎 All diamonds earned &amp; spent</div>
+      <div>🔒 All unlocked features</div>
+      <div>📜 Quest position (back to start)</div>
+      <div>✅ Map completion history</div>
+    </div>
+    <div style="height:1px;background:rgba(0,238,255,0.15);"></div>
+    <div style="font-size:12px;color:rgba(150,150,170,0.6);line-height:1.8;">
+      <div style="color:rgba(180,180,200,0.5);font-family:'Cinzel',serif;font-size:11px;letter-spacing:1px;margin-bottom:6px;">NOT AFFECTED:</div>
+      <div>🔥 Challenge history &amp; chains</div>
+      <div>🗺️ Your saved maps &amp; series</div>
+      <div>🏆 Leaderboard records</div>
+      <div>👤 Your account &amp; sign-in</div>
+    </div>
+    <button id="resetConfirmBtn" style="width:100%;background:linear-gradient(180deg,rgba(80,10,10,0.98),rgba(50,5,5,0.99));border:1px solid rgba(220,60,60,0.6);color:#e63946;font-family:'Cinzel',serif;font-weight:700;font-size:13px;letter-spacing:1px;padding:13px;cursor:pointer;border-radius:3px;">RESET MY PROGRESS</button>
+    <button id="resetCancelBtn" style="background:none;border:none;color:rgba(0,180,200,0.4);font-family:'Cinzel',serif;font-size:11px;cursor:pointer;letter-spacing:1px;padding:4px;">CANCEL</button>
+  `;
+  ov.appendChild(panel);
+  document.body.appendChild(ov);
+  panel.querySelector('#resetConfirmBtn').addEventListener('click', async () => {
+    ov.remove();
+    await resetProgress();
+  });
+  panel.querySelector('#resetCancelBtn').addEventListener('click', () => ov.remove());
+  ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+}
+
+async function resetProgress() {
+  LS.set('pb_total_diamonds', '0');
+  LS.set('pb_spent_diamonds', '0');
+  LS.set('pb_unlocked', '[]');
+  LS.set('pb_completed_maps', '[]');
+  LS.set('pb_quest_index', '0');
+  if (_currentUser) {
+    try {
+      const token = await getSupabaseToken();
+      await fetch(`${SUPA_URL}/rest/v1/user_progress?user_id=eq.${_currentUser.id}`, {
+        method: 'DELETE',
+        headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${token}` }
+      });
+    } catch(e) { console.warn('Reset cloud progress failed:', e); }
+  }
+  updateTotalDiamondDisplay();
+  showModeSelect();
+  showToast('Progress reset. Fresh start! 💎', '#00eeff');
 }
 
 function showSpendConfirm(feature, featureName, onUnlocked) {
@@ -7690,6 +7932,7 @@ async function syncChallenges() {
 
 // Kick off the game loop and show home screen
 requestAnimationFrame(loop);
+loadQuestOrderFromCloud().catch(() => {});
 initAuth().then(() => {
   updateAuthUI();
   updateTotalDiamondDisplay();
