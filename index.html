@@ -7177,10 +7177,7 @@ function showSpendConfirm(feature, featureName, onUnlocked) {
         feature === 'choose_map' ? 'modeSelectLevel' : null
       );
       if (btnEl) {
-        shatterUnlock(btnEl, feature, () => {
-          showModeSelect();
-          setTimeout(() => onUnlocked(), 100);
-        });
+        shatterUnlock(btnEl, feature, null);
       } else {
         showModeSelect();
         onUnlocked();
@@ -7221,7 +7218,7 @@ function shatterUnlock(btnEl, feature, onComplete) {
 
   // Shatter particles - fragments flying out
   const particles = [];
-  const fragCount = 32;
+  const fragCount = 96;
   for (let i = 0; i < fragCount; i++) {
     const angle = (i / fragCount) * Math.PI * 2 + (Math.random() - 0.5) * 0.3;
     const speed = 3 + Math.random() * 8;
@@ -7309,7 +7306,6 @@ function shatterUnlock(btnEl, feature, onComplete) {
       requestAnimationFrame(animate);
     } else {
       cvs.remove();
-      if (onComplete) onComplete();
     }
   }
 
