@@ -1893,7 +1893,7 @@ function resolveBrick(b){
   if(b.isSteel){ b.cooldown=20; }
   else if(b.isSkull){
     // Death brick - kill the ball
-    queueBrickTip('skull', '#1a0a0a', '💀', 'Skull Brick', 'Oh yeah... avoid these.');
+    queueBrickTip('skull', 'images/brick_skull.png', 'Skull Brick', 'Oh yeah... avoid these.');
     bricks.splice(bricks.indexOf(b),1);
     killBall();
   }
@@ -1941,14 +1941,14 @@ function resolveBrick(b){
     bombHud.style.display='inline';
     spawnParticles(b.x+b.w/2,b.y+b.h/2,'#ff6600',16);
     bricks.splice(bricks.indexOf(b),1);
-    queueBrickTip('bomb', '#ff6600', '💣', 'Bomb!', 'You collected a bomb! Deploy it by holding both thumbs on the screen and releasing at the same time. Be careful not to blow yourself up!');
+    queueBrickTip('bomb', 'images/brick_bomb.png', 'Bomb!', 'You collected a bomb! Deploy it by holding both thumbs on the screen and releasing at the same time. Be careful not to blow yourself up!');
   }
   else if(b.isKey){
     keysHeld++;
     keyDisplay.textContent=keysHeld;
     spawnParticles(b.x+b.w/2,b.y+b.h/2,'#ffd700',16);
     bricks.splice(bricks.indexOf(b),1);
-    queueBrickTip('key', '#ffd700', '🔑', 'Key!', 'You collected a Key! These open Locks. There\'s no limit to how many you can collect.');
+    queueBrickTip('key', 'images/brick_key.png', 'Key!', 'You collected a Key! These open Locks. There\'s no limit to how many you can collect.');
   }
   else if(b.isLock){
     if(keysHeld>0){
@@ -1958,11 +1958,11 @@ function resolveBrick(b){
       bricks.splice(bricks.indexOf(b),1);
     } else {
       b.cooldown=30;
-      queueBrickTip('lock', '#b8860b', '🔒', 'Lock', 'Locks can only be removed if you\'ve obtained a Key first. Find the 🔑 Key brick on the map.');
+      queueBrickTip('lock', 'images/brick_lock.png', 'Lock', 'Locks can only be removed if you\'ve obtained a Key first. Find the Key brick on the map.');
     }
   }
   else if(b.isPaint){ ball.color=b.color; ball.trail=[]; b.cooldown=20;
-    queueBrickTip('paint', b.color, '🎨', 'Paint Brick!', 'These change your active color. You can only remove bricks that match your active color. To change back to white you\'ll need to self-destruct using the 💥 button in the top menu bar.');
+    queueBrickTip('paint', 'images/brick_paintred.png', 'Paint Brick!', 'These change your active color. You can only remove bricks that match your active color. To change back to white, use the 💥 self-destruct button in the top menu bar.');
   }
   else if(ball.color===b.color){
     spawnParticles(b.x+b.w/2,b.y+b.h/2,b.color);
@@ -5999,10 +5999,10 @@ function hasTipShown(tipId) {
 let _tipQueue = [];
 let _tipShowing = false;
 
-function queueBrickTip(tipId, brickColor, emoji, title, body) {
+function queueBrickTip(tipId, imgSrc, title, body) {
   if (hasTipShown(tipId)) return;
   markTipShown(tipId);
-  _tipQueue.push({ tipId, brickColor, emoji, title, body });
+  _tipQueue.push({ tipId, imgSrc, title, body });
   if (!_tipShowing) showNextTip();
 }
 
@@ -6019,8 +6019,11 @@ function showNextTip() {
   panel.style.cssText = "background:linear-gradient(160deg,#0f0c18,#08060f);border:1px solid rgba(180,140,255,0.35);border-radius:4px;padding:24px 20px;width:min(290px,88vw);display:flex;flex-direction:column;align-items:center;gap:12px;box-shadow:0 8px 40px rgba(0,0,0,0.8);font-family:'Lato',sans-serif;text-align:center;";
 
   const swatch = document.createElement('div');
-  swatch.style.cssText = `width:52px;height:40px;border-radius:4px;background:${tip.brickColor};box-shadow:0 0 16px ${tip.brickColor}88;display:flex;align-items:center;justify-content:center;font-size:22px;`;
-  swatch.textContent = tip.emoji;
+  swatch.style.cssText = 'display:flex;align-items:center;justify-content:center;';
+  const img = document.createElement('img');
+  img.src = tip.imgSrc;
+  img.style.cssText = 'width:80px;height:60px;object-fit:contain;image-rendering:pixelated;filter:drop-shadow(0 0 8px rgba(255,255,255,0.2));border-radius:4px;';
+  swatch.appendChild(img);
   panel.appendChild(swatch);
 
   const titleEl = document.createElement('div');
