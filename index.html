@@ -5842,11 +5842,14 @@ function showModeSelect(){
   const diamondEl = document.getElementById('homeDiamondCount');
   if (diamondEl) {
     let pressTimer = null;
-    const startPress = () => { pressTimer = setTimeout(() => showResetProgressOverlay(), 700); };
-    const cancelPress = () => clearTimeout(pressTimer);
-    diamondEl.addEventListener('pointerdown', startPress);
-    diamondEl.addEventListener('pointerup', cancelPress);
-    diamondEl.addEventListener('pointerleave', cancelPress);
+    diamondEl.addEventListener('pointerdown', () => {
+      pressTimer = setTimeout(() => {
+        pressTimer = null;
+        showResetProgressOverlay();
+      }, 800);
+    });
+    // Only cancel if finger moves significantly (pointercancel) not on release
+    diamondEl.addEventListener('pointercancel', () => { clearTimeout(pressTimer); pressTimer = null; });
   }
   ['modeBreakout','modeBlackout','modeBuilder','modeSelectLevel','modeChallenges','modeHardcoded0'].forEach(id=>{
     const el = document.getElementById(id);
