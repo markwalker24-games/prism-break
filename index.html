@@ -1893,6 +1893,7 @@ function resolveBrick(b){
   if(b.isSteel){ b.cooldown=20; }
   else if(b.isSkull){
     // Death brick - kill the ball
+    queueBrickTip('skull', '#1a0a0a', '💀', 'Skull Brick', 'Oh yeah... avoid these.');
     bricks.splice(bricks.indexOf(b),1);
     killBall();
   }
@@ -1940,12 +1941,14 @@ function resolveBrick(b){
     bombHud.style.display='inline';
     spawnParticles(b.x+b.w/2,b.y+b.h/2,'#ff6600',16);
     bricks.splice(bricks.indexOf(b),1);
+    queueBrickTip('bomb', '#ff6600', '💣', 'Bomb!', 'You collected a bomb! Deploy it by holding both thumbs on the screen and releasing at the same time. Be careful not to blow yourself up!');
   }
   else if(b.isKey){
     keysHeld++;
     keyDisplay.textContent=keysHeld;
     spawnParticles(b.x+b.w/2,b.y+b.h/2,'#ffd700',16);
     bricks.splice(bricks.indexOf(b),1);
+    queueBrickTip('key', '#ffd700', '🔑', 'Key!', 'You collected a Key! These open Locks. There\'s no limit to how many you can collect.');
   }
   else if(b.isLock){
     if(keysHeld>0){
@@ -1955,9 +1958,12 @@ function resolveBrick(b){
       bricks.splice(bricks.indexOf(b),1);
     } else {
       b.cooldown=30;
+      queueBrickTip('lock', '#b8860b', '🔒', 'Lock', 'Locks can only be removed if you\'ve obtained a Key first. Find the 🔑 Key brick on the map.');
     }
   }
-  else if(b.isPaint){ ball.color=b.color; ball.trail=[]; b.cooldown=20; }
+  else if(b.isPaint){ ball.color=b.color; ball.trail=[]; b.cooldown=20;
+    queueBrickTip('paint', b.color, '🎨', 'Paint Brick!', 'These change your active color. You can only remove bricks that match your active color. To change back to white you\'ll need to self-destruct using the 💥 button in the top menu bar.');
+  }
   else if(ball.color===b.color){
     spawnParticles(b.x+b.w/2,b.y+b.h/2,b.color);
     bricks.splice(bricks.indexOf(b),1);
@@ -5349,7 +5355,7 @@ function endGame(reason){
   const isReceivedMap = currentLevelData && currentLevelData.creator_id && currentLevelData.creator_id !== CREATOR_ID;
   const isSeriesComplete = inSeries && !hasNext;
   const isChallengeMap = !!activeChallengeCtx;
-  const showBuildPrompt = !isChallengeMap && (isReceivedMap || isSeriesComplete);
+  const showBuildPrompt = !isChallengeMap && (isReceivedMap || isSeriesComplete) && isUnlocked('full_builder');
   const buildPromptMsgs = [
     'Now build your own 🔨',
     'Think you can build a harder one? 🔨',
@@ -5420,8 +5426,9 @@ function endGame(reason){
   // Show star rating for any map/series the player didn't create, not testing
   const isOwnMap = currentLevelData && currentLevelData.creator_id === CREATOR_ID;
   const isOwnSeries = activeSeries && activeSeries.creator_id === CREATOR_ID;
-  const shouldRateMap = !testingLevel && !isOwnMap && !isChallengeMap && currentLevelData && currentLevelData.name && !isSeriesComplete;
-  const shouldRateSeries = !testingLevel && !isChallengeMap && isSeriesComplete && activeSeries && !isOwnSeries;
+  const isQuestMap = activeSeries && isSeriesInQuest(activeSeries.name);
+  const shouldRateMap = !testingLevel && !isOwnMap && !isChallengeMap && !isQuestMap && currentLevelData && currentLevelData.name && !isSeriesComplete;
+  const shouldRateSeries = !testingLevel && !isChallengeMap && !isQuestMap && isSeriesComplete && activeSeries && !isOwnSeries;
 
   // Only track records for named maps (not random games)
   if(!testingLevel && !isChallengeMap && currentLevelData && currentLevelData.name){
@@ -5532,6 +5539,7 @@ function endGame(reason){
   // Build Your Own (shown instead of share on received maps)
   if(document.getElementById('endBuildBtn')){
     document.getElementById('endBuildBtn').addEventListener('click',()=>{
+      if(!isUnlocked('full_builder')){ showSpendConfirm('full_builder', 'Map Builder', ()=>{ hideMessage(); openBuilder(); }); return; }
       hideMessage(); openBuilder();
     });
   }
@@ -5627,6 +5635,8 @@ function showModeSelect(){
   selfDestructBtn.style.display='none';
   document.getElementById('editMapBtn').style.display='none';
   showTopBarBtns(false);
+  const available = getAvailableDiamonds();
+  const canAfford = (feature) => !isUnlocked(feature) && available >= UNLOCK_COSTS[feature];
   const featuredSeries = HARDCODED_SERIES[0];
   const seriesButtons = featuredSeries ? (()=>{
     const s = featuredSeries;
@@ -5689,17 +5699,17 @@ function showModeSelect(){
     <!-- Choose Map - same section as quest -->
     <button id="modeSelectLevel" style="
       width:100%;
-      background:${isUnlocked('choose_map') ? 'linear-gradient(160deg,rgba(25,18,8,0.95),rgba(15,10,4,0.97))' : 'rgba(10,10,15,0.97)'};
-      border:1px solid ${isUnlocked('choose_map') ? 'rgba(180,140,50,0.3)' : 'rgba(100,100,120,0.3)'};
-      box-shadow:0 2px 12px rgba(0,0,0,0.4),inset 0 1px 0 rgba(255,220,100,0.08);
-      color:${isUnlocked('choose_map') ? 'rgba(200,170,90,0.85)' : 'rgba(150,150,180,0.5)'};
+      background:${isUnlocked('choose_map') ? 'linear-gradient(160deg,rgba(25,18,8,0.95),rgba(15,10,4,0.97))' : canAfford('choose_map') ? 'rgba(0,30,40,0.97)' : 'rgba(10,10,15,0.97)'};
+      border:1px solid ${isUnlocked('choose_map') ? 'rgba(180,140,50,0.3)' : canAfford('choose_map') ? 'rgba(0,238,255,0.6)' : 'rgba(100,100,120,0.3)'};
+      box-shadow:${canAfford('choose_map') ? '0 0 12px rgba(0,238,255,0.25),0 2px 12px rgba(0,0,0,0.4)' : '0 2px 12px rgba(0,0,0,0.4)'};
+      color:${isUnlocked('choose_map') ? 'rgba(200,170,90,0.85)' : canAfford('choose_map') ? 'rgba(0,238,255,0.9)' : 'rgba(150,150,180,0.5)'};
       font-family:'Cinzel',serif;font-size:13px;font-weight:600;letter-spacing:1px;
       padding:12px 14px;cursor:pointer;border-radius:4px;
       display:flex;align-items:center;justify-content:center;gap:10px;
-      touch-action:manipulation;${isUnlocked('choose_map') ? '' : 'opacity:0.5;'}">
-      <span style="font-size:16px;opacity:0.7">${isUnlocked('choose_map') ? '📜' : '🔒'}</span>
+      touch-action:manipulation;${isUnlocked('choose_map') || canAfford('choose_map') ? '' : 'opacity:0.5;'}">
+      <span style="font-size:16px;opacity:0.7">${isUnlocked('choose_map') ? '📜' : canAfford('choose_map') ? '💎' : '🔒'}</span>
       <span>CHOOSE MAP</span>
-      ${!isUnlocked('choose_map') ? `<span style="font-size:11px;color:rgba(0,238,255,0.5);font-family:'Lato',sans-serif;font-weight:400;">${UNLOCK_COSTS.choose_map} 💎</span>` : ''}
+      ${!isUnlocked('choose_map') ? `<span style="font-size:11px;color:${canAfford('choose_map') ? 'rgba(0,238,255,0.8)' : 'rgba(0,238,255,0.5)'};font-family:'Lato',sans-serif;font-weight:400;">${UNLOCK_COSTS.choose_map} 💎</span>` : ''}
     </button>
 
     <!-- Challenges -->
@@ -5757,16 +5767,17 @@ function showModeSelect(){
         <span style="font-size:10px;color:rgba(120,180,255,0.6);font-family:'Lato',sans-serif;font-weight:400;letter-spacing:0">Collect all diamonds</span>
       </button>` : `
       <button id="modeBreakout" style="
-        flex:1;opacity:0.5;
-        background:rgba(10,10,15,0.97);
-        border:1px solid rgba(100,100,120,0.3);
-        color:rgba(150,150,180,0.6);font-family:'Cinzel',serif;font-size:12px;font-weight:600;letter-spacing:0.5px;
+        flex:1;${canAfford('breakout') ? '' : 'opacity:0.5;'}
+        background:${canAfford('breakout') ? 'rgba(5,15,30,0.97)' : 'rgba(10,10,15,0.97)'};
+        border:1px solid ${canAfford('breakout') ? 'rgba(0,238,255,0.6)' : 'rgba(100,100,120,0.3)'};
+        box-shadow:${canAfford('breakout') ? '0 0 12px rgba(0,238,255,0.25)' : 'none'};
+        color:${canAfford('breakout') ? 'rgba(0,238,255,0.9)' : 'rgba(150,150,180,0.6)'};font-family:'Cinzel',serif;font-size:12px;font-weight:600;letter-spacing:0.5px;
         padding:14px 8px;cursor:pointer;border-radius:4px;
         display:flex;flex-direction:column;align-items:center;gap:6px;
         touch-action:manipulation;">
-        <span style="font-size:20px;">🔒</span>
+        <span style="font-size:20px;">${canAfford('breakout') ? '💎' : '🔒'}</span>
         <span>BREAK OUT</span>
-        <span style="font-size:10px;color:rgba(0,238,255,0.5);font-family:'Lato',sans-serif;">${UNLOCK_COSTS.breakout} 💎</span>
+        <span style="font-size:10px;color:${canAfford('breakout') ? 'rgba(0,238,255,0.8)' : 'rgba(0,238,255,0.5)'};font-family:'Lato',sans-serif;">${UNLOCK_COSTS.breakout} 💎</span>
       </button>`}
       ${isUnlocked('blackout') ? `
       <button id="modeBlackout" style="
@@ -5783,16 +5794,17 @@ function showModeSelect(){
         <span style="font-size:10px;color:rgba(255,140,80,0.6);font-family:'Lato',sans-serif;font-weight:400;letter-spacing:0">Clear all bricks</span>
       </button>` : `
       <button id="modeBlackout" style="
-        flex:1;opacity:0.5;
-        background:rgba(10,10,15,0.97);
-        border:1px solid rgba(100,100,120,0.3);
-        color:rgba(150,150,180,0.6);font-family:'Cinzel',serif;font-size:12px;font-weight:600;letter-spacing:0.5px;
+        flex:1;${canAfford('blackout') ? '' : 'opacity:0.5;'}
+        background:${canAfford('blackout') ? 'rgba(30,5,3,0.97)' : 'rgba(10,10,15,0.97)'};
+        border:1px solid ${canAfford('blackout') ? 'rgba(0,238,255,0.6)' : 'rgba(100,100,120,0.3)'};
+        box-shadow:${canAfford('blackout') ? '0 0 12px rgba(0,238,255,0.25)' : 'none'};
+        color:${canAfford('blackout') ? 'rgba(0,238,255,0.9)' : 'rgba(150,150,180,0.6)'};font-family:'Cinzel',serif;font-size:12px;font-weight:600;letter-spacing:0.5px;
         padding:14px 8px;cursor:pointer;border-radius:4px;
         display:flex;flex-direction:column;align-items:center;gap:6px;
         touch-action:manipulation;">
-        <span style="font-size:20px;">🔒</span>
+        <span style="font-size:20px;">${canAfford('blackout') ? '💎' : '🔒'}</span>
         <span>BLACK OUT</span>
-        <span style="font-size:10px;color:rgba(0,238,255,0.5);font-family:'Lato',sans-serif;">${UNLOCK_COSTS.blackout} 💎</span>
+        <span style="font-size:10px;color:${canAfford('blackout') ? 'rgba(0,238,255,0.8)' : 'rgba(0,238,255,0.5)'};font-family:'Lato',sans-serif;">${UNLOCK_COSTS.blackout} 💎</span>
       </button>`}
     </div>
 
@@ -5823,15 +5835,16 @@ function showModeSelect(){
       <span>MAP BUILDER</span>
     </button>` : `
     <button id="modeBuilder" style="
-      width:100%;opacity:0.5;
-      background:rgba(10,10,15,0.97);
-      border:1px solid rgba(100,100,120,0.3);
-      color:rgba(150,150,180,0.6);font-family:'Cinzel',serif;font-size:13px;font-weight:600;letter-spacing:1px;
+      width:100%;${canAfford('full_builder') ? '' : 'opacity:0.5;'}
+      background:${canAfford('full_builder') ? 'rgba(20,15,0,0.97)' : 'rgba(10,10,15,0.97)'};
+      border:1px solid ${canAfford('full_builder') ? 'rgba(0,238,255,0.6)' : 'rgba(100,100,120,0.3)'};
+      box-shadow:${canAfford('full_builder') ? '0 0 12px rgba(0,238,255,0.25)' : 'none'};
+      color:${canAfford('full_builder') ? 'rgba(0,238,255,0.9)' : 'rgba(150,150,180,0.6)'};font-family:'Cinzel',serif;font-size:13px;font-weight:600;letter-spacing:1px;
       padding:13px 12px;cursor:pointer;border-radius:4px;
       display:flex;align-items:center;justify-content:center;gap:10px;
       touch-action:manipulation;">
-      <span>🔒 MAP BUILDER</span>
-      <span style="font-size:11px;color:rgba(0,238,255,0.5);font-family:'Lato',sans-serif;font-weight:400;">${UNLOCK_COSTS.full_builder} 💎</span>
+      <span>${canAfford('full_builder') ? '💎' : '🔒'} MAP BUILDER</span>
+      <span style="font-size:11px;color:${canAfford('full_builder') ? 'rgba(0,238,255,0.8)' : 'rgba(0,238,255,0.5)'};font-family:'Lato',sans-serif;font-weight:400;">${UNLOCK_COSTS.full_builder} 💎</span>
     </button>`}
 
   </div>`;
@@ -5966,6 +5979,73 @@ function playSeries(s, fromIdx){
   activeSeriesIdx = fromIdx !== undefined ? fromIdx : getSeriesProgress(s.name);
   if(activeSeriesIdx >= s.levels.length) activeSeriesIdx=0;
   startGame(s.levels[activeSeriesIdx]);
+}
+
+// =====================================================================
+// BRICK TIPS - shown once per brick type, ever
+// =====================================================================
+function getShownTips() {
+  try { return new Set(JSON.parse(LS.get('pb_shown_tips') || '[]')); } catch(e) { return new Set(); }
+}
+function markTipShown(tipId) {
+  const shown = getShownTips();
+  shown.add(tipId);
+  LS.set('pb_shown_tips', JSON.stringify([...shown]));
+}
+function hasTipShown(tipId) {
+  return getShownTips().has(tipId);
+}
+
+let _tipQueue = [];
+let _tipShowing = false;
+
+function queueBrickTip(tipId, brickColor, emoji, title, body) {
+  if (hasTipShown(tipId)) return;
+  markTipShown(tipId);
+  _tipQueue.push({ tipId, brickColor, emoji, title, body });
+  if (!_tipShowing) showNextTip();
+}
+
+function showNextTip() {
+  if (!_tipQueue.length) { _tipShowing = false; return; }
+  _tipShowing = true;
+  const tip = _tipQueue.shift();
+  gameRunning = false;
+
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.82);z-index:600;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;';
+
+  const panel = document.createElement('div');
+  panel.style.cssText = "background:linear-gradient(160deg,#0f0c18,#08060f);border:1px solid rgba(180,140,255,0.35);border-radius:4px;padding:24px 20px;width:min(290px,88vw);display:flex;flex-direction:column;align-items:center;gap:12px;box-shadow:0 8px 40px rgba(0,0,0,0.8);font-family:'Lato',sans-serif;text-align:center;";
+
+  const swatch = document.createElement('div');
+  swatch.style.cssText = `width:52px;height:40px;border-radius:4px;background:${tip.brickColor};box-shadow:0 0 16px ${tip.brickColor}88;display:flex;align-items:center;justify-content:center;font-size:22px;`;
+  swatch.textContent = tip.emoji;
+  panel.appendChild(swatch);
+
+  const titleEl = document.createElement('div');
+  titleEl.style.cssText = "font-family:'Cinzel',serif;font-size:14px;font-weight:700;color:#e8d5ff;letter-spacing:1px;";
+  titleEl.textContent = tip.title;
+  panel.appendChild(titleEl);
+
+  const bodyEl = document.createElement('div');
+  bodyEl.style.cssText = "color:rgba(200,180,240,0.75);font-size:12px;line-height:1.8;";
+  bodyEl.innerHTML = tip.body;
+  panel.appendChild(bodyEl);
+
+  const gotItBtn = document.createElement('button');
+  gotItBtn.style.cssText = "width:100%;background:linear-gradient(180deg,rgba(60,40,100,0.98),rgba(40,25,70,0.99));border:1px solid rgba(180,140,255,0.5);color:#c8a8ff;font-family:'Cinzel',serif;font-weight:700;font-size:13px;letter-spacing:1px;padding:12px;cursor:pointer;border-radius:3px;margin-top:4px;";
+  gotItBtn.textContent = 'GOT IT';
+  gotItBtn.addEventListener('click', () => {
+    ov.remove();
+    gameRunning = true;
+    _tipShowing = false;
+    showNextTip();
+  });
+  panel.appendChild(gotItBtn);
+
+  ov.appendChild(panel);
+  document.body.appendChild(ov);
 }
 
 function showToast(msg,color='#ffd700'){
@@ -6959,7 +7039,7 @@ async function resetProgress() {
     } catch(e) { console.warn('Reset cloud progress failed:', e); }
   }
   // Wipe progress keys
-  ['pb_total_diamonds','pb_spent_diamonds','pb_unlocked','pb_completed_maps','pb_quest_index'].forEach(k => LS.remove(k));
+  ['pb_total_diamonds','pb_spent_diamonds','pb_unlocked','pb_completed_maps','pb_quest_index','pb_shown_tips'].forEach(k => LS.remove(k));
   // Wipe all series progress keys (pb_progress_<seriesName>)
   try {
     // Clear by known series names first
