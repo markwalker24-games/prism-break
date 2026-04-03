@@ -552,7 +552,8 @@ let activeSeriesIdx=0;      // which level we're on
 // Safe localStorage wrapper for Safari private mode
 const LS = {
   get(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } },
-  set(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
+  set(k,v){ try{ localStorage.setItem(k,v); }catch(e){} },
+  remove(k){ try{ localStorage.removeItem(k); }catch(e){} }
 };
 
 // =====================================================================
@@ -597,6 +598,7 @@ function getUnlockedFeatures() {
   try { return new Set(JSON.parse(LS.get('pb_unlocked') || '[]')); } catch(e) { return new Set(); }
 }
 function isUnlocked(feature) {
+  if (adminMode) return true;
   return getUnlockedFeatures().has(feature);
 }
 function spendToUnlock(feature) {
@@ -6943,11 +6945,7 @@ function showResetProgressOverlay() {
 }
 
 async function resetProgress() {
-  LS.set('pb_total_diamonds', '0');
-  LS.set('pb_spent_diamonds', '0');
-  LS.set('pb_unlocked', '[]');
-  LS.set('pb_completed_maps', '[]');
-  LS.set('pb_quest_index', '0');
+  // Delete from Supabase first
   if (_currentUser) {
     try {
       const token = await getSupabaseToken();
@@ -6957,6 +6955,8 @@ async function resetProgress() {
       });
     } catch(e) { console.warn('Reset cloud progress failed:', e); }
   }
+  // Wipe all progress keys from localStorage
+  ['pb_total_diamonds','pb_spent_diamonds','pb_unlocked','pb_completed_maps','pb_quest_index'].forEach(k => LS.remove(k));
   updateTotalDiamondDisplay();
   showModeSelect();
   showToast('Progress reset. Fresh start! 💎', '#00eeff');
