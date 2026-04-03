@@ -7353,6 +7353,7 @@ async function syncChallenges() {
       mapSlug: r.map_slug,
       mapName: null,
       senderId: r.sender_id,
+      recipientId: r.recipient_id || null,
       beaten: r.beaten,
       ts: new Date(r.created_at).getTime()
     }));
