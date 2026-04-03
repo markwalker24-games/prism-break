@@ -7169,12 +7169,151 @@ function showSpendConfirm(feature, featureName, onUnlocked) {
       ov.remove();
       spendToUnlock(feature);
       updateTotalDiamondDisplay();
-      showModeSelect(); // refresh home screen to show unlocked state
-      onUnlocked();
+      // Find the button element to shatter, then proceed
+      const btnEl = document.getElementById(
+        feature === 'breakout' ? 'modeBreakout' :
+        feature === 'blackout' ? 'modeBlackout' :
+        feature === 'full_builder' ? 'modeBuilder' :
+        feature === 'choose_map' ? 'modeSelectLevel' : null
+      );
+      if (btnEl) {
+        shatterUnlock(btnEl, feature, () => {
+          showModeSelect();
+          setTimeout(() => onUnlocked(), 100);
+        });
+      } else {
+        showModeSelect();
+        onUnlocked();
+      }
     });
   }
   panel.querySelector('#spendCancelBtn').addEventListener('click', () => ov.remove());
   ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+}
+
+function shatterUnlock(btnEl, feature, onComplete) {
+  const rect = btnEl.getBoundingClientRect();
+  const cx = rect.left + rect.width / 2;
+  const cy = rect.top + rect.height / 2;
+
+  // Feature colors for the burst
+  const colors = {
+    breakout: ['#7bbfff', '#00aaff', '#ffffff', '#00eeff'],
+    blackout: ['#ff8855', '#ff6633', '#ffaa77', '#ffffff'],
+    full_builder: ['#f5c842', '#ffdd55', '#ffffff', '#ffa500'],
+    choose_map: ['#f5c842', '#e8d5a0', '#ffffff', '#ffcc44'],
+  };
+  const burstColors = colors[feature] || ['#00eeff', '#ffffff'];
+
+  // Create overlay canvas for particle animation
+  const cvs = document.createElement('canvas');
+  cvs.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:800;';
+  cvs.width = window.innerWidth;
+  cvs.height = window.innerHeight;
+  document.body.appendChild(cvs);
+  const ctx = cvs.getContext('2d');
+
+  // Flash the button white
+  const origStyle = btnEl.style.cssText;
+  btnEl.style.transition = 'all 0.1s';
+  btnEl.style.background = 'rgba(255,255,255,0.95)';
+  btnEl.style.boxShadow = `0 0 40px rgba(255,255,255,0.9)`;
+
+  // Shatter particles - fragments flying out
+  const particles = [];
+  const fragCount = 32;
+  for (let i = 0; i < fragCount; i++) {
+    const angle = (i / fragCount) * Math.PI * 2 + (Math.random() - 0.5) * 0.3;
+    const speed = 3 + Math.random() * 8;
+    const size = 3 + Math.random() * 8;
+    particles.push({
+      x: cx + (Math.random() - 0.5) * rect.width * 0.8,
+      y: cy + (Math.random() - 0.5) * rect.height * 0.8,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed - 2,
+      size,
+      color: burstColors[Math.floor(Math.random() * burstColors.length)],
+      alpha: 1,
+      rotation: Math.random() * Math.PI * 2,
+      rotSpeed: (Math.random() - 0.5) * 0.3,
+      gravity: 0.25 + Math.random() * 0.2,
+    });
+  }
+
+  // Diamond sparkles
+  for (let i = 0; i < 12; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 5 + Math.random() * 10;
+    particles.push({
+      x: cx, y: cy,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed - 3,
+      size: 2 + Math.random() * 3,
+      color: '#00eeff',
+      alpha: 1,
+      rotation: 0, rotSpeed: 0,
+      gravity: 0.15,
+      isDiamond: true,
+    });
+  }
+
+  let frame = 0;
+  const totalFrames = 55;
+
+  function animate() {
+    ctx.clearRect(0, 0, cvs.width, cvs.height);
+    frame++;
+
+    // Restore button to unlocked state after flash
+    if (frame === 8) {
+      btnEl.style.cssText = origStyle;
+      showModeSelect(); // rebuild home screen with unlocked button
+    }
+
+    particles.forEach(p => {
+      p.x += p.vx;
+      p.y += p.vy;
+      p.vy += p.gravity;
+      p.vx *= 0.97;
+      p.alpha = Math.max(0, 1 - frame / totalFrames);
+      p.rotation += p.rotSpeed;
+
+      ctx.save();
+      ctx.globalAlpha = p.alpha;
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+
+      if (p.isDiamond) {
+        // Diamond shape
+        ctx.fillStyle = p.color;
+        ctx.shadowBlur = 8;
+        ctx.shadowColor = p.color;
+        ctx.beginPath();
+        ctx.moveTo(0, -p.size);
+        ctx.lineTo(p.size * 0.6, 0);
+        ctx.lineTo(0, p.size);
+        ctx.lineTo(-p.size * 0.6, 0);
+        ctx.closePath();
+        ctx.fill();
+      } else {
+        // Fragment shard
+        ctx.fillStyle = p.color;
+        ctx.shadowBlur = 6;
+        ctx.shadowColor = p.color;
+        ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      }
+      ctx.restore();
+    });
+
+    if (frame < totalFrames) {
+      requestAnimationFrame(animate);
+    } else {
+      cvs.remove();
+      if (onComplete) onComplete();
+    }
+  }
+
+  requestAnimationFrame(animate);
 }
 
 function showDiamondAlert(earned) {
