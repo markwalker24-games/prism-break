@@ -7266,7 +7266,7 @@ async function showChallengesScreen() {
       const left = document.createElement('div');
       left.style.cssText = 'display:flex;flex-direction:column;gap:3px;';
       const opponentName = profiles[r.opponentId] || null;
-      const vsLabel = opponentName ? `vs. ${opponentName}` : '';
+      const vsLabel = opponentName ? `vs. ${opponentName}` : (r.opponentId ? `vs. ${r.opponentId.slice(0,8)}...` : '');
       left.innerHTML = '<div style="color:#e8d5a0;font-family:Cinzel,serif;font-size:13px;font-weight:700;">' + (r.c.mapName || 'Challenge Map') + '</div><div style="color:rgba(200,130,130,0.5);font-size:11px;">' + (vsLabel ? `${vsLabel} · ` : '') + 'Round ' + r.c.round + '</div>';
       const right = document.createElement('div');
       right.style.cssText = "color:" + r.statusColor + ";font-family:'Cinzel',serif;font-size:10px;font-weight:700;letter-spacing:0.5px;";
