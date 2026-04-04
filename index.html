@@ -922,6 +922,7 @@ async function initAuth() {
         upsertMyProfile(session.user).catch(() => {});
         setTimeout(() => syncMyDataFromCloud(session.user.id), 1000);
         syncProgressFromCloud().then(() => { updateTotalDiamondDisplay(); showModeSelect(); }).catch(() => {});
+        migrateAnonymousChallenges(session.user.id);
       }
     } else {
       _currentUser = null;
@@ -7951,17 +7952,18 @@ async function showChallengesScreen() {
   Object.keys(_profileCache).forEach(k => { if (_profileCache[k] === null) delete _profileCache[k]; });
   const rows = challenges.map(c => {
     const iMSent = c.senderId === CREATOR_ID;
-    const isMyTurn = !iMSent && !c.beaten;
-    const fireBack = c.beaten; // always your turn to fire back after beating
-    const isWaiting = iMSent && !c.beaten;
+    const isMyTurn = !iMSent && !c.beaten;          // received, not beaten yet
+    const fireBack = !iMSent && c.beaten;            // received AND you beat it
+    const isWaiting = iMSent && !c.beaten;           // you sent it, waiting for them
+    const theyBeatIt = iMSent && c.beaten;           // you sent it, they beat it - their turn
     const awaitingFireBack = false;
     let statusText, statusColor, clickable;
     if (isMyTurn)           { statusText = '🔴 YOUR TURN';        statusColor = '#e63946'; clickable = true; }
     else if (fireBack)      { statusText = '🔥 FIRE BACK';        statusColor = '#e63946'; clickable = true; }
     else if (isWaiting)     { statusText = '⏳ WAITING';          statusColor = 'rgba(200,160,60,0.7)'; clickable = false; }
-    else if (awaitingFireBack) { statusText = '⏳ AWAITING FIRE BACK'; statusColor = 'rgba(200,160,60,0.7)'; clickable = false; }
+    else if (theyBeatIt)    { statusText = '⏳ THEIR TURN';       statusColor = 'rgba(200,160,60,0.7)'; clickable = false; }
     const opponentId = iMSent ? c.recipientId : c.senderId;
-    return { c, statusText, statusColor, clickable, isMyTurn, fireBack, isWaiting, awaitingFireBack, opponentId };
+    return { c, statusText, statusColor, clickable, isMyTurn, fireBack, isWaiting, theyBeatIt, opponentId };
   }).filter(r => r !== null);
 
   // Fetch opponent profiles
@@ -8173,6 +8175,52 @@ async function upsertChallengeSeriesLocally(chainId, baseName, newMapSlug, newMa
     };
     saveSeries(seriesObj);
   } catch(e) { console.warn('upsertChallengeSeriesLocally failed:', e); }
+}
+
+function migrateAnonymousChallenges(newUserId) {
+  // When an anonymous player signs in, their local challenges were stored
+  // with senderId = someone else's UUID (they were the recipient).
+  // We don't need to change senderId - that's correct.
+  // But we do need to make sure syncChallenges runs fresh so Supabase
+  // data (which knows their beaten status) overwrites any stale local data.
+  // Also stamp recipient_id on any beaten rounds they completed anonymously.
+  try {
+    const challenges = getLocalChallenges();
+    if (!challenges.length) return;
+
+    // For each challenge where they beat it as anonymous, try to stamp recipient_id in Supabase
+    challenges.forEach(async c => {
+      if (c.beaten && c.challengeId && !c.recipientId) {
+        try {
+          const token = await getSupabaseToken();
+          // Only stamp if recipient_id is still null
+          const res = await fetch(
+            `${SUPA_URL}/rest/v1/challenges?id=eq.${c.challengeId}&recipient_id=is.null&select=id`,
+            { headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${token}` } }
+          );
+          if (res.ok) {
+            const rows = await res.json();
+            if (rows.length) {
+              // Stamp their new Google UUID as recipient
+              await fetch(`${SUPA_URL}/rest/v1/challenges?id=eq.${c.challengeId}`, {
+                method: 'PATCH',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'apikey': SUPA_KEY,
+                  'Authorization': `Bearer ${token}`,
+                  'Prefer': 'return=minimal'
+                },
+                body: JSON.stringify({ recipient_id: newUserId })
+              });
+            }
+          }
+        } catch(e) { console.warn('Challenge migration failed for', c.challengeId, e); }
+      }
+    });
+
+    // Re-sync from Supabase to get fresh state with new UUID
+    setTimeout(() => syncChallenges(), 1500);
+  } catch(e) { console.warn('migrateAnonymousChallenges error:', e); }
 }
 
 async function syncChallenges() {
