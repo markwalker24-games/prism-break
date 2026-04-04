@@ -92,11 +92,11 @@
   .panel-btn.danger { border-color:rgba(200,60,60,0.6); color:#e88; }
   .panel-btn.gold { border-color:rgba(245,200,66,0.7); color:#f5c842; box-shadow:0 0 8px rgba(245,200,66,0.1),inset 0 1px 0 rgba(255,220,100,0.15); }
   .close-btn {
-    background:none; border:none; color:rgba(180,150,80,0.6);
+    background:none; border:none; color:rgba(220,220,220,0.7);
     font-family:'Cinzel',serif; font-size:11px;
     cursor:pointer; text-align:center; padding:4px; letter-spacing:1px;
   }
-  .close-btn:hover { color:#c9a84c; }
+  .close-btn:hover { color:#ffffff; }
 
   /* Level list */
   #levelList {
@@ -367,7 +367,7 @@
     <div style="height:1px;background:rgba(200,160,60,0.15);margin:8px 16px;"></div>
     <!-- Buttons -->
     <div style="display:flex;gap:8px;padding:10px 16px;flex-wrap:wrap;">
-      <button id="mapPreviewBack" style="flex:1;background:none;border:1px solid rgba(180,140,60,0.3);color:rgba(200,160,60,0.6);font-family:'Cinzel',serif;font-size:12px;font-weight:600;letter-spacing:1px;padding:12px;cursor:pointer;border-radius:3px;">BACK</button>
+      <button id="mapPreviewBack" style="flex:1;background:none;border:1px solid rgba(200,200,200,0.35);color:rgba(220,220,220,0.8);font-family:'Cinzel',serif;font-size:12px;font-weight:600;letter-spacing:1px;padding:12px;cursor:pointer;border-radius:3px;">BACK</button>
       <button id="mapPreviewPlay" style="flex:2;background:linear-gradient(180deg,rgba(60,45,20,0.95),rgba(35,25,10,0.98));border:1px solid rgba(245,200,66,0.6);border-bottom:2px solid rgba(80,50,10,0.9);color:#f5c842;font-family:'Cinzel',serif;font-size:14px;font-weight:700;letter-spacing:2px;padding:12px;cursor:pointer;border-radius:3px;">▶ PLAY</button>
     </div>
     <div id="mapPreviewChallengeWrap" style="display:none;padding:0 16px 16px;">
@@ -573,7 +573,7 @@ const UNLOCK_COSTS = {
   choose_map:        5,
   full_builder:      10, // full map builder + issue challenges
   breakout:          20,
-  blackout:          30,
+  blackout:          150,
 };
 const CHALLENGE_DIAMOND_CAP = 3;
 
@@ -609,7 +609,13 @@ function spendDiamonds(count) {
 
 function spendToUnlock(feature) {
   const cost = UNLOCK_COSTS[feature];
-  if (!cost) return false;
+  if (cost === undefined) return false;
+  if (cost === 0) { // free unlock
+    const unlocked = getUnlockedFeatures();
+    unlocked.add(feature);
+    LS.set('pb_unlocked', JSON.stringify([...unlocked]));
+    return true;
+  }
   if (isUnlocked(feature)) return true;
   if (getAvailableDiamonds() < cost) return false;
   LS.set('pb_spent_diamonds', String(getSpentDiamonds() + cost));
@@ -1294,6 +1300,102 @@ function makeBrick(c,r,color,isPaint,isSteel) {
   return { x:c*BRICK_W, y:r*BRICK_H, w:BRICK_W, h:BRICK_H,
            color:color||COLORS[0], isPaint:!!isPaint, isSteel:!!isSteel,
            isKey:false, isLock:false, hit:0, cooldown:0 };
+}
+
+function buildGuardModeMap() {
+  const result = [];
+  const mk = (c, r, opts={}) => ({
+    col:c, row:r, x:c*BRICK_W, y:r*BRICK_H, w:BRICK_W, h:BRICK_H,
+    color: opts.color || COLORS[Math.floor(Math.random()*COLORS.length)],
+    isPaint:!!opts.isPaint, isSteel:!!opts.isSteel,
+    isKey:!!opts.isKey, isLock:!!opts.isLock,
+    isDiamond:!!opts.isDiamond, isWhite:!!opts.isWhite,
+    isSkull:!!opts.isSkull, isReverse:false, isBomb:!!opts.isBomb,
+    hit:0, cooldown:0
+  });
+
+  // Build steel perimeter
+  for (let c = 0; c < BRICK_COLS; c++) {
+    result.push(mk(c, 0, { isSteel:true }));           // top
+    result.push(mk(c, BRICK_ROWS-1, { isSteel:true })); // bottom
+  }
+  for (let r = 1; r < BRICK_ROWS-1; r++) {
+    result.push(mk(0, r, { isSteel:true }));             // left
+    result.push(mk(BRICK_COLS-1, r, { isSteel:true }));  // right
+  }
+
+  // Place the lock randomly in the perimeter (not corners)
+  // Pick a side: 0=top, 1=bottom, 2=left, 3=right
+  const side = Math.floor(Math.random() * 4);
+  let lockCol, lockRow;
+  if (side === 0) { lockCol = 1 + Math.floor(Math.random()*(BRICK_COLS-2)); lockRow = 0; }
+  else if (side === 1) { lockCol = 1 + Math.floor(Math.random()*(BRICK_COLS-2)); lockRow = BRICK_ROWS-1; }
+  else if (side === 2) { lockCol = 0; lockRow = 1 + Math.floor(Math.random()*(BRICK_ROWS-2)); }
+  else { lockCol = BRICK_COLS-1; lockRow = 1 + Math.floor(Math.random()*(BRICK_ROWS-2)); }
+
+  // Replace the steel brick at that position with a lock
+  const lockIdx = result.findIndex(b => b.col === lockCol && b.row === lockRow);
+  if (lockIdx >= 0) result.splice(lockIdx, 1);
+  result.push(mk(lockCol, lockRow, { isLock:true, color:'#b8860b' }));
+
+  // Interior maze - scattered colored bricks, paint bricks, some skulls, a bomb
+  const occupied = new Set(result.map(b => `${b.col},${b.row}`));
+  const isFree = (c, r) => !occupied.has(`${c},${r}`);
+  const place = (b) => { occupied.add(`${b.col},${b.row}`); result.push(b); };
+
+  // Add some paint bricks for color mechanic
+  const paintColors = COLORS.slice(0, 3);
+  paintColors.forEach(color => {
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const c = 1 + Math.floor(Math.random()*(BRICK_COLS-2));
+      const r = 1 + Math.floor(Math.random()*(BRICK_ROWS-2));
+      if (isFree(c,r)) { place(mk(c, r, { isPaint:true, color })); break; }
+    }
+  });
+
+  // Add colored bricks
+  for (let i = 0; i < Math.floor(BRICK_COLS * BRICK_ROWS * 0.18); i++) {
+    const c = 1 + Math.floor(Math.random()*(BRICK_COLS-2));
+    const r = 1 + Math.floor(Math.random()*(BRICK_ROWS-2));
+    if (isFree(c,r)) {
+      const color = COLORS[Math.floor(Math.random()*COLORS.length)];
+      place(mk(c, r, { color }));
+    }
+  }
+
+  // Add some steel interior obstacles
+  for (let i = 0; i < 6; i++) {
+    const c = 1 + Math.floor(Math.random()*(BRICK_COLS-2));
+    const r = 1 + Math.floor(Math.random()*(BRICK_ROWS-2));
+    if (isFree(c,r)) place(mk(c, r, { isSteel:true }));
+  }
+
+  // Add a couple of skulls
+  for (let i = 0; i < 3; i++) {
+    const c = 1 + Math.floor(Math.random()*(BRICK_COLS-2));
+    const r = 1 + Math.floor(Math.random()*(BRICK_ROWS-2));
+    if (isFree(c,r)) place(mk(c, r, { isSkull:true }));
+  }
+
+  // Add a bomb so player can bomb the guard
+  for (let attempt = 0; attempt < 30; attempt++) {
+    const c = 2 + Math.floor(Math.random()*(BRICK_COLS-4));
+    const r = 2 + Math.floor(Math.random()*(BRICK_ROWS-4));
+    if (isFree(c,r)) { place(mk(c, r, { isBomb:true })); break; }
+  }
+
+  // Make sure ball spawn area is clear (center-ish)
+  const ballCol = Math.floor(BRICK_COLS/2);
+  const ballRow = Math.floor(BRICK_ROWS*0.7);
+  for (let dc=-1; dc<=1; dc++) {
+    for (let dr=-1; dr<=1; dr++) {
+      const bc = ballCol+dc, br = ballRow+dr;
+      const idx = result.findIndex(b => b.col===bc && b.row===br && !b.isSteel && !b.isLock);
+      if (idx>=0) result.splice(idx,1);
+    }
+  }
+
+  return { bricks: result, ballCol, ballRow, lockCol, lockRow };
 }
 
 function buildRandomBricks(mode) {
@@ -2137,6 +2239,35 @@ function detonateBomb(bomb){
     }
   }
 
+  // Check if guard is in blast zone - drops key and respawns
+  if (guardBall && gameMode === 'blackout') {
+    const gc = Math.floor(guardBall.x / BRICK_W);
+    const gr = Math.floor(guardBall.y / BRICK_H);
+    if (affected.has(`${gc},${gr}`)) {
+      // Drop a key where the guard was
+      const keyX = guardBall.col * BRICK_W;
+      const keyY = guardBall.row * BRICK_H;
+      bricks.push({
+        col: guardBall.col, row: guardBall.row,
+        x: keyX, y: keyY, w: BRICK_W, h: BRICK_H,
+        color: '#ffd700', isPaint:false, isSteel:false,
+        isKey:true, isLock:false, isDiamond:false,
+        isWhite:false, isSkull:false, isReverse:false, isBomb:false,
+        hit:0, cooldown:0
+      });
+      // Explosion effect
+      for(let i=0;i<20;i++){
+        const a=Math.random()*Math.PI*2, s=2+Math.random()*5;
+        particles.push({x:guardBall.x,y:guardBall.y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,
+          color:'#cc00ff',life:1.0,size:2+Math.random()*4});
+      }
+      showToast('Guard down! Grab the key! 🔑', '#cc00ff');
+      // Respawn guard after delay
+      guardBall = null;
+      setTimeout(() => { if(gameRunning && gameMode==='blackout') spawnGuard(); }, 3000);
+    }
+  }
+
   // Check if ball is in blast zone - but not if finale already triggered
   const ballCol=Math.round((ball.x-BRICK_W/2)/BRICK_W);
   const ballRow=Math.round((ball.y-BRICK_H/2)/BRICK_H);
@@ -2148,6 +2279,208 @@ function detonateBomb(bomb){
       const px=c*BRICK_W+BRICK_W/2, py=r*BRICK_H+BRICK_H/2;
       spawnParticles(px,py,'#ff8800',4);
     }
+  });
+}
+
+let guardBall = null; // grid-walking guard for guard mode
+
+function spawnGuard() {
+  // Find an open cell far from the player ball to start
+  const openCells = [];
+  for (let c = 0; c < BRICK_COLS; c++) {
+    for (let r = 0; r < BRICK_ROWS; r++) {
+      const hasBrick = bricks.some(b => b.col === c && b.row === r);
+      if (!hasBrick) openCells.push({ c, r });
+    }
+  }
+  if (!openCells.length) return;
+
+  // Pick a cell in the upper portion of the map
+  const topCells = openCells.filter(cell => cell.r < BRICK_ROWS * 0.4);
+  const startCells = topCells.length ? topCells : openCells;
+  const start = startCells[Math.floor(Math.random() * startCells.length)];
+
+  guardBall = {
+    col: start.c,
+    row: start.r,
+    x: start.c * BRICK_W + BRICK_W / 2,
+    y: start.r * BRICK_H + BRICK_H / 2,
+    // Direction: 0=right, 1=down, 2=left, 3=up
+    dir: Math.floor(Math.random() * 4),
+    moveTimer: 0,
+    moveInterval: 380, // ms per cell move - adjust for speed
+    trail: [],
+    flashlight: true,
+  };
+}
+
+function updateGuard(dt) {
+  const g = guardBall;
+  if (!g) return;
+
+  g.moveTimer += dt * 16.67;
+
+  if (g.moveTimer >= g.moveInterval) {
+    g.moveTimer = 0;
+
+    // Save trail
+    g.trail.unshift({ x: g.x, y: g.y });
+    if (g.trail.length > 6) g.trail.pop();
+
+    // Try to continue in current direction, else turn
+    const dirs = [
+      { dc: 1, dr: 0 },  // right
+      { dc: 0, dr: 1 },  // down
+      { dc: -1, dr: 0 }, // left
+      { dc: 0, dr: -1 }, // up
+    ];
+
+    const canMove = (dc, dr) => {
+      const nc = g.col + dc;
+      const nr = g.row + dr;
+      if (nc < 0 || nc >= BRICK_COLS || nr < 0 || nr >= BRICK_ROWS) return false;
+      return !bricks.some(b => b.col === nc && b.row === nr && (b.isSteel || b.isLock || b.isDiamond));
+    };
+
+    // Try current direction
+    const cur = dirs[g.dir];
+    if (canMove(cur.dc, cur.dr)) {
+      // 85% chance to continue straight, 15% chance to turn at intersections
+      const shouldTurn = Math.random() < 0.15;
+      if (!shouldTurn) {
+        g.col += cur.dc;
+        g.row += cur.dr;
+      } else {
+        // Try a random valid turn (not reverse)
+        const turns = [0, 1, 2, 3].filter(d => d !== (g.dir + 2) % 4 && canMove(dirs[d].dc, dirs[d].dr));
+        if (turns.length) {
+          g.dir = turns[Math.floor(Math.random() * turns.length)];
+          const nd = dirs[g.dir];
+          g.col += nd.dc;
+          g.row += nd.dr;
+        } else {
+          g.col += cur.dc;
+          g.row += cur.dr;
+        }
+      }
+    } else {
+      // Can't go straight - find valid turns, prefer not reversing
+      const forward = g.dir;
+      const reverse = (g.dir + 2) % 4;
+      const options = [0, 1, 2, 3].filter(d => d !== forward && canMove(dirs[d].dc, dirs[d].dr));
+      const noReverse = options.filter(d => d !== reverse);
+      const choices = noReverse.length ? noReverse : options;
+
+      if (choices.length) {
+        g.dir = choices[Math.floor(Math.random() * choices.length)];
+        const nd = dirs[g.dir];
+        g.col += nd.dc;
+        g.row += nd.dr;
+      } else {
+        // Dead end - reverse
+        g.dir = reverse;
+      }
+    }
+
+    // Snap to grid center
+    g.x = g.col * BRICK_W + BRICK_W / 2;
+    g.y = g.row * BRICK_H + BRICK_H / 2;
+  }
+
+  // Check collision with player ball
+  if (ballLaunched && ball) {
+    const dx = ball.x - g.x;
+    const dy = ball.y - g.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < BALL_R * 2.5) {
+      // Caught by guard - kill ball
+      spawnParticles(ball.x, ball.y, '#cc00ff', 20);
+      screenFlash = 10;
+      killBall();
+    }
+  }
+}
+
+function drawGuard(c) {
+  const g = guardBall;
+  if (!g) return;
+  const x = g.x, y = g.y, R = BALL_R;
+  const t = performance.now() * 0.002;
+
+  // Trail
+  g.trail.forEach((tr, i) => {
+    c.globalAlpha = (1 - i / g.trail.length) * 0.3;
+    c.fillStyle = '#8800cc';
+    c.beginPath(); c.arc(tr.x, tr.y, R * 0.6, 0, Math.PI * 2); c.fill();
+  });
+  c.globalAlpha = 1;
+
+  // Flashlight cone in movement direction
+  const dirs = [[1,0],[0,1],[-1,0],[0,-1]];
+  const [dx, dy] = dirs[g.dir];
+  const angle = Math.atan2(dy, dx);
+  const coneLen = BRICK_W * 2.5;
+  const coneAngle = Math.PI / 4;
+
+  // Flashlight cone in movement direction
+  c.save();
+  c.globalAlpha = 0.18;
+  c.fillStyle = '#ffee99';
+  c.beginPath();
+  c.moveTo(x, y);
+  c.arc(x, y, coneLen, angle - coneAngle / 2, angle + coneAngle / 2);
+  c.closePath();
+  c.fill();
+  c.globalAlpha = 1;
+  c.restore();
+
+  // Check if player is in flashlight cone - caught!
+  if (ballLaunched && ball) {
+    const pdx = ball.x - x, pdy = ball.y - y;
+    const pdist = Math.sqrt(pdx * pdx + pdy * pdy);
+    if (pdist < coneLen) {
+      const playerAngle = Math.atan2(pdy, pdx);
+      let angleDiff = Math.abs(playerAngle - angle);
+      if (angleDiff > Math.PI) angleDiff = Math.PI * 2 - angleDiff;
+      if (angleDiff < coneAngle / 2) {
+        spawnParticles(ball.x, ball.y, '#ffee99', 12);
+        screenFlash = 8;
+        killBall();
+      }
+    }
+  }
+
+  // Outer glow
+  const glow = c.createRadialGradient(x, y, 0, x, y, R * 3);
+  glow.addColorStop(0, `rgba(160,0,255,${0.5 + 0.2 * Math.sin(t * 4)})`);
+  glow.addColorStop(0.5, 'rgba(80,0,180,0.2)');
+  glow.addColorStop(1, 'rgba(0,0,0,0)');
+  c.fillStyle = glow;
+  c.beginPath(); c.arc(x, y, R * 3, 0, Math.PI * 2); c.fill();
+
+  // Body - dark purple
+  const body = c.createRadialGradient(x - R * 0.3, y - R * 0.3, 0, x, y, R);
+  body.addColorStop(0, '#cc66ff');
+  body.addColorStop(0.4, '#880099');
+  body.addColorStop(1, '#330044');
+  c.fillStyle = body;
+  c.beginPath(); c.arc(x, y, R, 0, Math.PI * 2); c.fill();
+
+  // Eyes - two small white dots looking in movement direction
+  const eyeOffset = R * 0.35;
+  const perpX = -dy * eyeOffset * 0.5;
+  const perpY = dx * eyeOffset * 0.5;
+  const eyeForward = R * 0.25;
+  [[perpX, perpY], [-perpX, -perpY]].forEach(([ex, ey]) => {
+    c.fillStyle = '#ffffff';
+    c.beginPath();
+    c.arc(x + dx * eyeForward + ex, y + dy * eyeForward + ey, R * 0.18, 0, Math.PI * 2);
+    c.fill();
+    // Pupils
+    c.fillStyle = '#000000';
+    c.beginPath();
+    c.arc(x + dx * eyeForward + ex + dx * 1.5, y + dy * eyeForward + ey + dy * 1.5, R * 0.09, 0, Math.PI * 2);
+    c.fill();
   });
 }
 
@@ -2353,14 +2686,19 @@ function update(dt){
 
   // Win condition: blackout = clear all colored bricks (check AFTER detonations)
   if(gameMode==='blackout' && !finaleTriggered && !gameOver){
-    if(bricks.every(b=>b.isPaint||b.isSteel||b.isLock||b.isKey||b.isDiamond||b.isWhite||b.isSkull||b.isReverse||b.isBomb)){
+    // Win condition: the perimeter lock has been opened (removed from bricks)
+    // The perimeter lock is on row 0, last row, col 0, or last col
+    const perimeterLockExists = bricks.some(b => b.isLock && (
+      b.row === 0 || b.row === BRICK_ROWS-1 || b.col === 0 || b.col === BRICK_COLS-1
+    ));
+    if (!perimeterLockExists) {
       triggerBlackoutFinale();
       return;
     }
   }
 
   // Update poison ball - freeze during respawn
-  if(poisonBall && gameMode==='blackout' && !isRespawning) updatePoisonBall(dt);
+  if(guardBall && gameMode==='blackout' && !isRespawning) updateGuard(dt);
 
   // Bomb regeneration - if any color bricks exist without a matching paint brick, spawn a bomb
   if(gameMode==='blackout' && gameRunning && !testingLevel && Math.random()<0.002*dt){
@@ -2421,10 +2759,17 @@ function triggerBlackoutFinale(){
   if(finaleTriggered) return;
   finaleTriggered=true;
   gameRunning=false;
+  guardBall = null;
   activeBombs=[];
-  fallingBricks=[];
-  bricks=[];
-  setTimeout(()=>{ endGame('clear'); }, 600);
+  // Celebration burst
+  for(let i=0;i<8;i++) spawnDiamondBurst(ball.x, ball.y);
+  for(let i=0;i<30;i++){
+    const a=Math.random()*Math.PI*2, s=4+Math.random()*8;
+    particles.push({x:ball.x,y:ball.y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,
+      color:Math.random()<0.5?'#ffd700':'#ffffff',life:1.5,size:3+Math.random()*5});
+  }
+  screenFlash=15;
+  setTimeout(()=>{ endGame('clear'); }, 800);
 }
 
 // roundRect polyfill for older Safari
@@ -2497,7 +2842,7 @@ function draw(){
   for(let b of bricks) drawBrick(ctx,b);
   // Draw placed bombs
   for(const bomb of activeBombs) drawPlacedBomb(ctx, bomb);
-  if(poisonBall) drawPoisonBall(ctx, poisonBall);
+  if(guardBall && gameMode==='blackout') drawGuard(ctx);
   // Draw falling bricks during blackout finale
   for(const fb of fallingBricks){
     if(!fb.exploded){
@@ -2617,7 +2962,7 @@ function startGame(levelData, forcedMode){
   editBtn.style.display = isCustomLevel ? 'block' : 'none';
   score=0; particles=[]; gameOver=false; ballLaunched=false; paused=false;
   gameStartTime=0; totalElapsed=0; portal=null; keysHeld=0; diamondsCollected=0; screenFlash=0;
-  lives=3; usedContinue=false; controlsReversed=false; fallingBricks=[]; finaleTriggered=false; finaleTimeout=null; bombsHeld=0; activeBombs=[]; bothSidesHeld=false; bothSidesTimestamp=0; isRespawning=false; poisonBall=null; blownUpKeys=[]; deathFreeze=false;
+  lives=3; usedContinue=false; controlsReversed=false; fallingBricks=[]; finaleTriggered=false; finaleTimeout=null; bombsHeld=0; activeBombs=[]; bothSidesHeld=false; bothSidesTimestamp=0; isRespawning=false; poisonBall=null; guardBall=null; blownUpKeys=[]; deathFreeze=false;
   if(bothSidesReleaseTimer){ clearTimeout(bothSidesReleaseTimer); bothSidesReleaseTimer=null; }
   bombHud.style.display='none';
   renderLives();
@@ -2647,10 +2992,17 @@ function startGame(levelData, forcedMode){
     initBall(); bricks=bricksFromSaved(levelData);
     if(forcedMode==='escape') bricks=addRandomDiamonds(bricks);
   } else {
-    initBall();
-    bricks=buildRandomBricks(forcedMode);
-    if(forcedMode==='escape') bricks=addRandomDiamonds(bricks);
-    addRandomHazards(bricks, forcedMode);
+    if (forcedMode === 'blackout') {
+      // Guard mode - steel perimeter with lock exit
+      const guardMap = buildGuardModeMap();
+      bricks = guardMap.bricks;
+      initBall(guardMap.ballCol * BRICK_W + BRICK_W/2, guardMap.ballRow * BRICK_H + BRICK_H/2);
+    } else {
+      initBall();
+      bricks = buildRandomBricks(forcedMode);
+      if(forcedMode==='escape') bricks=addRandomDiamonds(bricks);
+      addRandomHazards(bricks, forcedMode);
+    }
   }
 
   // Apply level background if set, or pick random for Break Out / Blackout
@@ -2669,8 +3021,10 @@ function startGame(levelData, forcedMode){
 
   // Spawn poison ball for blackout - never during builder testing
   poisonBall = null;
+  guardBall = null;
   if(gameMode==='blackout' && !testingLevel){
-    setTimeout(()=>{ if(gameRunning) spawnPoisonBall(); }, 3000);
+    guardBall = null;
+    setTimeout(()=>{ if(gameRunning) spawnGuard(); }, 2000);
   }
 
   // Update diamond HUD
@@ -3103,7 +3457,7 @@ document.getElementById('mapPreviewChallenge').addEventListener('click', async (
       <textarea id="challengeInitCopyArea" readonly rows="4" style="width:100%;box-sizing:border-box;background:rgba(10,4,4,0.9);border:1px solid rgba(180,60,60,0.4);color:#e8d5a0;font-family:'Lato',sans-serif;font-size:12px;padding:10px;border-radius:3px;resize:none;line-height:1.6;cursor:text;" onclick="this.select()">${msg}</textarea>
       <div id="challengeInitCopyStatus" style="color:rgba(180,150,80,0.7);font-size:12px;text-align:center;">Message copied to clipboard!</div>
       <button id="challengeInitTextBtn" style="width:100%;background:linear-gradient(180deg,rgba(80,10,10,0.98),rgba(50,5,5,0.99));border:1px solid rgba(220,60,60,0.7);border-bottom:2px solid rgba(80,10,10,0.9);color:#e63946;font-family:'Cinzel',serif;font-weight:700;font-size:14px;letter-spacing:1px;padding:14px;cursor:pointer;border-radius:3px;">TEXT THEM</button>
-      <button id="challengeInitDoneBtn" style="width:100%;background:none;border:none;color:rgba(180,100,100,0.4);font-family:'Cinzel',serif;font-size:12px;cursor:pointer;padding:4px;letter-spacing:1px;">DONE</button>
+      <button id="challengeInitDoneBtn" style="width:100%;background:none;border:none;color:rgba(220,220,220,0.7);font-family:'Cinzel',serif;font-size:12px;cursor:pointer;padding:4px;letter-spacing:1px;">DONE</button>
     `;
     ov.appendChild(panel);
     document.body.appendChild(ov);
@@ -4043,7 +4397,7 @@ function showShareLinkOverlay(title, url, levelData) {
     <div id="slCopyStatus" style="color:rgba(180,150,80,0.7);font-size:12px;text-align:center;line-height:1.6;">Message copied to clipboard!</div>
     <textarea id="slLinkInput" readonly rows="4" style="width:100%;box-sizing:border-box;background:rgba(10,8,4,0.9);border:1px solid rgba(150,110,40,0.5);color:#e8d5a0;font-family:'Lato',sans-serif;font-size:12px;padding:10px;border-radius:3px;resize:none;line-height:1.6;cursor:text;" onclick="this.select()">${shareMsg}</textarea>
     <button id="slTextBtn" style="width:100%;background:linear-gradient(180deg,rgba(60,45,20,0.95),rgba(35,25,10,0.98));border:1px solid rgba(245,200,66,0.6);border-bottom:2px solid rgba(80,50,10,0.9);color:#f5c842;font-family:'Cinzel',serif;font-weight:600;font-size:14px;letter-spacing:1px;padding:14px;cursor:pointer;border-radius:3px;box-shadow:0 0 12px rgba(245,200,66,0.15);">TEXT A FRIEND</button>
-    <button id="slDoneBtn" style="width:100%;background:none;border:none;color:rgba(180,140,60,0.5);font-family:'Cinzel',serif;font-size:12px;cursor:pointer;padding:4px;letter-spacing:1px;">DONE</button>
+    <button id="slDoneBtn" style="width:100%;background:none;border:none;color:rgba(220,220,220,0.7);font-family:'Cinzel',serif;font-size:12px;cursor:pointer;padding:4px;letter-spacing:1px;">DONE</button>
   `;
 
   ov.appendChild(panel);
@@ -4075,7 +4429,7 @@ function requireSignIn(onSignedIn) {
     <div style="font-family:'Cinzel',serif;font-size:14px;color:#e63946;letter-spacing:1px;text-align:center;">SIGN IN TO FIRE BACK</div>
     <div style="color:rgba(200,150,150,0.7);font-size:12px;text-align:center;line-height:1.8;">Sign in so your opponent can find your response.</div>
     <button id="signInToFireBtn" style="width:100%;background:linear-gradient(180deg,rgba(80,10,10,0.98),rgba(50,5,5,0.99));border:1px solid rgba(220,60,60,0.7);border-bottom:2px solid rgba(80,10,10,0.9);color:#e63946;font-family:'Cinzel',serif;font-weight:700;font-size:13px;letter-spacing:1px;padding:13px;cursor:pointer;border-radius:3px;">SIGN IN WITH GOOGLE</button>
-    <button id="signInSkipBtn" style="background:none;border:none;color:rgba(180,100,100,0.4);font-family:'Cinzel',serif;font-size:11px;cursor:pointer;letter-spacing:1px;">CANCEL</button>
+    <button id="signInSkipBtn" style="background:none;border:none;color:rgba(220,220,220,0.7);font-family:'Cinzel',serif;font-size:11px;cursor:pointer;letter-spacing:1px;">CANCEL</button>
   `;
   ov.appendChild(panel);
   document.body.appendChild(ov);
@@ -4181,7 +4535,7 @@ function openMapsPanel(defaultTab='maps') {
     <div id="mapsPanelBody" style="flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px;min-height:0;"></div>
     <!-- Footer -->
     <div style="padding:10px 14px;border-top:1px solid rgba(200,160,60,0.15);">
-      <button id="mapsPanelClose" style="width:100%;background:none;border:none;color:rgba(180,140,60,0.5);font-family:'Cinzel',serif;font-size:13px;cursor:pointer;padding:6px;">CLOSE</button>
+      <button id="mapsPanelClose" style="width:100%;background:none;border:none;color:rgba(220,220,220,0.7);font-family:'Cinzel',serif;font-size:13px;cursor:pointer;padding:6px;">CLOSE</button>
     </div>
   </div>`;
 
@@ -4503,7 +4857,7 @@ function openMapsPanel(defaultTab='maps') {
               <textarea id="challengeInitCopyArea" readonly rows="4" style="width:100%;box-sizing:border-box;background:rgba(10,4,4,0.9);border:1px solid rgba(180,60,60,0.4);color:#e8d5a0;font-family:'Lato',sans-serif;font-size:12px;padding:10px;border-radius:3px;resize:none;line-height:1.6;cursor:text;" onclick="this.select()">${msg}</textarea>
               <div id="challengeInitCopyStatus" style="color:rgba(180,150,80,0.7);font-size:12px;text-align:center;">Message copied to clipboard!</div>
               <button id="challengeInitTextBtn" style="width:100%;background:linear-gradient(180deg,rgba(80,10,10,0.98),rgba(50,5,5,0.99));border:1px solid rgba(220,60,60,0.7);border-bottom:2px solid rgba(80,10,10,0.9);color:#e63946;font-family:'Cinzel',serif;font-weight:700;font-size:14px;letter-spacing:1px;padding:14px;cursor:pointer;border-radius:3px;">TEXT THEM</button>
-              <button id="challengeInitDoneBtn" style="width:100%;background:none;border:none;color:rgba(180,100,100,0.4);font-family:'Cinzel',serif;font-size:12px;cursor:pointer;padding:4px;letter-spacing:1px;">DONE</button>
+              <button id="challengeInitDoneBtn" style="width:100%;background:none;border:none;color:rgba(220,220,220,0.7);font-family:'Cinzel',serif;font-size:12px;cursor:pointer;padding:4px;letter-spacing:1px;">DONE</button>
             `;
             shareOv.appendChild(sharePanel);
             document.body.appendChild(shareOv);
@@ -7096,7 +7450,7 @@ function showResetProgressOverlay() {
       <div>👤 Your account &amp; sign-in</div>
     </div>
     <button id="resetConfirmBtn" style="width:100%;background:linear-gradient(180deg,rgba(80,10,10,0.98),rgba(50,5,5,0.99));border:1px solid rgba(220,60,60,0.6);color:#e63946;font-family:'Cinzel',serif;font-weight:700;font-size:13px;letter-spacing:1px;padding:13px;cursor:pointer;border-radius:3px;">RESET MY PROGRESS</button>
-    <button id="resetCancelBtn" style="background:none;border:none;color:rgba(0,180,200,0.4);font-family:'Cinzel',serif;font-size:11px;cursor:pointer;letter-spacing:1px;padding:4px;">CANCEL</button>
+    <button id="resetCancelBtn" style="background:none;border:none;color:rgba(220,220,220,0.7);font-family:'Cinzel',serif;font-size:11px;cursor:pointer;letter-spacing:1px;padding:4px;">CANCEL</button>
   `;
   ov.appendChild(panel);
   document.body.appendChild(ov);
@@ -7141,6 +7495,14 @@ async function resetProgress() {
 
 function showSpendConfirm(feature, featureName, onUnlocked) {
   const cost = UNLOCK_COSTS[feature];
+  // Free unlock - just do it immediately
+  if (cost === 0) {
+    spendToUnlock(feature);
+    updateTotalDiamondDisplay();
+    showModeSelect();
+    onUnlocked();
+    return;
+  }
   const available = getAvailableDiamonds();
   const canAfford = available >= cost;
 
@@ -7160,7 +7522,7 @@ function showSpendConfirm(feature, featureName, onUnlocked) {
     ` : `
       <div style="color:rgba(220,100,100,0.7);font-size:12px;">Not enough diamonds.<br>Keep playing to earn more!</div>
     `}
-    <button id="spendCancelBtn" style="background:none;border:none;color:rgba(0,180,200,0.4);font-family:'Cinzel',serif;font-size:11px;cursor:pointer;letter-spacing:1px;">CANCEL</button>
+    <button id="spendCancelBtn" style="background:none;border:none;color:rgba(220,220,220,0.7);font-family:'Cinzel',serif;font-size:11px;cursor:pointer;letter-spacing:1px;">CANCEL</button>
   `;
   ov.appendChild(panel);
   document.body.appendChild(ov);
@@ -7349,7 +7711,7 @@ function showLeaderboard() {
     <div id="leaderboardRows" style="display:flex;flex-direction:column;gap:4px;">
       <div style="color:rgba(180,140,60,0.5);font-size:12px;font-family:'Lato',sans-serif;text-align:center;padding:16px 0;">Loading...</div>
     </div>
-    <button id="leaderboardClose" style="background:none;border:none;color:rgba(180,140,60,0.4);font-family:'Cinzel',serif;font-size:12px;cursor:pointer;letter-spacing:1px;padding:6px;">CLOSE</button>
+    <button id="leaderboardClose" style="background:none;border:none;color:rgba(220,220,220,0.7);font-family:'Cinzel',serif;font-size:12px;cursor:pointer;letter-spacing:1px;padding:6px;">CLOSE</button>
   `;
 
   ov.appendChild(panel);
@@ -7454,7 +7816,7 @@ async function showPlayerRecords(playerName, isMe, parentOv) {
   }
 
   const backBtn = document.createElement('button');
-  backBtn.style.cssText = "background:none;border:none;color:rgba(180,140,60,0.4);font-family:'Cinzel',serif;font-size:12px;cursor:pointer;letter-spacing:1px;padding:6px;";
+  backBtn.style.cssText = "background:none;border:none;color:rgba(220,220,220,0.7);font-family:'Cinzel',serif;font-size:12px;cursor:pointer;letter-spacing:1px;padding:6px;";
   backBtn.textContent = '← BACK';
   backBtn.addEventListener('click', () => ov.remove());
   panel.appendChild(backBtn);
@@ -7878,7 +8240,7 @@ function showChallengeShareOverlay(chainId, round, url) {
     <textarea id="challengeCopyArea" readonly rows="4" style="width:100%;box-sizing:border-box;background:rgba(10,4,4,0.9);border:1px solid rgba(180,60,60,0.4);color:#e8d5a0;font-family:'Lato',sans-serif;font-size:12px;padding:10px;border-radius:3px;resize:none;line-height:1.6;cursor:text;" onclick="this.select()">${msg}</textarea>
     <div id="challengeCopyStatus" style="color:rgba(180,150,80,0.7);font-size:12px;text-align:center;line-height:1.5;">Message copied to clipboard!</div>
     <button id="challengeTextBtn" style="width:100%;background:linear-gradient(180deg,rgba(80,10,10,0.98),rgba(50,5,5,0.99));border:1px solid rgba(220,60,60,0.7);border-bottom:2px solid rgba(80,10,10,0.9);color:#e63946;font-family:'Cinzel',serif;font-weight:700;font-size:14px;letter-spacing:1px;padding:14px;cursor:pointer;border-radius:3px;">TEXT THEM</button>
-    <button id="challengeDoneBtn" style="width:100%;background:none;border:none;color:rgba(180,100,100,0.4);font-family:'Cinzel',serif;font-size:12px;cursor:pointer;padding:4px;letter-spacing:1px;">DONE</button>
+    <button id="challengeDoneBtn" style="width:100%;background:none;border:none;color:rgba(220,220,220,0.7);font-family:'Cinzel',serif;font-size:12px;cursor:pointer;padding:4px;letter-spacing:1px;">DONE</button>
   `;
   ov.appendChild(panel);
   document.body.appendChild(ov);
@@ -7924,7 +8286,7 @@ function showChallengeWaitingPopup(c, onEditMap) {
     <textarea id="waitingNudgeText" readonly rows="3" style="width:100%;box-sizing:border-box;background:rgba(10,4,4,0.9);border:1px solid rgba(180,60,60,0.3);color:#e8d5a0;font-family:'Lato',sans-serif;font-size:12px;padding:10px;border-radius:3px;resize:none;line-height:1.6;cursor:text;" onclick="this.select()">${nudgeMsg}</textarea>
     <button id="waitingNudgeBtn" style="width:100%;background:linear-gradient(180deg,rgba(80,10,10,0.98),rgba(50,5,5,0.99));border:1px solid rgba(220,60,60,0.6);border-bottom:2px solid rgba(80,10,10,0.9);color:#e63946;font-family:'Cinzel',serif;font-weight:700;font-size:13px;letter-spacing:1px;padding:13px;cursor:pointer;border-radius:3px;">📲 SEND NUDGE</button>
     <button id="waitingEditBtn" style="width:100%;background:none;border:1px solid rgba(200,160,60,0.3);color:rgba(200,160,60,0.7);font-family:'Cinzel',serif;font-size:12px;font-weight:600;letter-spacing:1px;padding:11px;cursor:pointer;border-radius:3px;">✏️ EDIT MAP (Make it Easier)</button>
-    <button id="waitingCloseBtn" style="width:100%;background:none;border:none;color:rgba(180,100,100,0.35);font-family:'Cinzel',serif;font-size:11px;cursor:pointer;padding:4px;letter-spacing:1px;">CLOSE</button>
+    <button id="waitingCloseBtn" style="width:100%;background:none;border:none;color:rgba(220,220,220,0.7);font-family:'Cinzel',serif;font-size:11px;cursor:pointer;padding:4px;letter-spacing:1px;">CLOSE</button>
   `;
 
   ov.appendChild(panel);
@@ -8023,7 +8385,7 @@ async function showChallengesScreen() {
 
   const backBtn = document.createElement('button');
   backBtn.id = 'challengesBackBtn';
-  backBtn.style.cssText = "width:100%;background:none;border:none;color:rgba(180,100,100,0.45);font-family:'Cinzel',serif;font-size:12px;cursor:pointer;padding:10px;letter-spacing:1px;margin-top:4px;";
+  backBtn.style.cssText = "width:100%;background:none;border:none;color:rgba(220,220,220,0.7);font-family:'Cinzel',serif;font-size:12px;cursor:pointer;padding:10px;letter-spacing:1px;margin-top:4px;";
   backBtn.textContent = 'BACK';
   container.appendChild(backBtn);
 
