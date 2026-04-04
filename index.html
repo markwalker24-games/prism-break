@@ -2409,12 +2409,57 @@ function updateGuard(dt) {
     const dy = ball.y - g.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
     if (dist < BALL_R * 2.5) {
-      // Caught by guard - kill ball
-      spawnParticles(ball.x, ball.y, '#cc00ff', 20);
-      screenFlash = 10;
-      killBall();
+      guardCaughtPlayer();
     }
   }
+}
+
+let _guardAlertFrame = -1; // -1 = inactive, 0+ = frame count
+
+function guardCaughtPlayer() {
+  if (_guardAlertFrame >= 0 || gameOver) return;
+  _guardAlertFrame = 0;
+  gameRunning = false;
+}
+
+function updateGuardAlert() {
+  if (_guardAlertFrame < 0) return;
+  _guardAlertFrame++;
+  if (_guardAlertFrame > 25) {
+    _guardAlertFrame = -1;
+    _guardAlertFrame = -1;
+    killBall();
+  }
+}
+
+function drawGuardAlert() {
+  if (_guardAlertFrame < 0 || !guardBall) return;
+
+  // Police flash - alternate red/blue every 8 frames
+  const flashPhase = Math.floor(_guardAlertFrame / 8) % 2;
+  ctx.fillStyle = flashPhase === 0 ? 'rgba(255,30,30,0.25)' : 'rgba(30,80,255,0.25)';
+  ctx.fillRect(0, 0, W, H);
+
+  // Exclamation bubble above guard
+  const gx = guardBall.x;
+  const gy = guardBall.y - BALL_R * 2.5;
+  const bob = Math.sin(_guardAlertFrame * 0.3) * 3;
+
+  // Big bright red exclamation on top of everything
+  ctx.save();
+  ctx.shadowColor = '#ff0000';
+  ctx.shadowBlur = 16;
+  ctx.font = 'bold 36px Arial, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#ff0000';
+  ctx.fillText('!', gx, gy + bob);
+  // Second pass for extra brightness
+  ctx.shadowBlur = 8;
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 28px Arial, sans-serif';
+  ctx.fillText('!', gx, gy + bob);
+  ctx.restore();
 }
 
 function drawGuard(c) {
@@ -2488,9 +2533,7 @@ function drawGuard(c) {
         // Check no wall between guard and player
         const wallDist = castRay(playerAngle);
         if (pdist <= wallDist + BRICK_W) {
-          spawnParticles(ball.x, ball.y, '#ffffff', 12);
-          screenFlash = 8;
-          killBall();
+          guardCaughtPlayer();
         }
       }
     }
@@ -2889,6 +2932,7 @@ function draw(){
   // Draw placed bombs
   for(const bomb of activeBombs) drawPlacedBomb(ctx, bomb);
   if(guardBall && gameMode==='blackout') drawGuard(ctx);
+  if(gameMode==='blackout') { updateGuardAlert(); drawGuardAlert(); }
   // Draw falling bricks during blackout finale
   for(const fb of fallingBricks){
     if(!fb.exploded){
@@ -3008,7 +3052,7 @@ function startGame(levelData, forcedMode){
   editBtn.style.display = isCustomLevel ? 'block' : 'none';
   score=0; particles=[]; gameOver=false; ballLaunched=false; paused=false;
   gameStartTime=0; totalElapsed=0; portal=null; keysHeld=0; diamondsCollected=0; screenFlash=0;
-  lives=3; usedContinue=false; controlsReversed=false; fallingBricks=[]; finaleTriggered=false; finaleTimeout=null; bombsHeld=0; activeBombs=[]; bothSidesHeld=false; bothSidesTimestamp=0; isRespawning=false; poisonBall=null; guardBall=null; blownUpKeys=[]; deathFreeze=false;
+  lives=3; usedContinue=false; controlsReversed=false; fallingBricks=[]; finaleTriggered=false; finaleTimeout=null; bombsHeld=0; activeBombs=[]; bothSidesHeld=false; bothSidesTimestamp=0; isRespawning=false; poisonBall=null; guardBall=null; _guardAlertFrame=-1; blownUpKeys=[]; deathFreeze=false;
   if(bothSidesReleaseTimer){ clearTimeout(bothSidesReleaseTimer); bothSidesReleaseTimer=null; }
   bombHud.style.display='none';
   renderLives();
