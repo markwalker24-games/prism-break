@@ -1370,13 +1370,6 @@ function buildGuardModeMap() {
     if (isFree(c,r)) place(mk(c, r, { isSteel:true }));
   }
 
-  // Add a couple of skulls
-  for (let i = 0; i < 3; i++) {
-    const c = 1 + Math.floor(Math.random()*(BRICK_COLS-2));
-    const r = 1 + Math.floor(Math.random()*(BRICK_ROWS-2));
-    if (isFree(c,r)) place(mk(c, r, { isSkull:true }));
-  }
-
   // Add a bomb so player can bomb the guard
   for (let attempt = 0; attempt < 30; attempt++) {
     const c = 2 + Math.floor(Math.random()*(BRICK_COLS-4));
@@ -2303,12 +2296,16 @@ function spawnGuard() {
   guardBall = {
     col: start.c,
     row: start.r,
+    prevCol: start.c,
+    prevRow: start.r,
     x: start.c * BRICK_W + BRICK_W / 2,
     y: start.r * BRICK_H + BRICK_H / 2,
+    targetX: start.c * BRICK_W + BRICK_W / 2,
+    targetY: start.r * BRICK_H + BRICK_H / 2,
     // Direction: 0=right, 1=down, 2=left, 3=up
     dir: Math.floor(Math.random() * 4),
-    moveTimer: 0,
-    moveInterval: 380, // ms per cell move - adjust for speed
+    moveTimer: 494, // start at full so he moves on first frame
+    moveInterval: 494, // ms per cell move - 30% slower than original 380
     trail: [],
     flashlight: true,
   };
@@ -2318,73 +2315,92 @@ function updateGuard(dt) {
   const g = guardBall;
   if (!g) return;
 
-  g.moveTimer += dt * 16.67;
+  const framems = dt * 16.67;
+  g.moveTimer += framems;
+
+  // Smooth position: interpolate between prev and current cell
+  const t = Math.min(g.moveTimer / g.moveInterval, 1);
+  g.x = (g.prevCol + (g.col - g.prevCol) * t) * BRICK_W + BRICK_W / 2;
+  g.y = (g.prevRow + (g.row - g.prevRow) * t) * BRICK_H + BRICK_H / 2;
 
   if (g.moveTimer >= g.moveInterval) {
     g.moveTimer = 0;
+    g.prevCol = g.col;
+    g.prevRow = g.row;
 
     // Save trail
     g.trail.unshift({ x: g.x, y: g.y });
     if (g.trail.length > 6) g.trail.pop();
 
-    // Try to continue in current direction, else turn
     const dirs = [
-      { dc: 1, dr: 0 },  // right
-      { dc: 0, dr: 1 },  // down
-      { dc: -1, dr: 0 }, // left
-      { dc: 0, dr: -1 }, // up
+      { dc: 1, dr: 0 },
+      { dc: 0, dr: 1 },
+      { dc: -1, dr: 0 },
+      { dc: 0, dr: -1 },
     ];
 
+    // Block on ANY brick - guard navigates around everything
     const canMove = (dc, dr) => {
       const nc = g.col + dc;
       const nr = g.row + dr;
       if (nc < 0 || nc >= BRICK_COLS || nr < 0 || nr >= BRICK_ROWS) return false;
-      return !bricks.some(b => b.col === nc && b.row === nr && (b.isSteel || b.isLock || b.isDiamond));
+      return !bricks.some(b => {
+        const bc = b.col !== undefined ? b.col : Math.round(b.x / BRICK_W);
+        const br = b.row !== undefined ? b.row : Math.round(b.y / BRICK_H);
+        return bc === nc && br === nr;
+      });
     };
 
-    // Try current direction
     const cur = dirs[g.dir];
     if (canMove(cur.dc, cur.dr)) {
-      // 85% chance to continue straight, 15% chance to turn at intersections
       const shouldTurn = Math.random() < 0.15;
       if (!shouldTurn) {
         g.col += cur.dc;
         g.row += cur.dr;
       } else {
-        // Try a random valid turn (not reverse)
         const turns = [0, 1, 2, 3].filter(d => d !== (g.dir + 2) % 4 && canMove(dirs[d].dc, dirs[d].dr));
         if (turns.length) {
           g.dir = turns[Math.floor(Math.random() * turns.length)];
-          const nd = dirs[g.dir];
-          g.col += nd.dc;
-          g.row += nd.dr;
+          g.col += dirs[g.dir].dc;
+          g.row += dirs[g.dir].dr;
         } else {
           g.col += cur.dc;
           g.row += cur.dr;
         }
       }
     } else {
-      // Can't go straight - find valid turns, prefer not reversing
-      const forward = g.dir;
       const reverse = (g.dir + 2) % 4;
-      const options = [0, 1, 2, 3].filter(d => d !== forward && canMove(dirs[d].dc, dirs[d].dr));
+      const options = [0, 1, 2, 3].filter(d => d !== g.dir && canMove(dirs[d].dc, dirs[d].dr));
       const noReverse = options.filter(d => d !== reverse);
       const choices = noReverse.length ? noReverse : options;
-
       if (choices.length) {
         g.dir = choices[Math.floor(Math.random() * choices.length)];
-        const nd = dirs[g.dir];
-        g.col += nd.dc;
-        g.row += nd.dr;
-      } else {
-        // Dead end - reverse
+        g.col += dirs[g.dir].dc;
+        g.row += dirs[g.dir].dr;
+      } else if (canMove(dirs[reverse].dc, dirs[reverse].dr)) {
+        // Reverse and actually move
         g.dir = reverse;
+        g.col += dirs[g.dir].dc;
+        g.row += dirs[g.dir].dr;
+      } else {
+        // Completely stuck - teleport to nearest open cell
+        const open = [];
+        for (let c = 0; c < BRICK_COLS; c++) {
+          for (let r = 0; r < BRICK_ROWS; r++) {
+            if (!bricks.some(b => (b.col ?? Math.round(b.x/BRICK_W)) === c && (b.row ?? Math.round(b.y/BRICK_H)) === r)) {
+              const dist = Math.abs(c - g.col) + Math.abs(r - g.row);
+              open.push({ c, r, dist });
+            }
+          }
+        }
+        open.sort((a, b) => a.dist - b.dist);
+        if (open.length > 1) {
+          const pick = open[1 + Math.floor(Math.random() * Math.min(5, open.length - 1))];
+          g.col = pick.c; g.row = pick.r;
+          g.prevCol = pick.c; g.prevRow = pick.r;
+        }
       }
     }
-
-    // Snap to grid center
-    g.x = g.col * BRICK_W + BRICK_W / 2;
-    g.y = g.row * BRICK_H + BRICK_H / 2;
   }
 
   // Check collision with player ball
@@ -2410,59 +2426,89 @@ function drawGuard(c) {
   // Trail
   g.trail.forEach((tr, i) => {
     c.globalAlpha = (1 - i / g.trail.length) * 0.3;
-    c.fillStyle = '#8800cc';
+    c.fillStyle = '#7a4a1e';
     c.beginPath(); c.arc(tr.x, tr.y, R * 0.6, 0, Math.PI * 2); c.fill();
   });
   c.globalAlpha = 1;
 
-  // Flashlight cone in movement direction
+  // Flashlight cone in movement direction - wall aware raycast
   const dirs = [[1,0],[0,1],[-1,0],[0,-1]];
   const [dx, dy] = dirs[g.dir];
   const angle = Math.atan2(dy, dx);
-  const coneLen = BRICK_W * 2.5;
   const coneAngle = Math.PI / 4;
+  const maxConeLen = BRICK_W * 3;
 
-  // Flashlight cone in movement direction
+  // Raycast: find how far the flashlight reaches before hitting a wall
+  // Cast the center ray and edge rays, take the shortest
+  function castRay(rayAngle) {
+    const rdx = Math.cos(rayAngle);
+    const rdy = Math.sin(rayAngle);
+    let dist = 0;
+    const step = Math.min(BRICK_W, BRICK_H) * 0.5;
+    while (dist < maxConeLen) {
+      dist += step;
+      const rx = x + rdx * dist;
+      const ry = y + rdy * dist;
+      const col = Math.floor(rx / BRICK_W);
+      const row = Math.floor(ry / BRICK_H);
+      if (col < 0 || col >= BRICK_COLS || row < 0 || row >= BRICK_ROWS) break;
+      if (bricks.some(b => (b.col ?? Math.round(b.x/BRICK_W)) === col && (b.row ?? Math.round(b.y/BRICK_H)) === row)) {
+        return dist - step;
+      }
+    }
+    return dist;
+  }
+
+  // Build a clipped cone using multiple rays
+  const rayCount = 12;
   c.save();
-  c.globalAlpha = 0.18;
-  c.fillStyle = '#ffee99';
+  c.globalAlpha = 0.2;
+  c.fillStyle = '#ffffcc';
   c.beginPath();
   c.moveTo(x, y);
-  c.arc(x, y, coneLen, angle - coneAngle / 2, angle + coneAngle / 2);
+  for (let i = 0; i <= rayCount; i++) {
+    const rayAngle = angle - coneAngle/2 + (coneAngle / rayCount) * i;
+    const rayLen = castRay(rayAngle);
+    c.lineTo(x + Math.cos(rayAngle) * rayLen, y + Math.sin(rayAngle) * rayLen);
+  }
   c.closePath();
   c.fill();
   c.globalAlpha = 1;
   c.restore();
 
-  // Check if player is in flashlight cone - caught!
+  // Detect player in flashlight - but only if no wall between guard and player
   if (ballLaunched && ball) {
     const pdx = ball.x - x, pdy = ball.y - y;
     const pdist = Math.sqrt(pdx * pdx + pdy * pdy);
-    if (pdist < coneLen) {
+    if (pdist < maxConeLen) {
       const playerAngle = Math.atan2(pdy, pdx);
       let angleDiff = Math.abs(playerAngle - angle);
       if (angleDiff > Math.PI) angleDiff = Math.PI * 2 - angleDiff;
       if (angleDiff < coneAngle / 2) {
-        spawnParticles(ball.x, ball.y, '#ffee99', 12);
-        screenFlash = 8;
-        killBall();
+        // Check no wall between guard and player
+        const wallDist = castRay(playerAngle);
+        if (pdist <= wallDist + BRICK_W) {
+          spawnParticles(ball.x, ball.y, '#ffffff', 12);
+          screenFlash = 8;
+          killBall();
+        }
       }
     }
   }
 
   // Outer glow
   const glow = c.createRadialGradient(x, y, 0, x, y, R * 3);
-  glow.addColorStop(0, `rgba(160,0,255,${0.5 + 0.2 * Math.sin(t * 4)})`);
-  glow.addColorStop(0.5, 'rgba(80,0,180,0.2)');
+  glow.addColorStop(0, `rgba(180,100,30,${0.5 + 0.2 * Math.sin(t * 4)})`);
+  glow.addColorStop(0.5, 'rgba(120,60,10,0.2)');
   glow.addColorStop(1, 'rgba(0,0,0,0)');
   c.fillStyle = glow;
   c.beginPath(); c.arc(x, y, R * 3, 0, Math.PI * 2); c.fill();
 
   // Body - dark purple
   const body = c.createRadialGradient(x - R * 0.3, y - R * 0.3, 0, x, y, R);
-  body.addColorStop(0, '#cc66ff');
-  body.addColorStop(0.4, '#880099');
-  body.addColorStop(1, '#330044');
+  body.addColorStop(0, '#c8843a');
+  body.addColorStop(0.4, '#7a4a1e');
+  body.addColorStop(1, '#3d2008');
   c.fillStyle = body;
   c.beginPath(); c.arc(x, y, R, 0, Math.PI * 2); c.fill();
 
@@ -2997,6 +3043,7 @@ function startGame(levelData, forcedMode){
       const guardMap = buildGuardModeMap();
       bricks = guardMap.bricks;
       initBall(guardMap.ballCol * BRICK_W + BRICK_W/2, guardMap.ballRow * BRICK_H + BRICK_H/2);
+      setBgKey('Metal Bunker');
     } else {
       initBall();
       bricks = buildRandomBricks(forcedMode);
