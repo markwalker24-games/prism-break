@@ -2022,21 +2022,24 @@ function resolveBrick(b){
     screenFlash=8;
     bricks.splice(bricks.indexOf(b),1);
     queueBrickTip('diamond', 'images/brick_diamond.png', 'Diamond!', 'Diamonds are your currency. Collect them to unlock new game modes and features. You\'ll earn them at the end of each map you complete for the first time.');
-    const remaining=bricks.filter(x=>x.isDiamond).length;
-    if(remaining===0 && gameMode==='escape'){
-      // Stop the timer immediately - freeze elapsed time right now
-      if(ballLaunched && gameStartTime) totalElapsed += (performance.now() - gameStartTime) / 1000;
-      gameStartTime = 0;
-      const allBricks=[...bricks];
-      bricks=[];
-      allBricks.forEach(rb=>{
-        const rx=rb.x+rb.w/2, ry=rb.y+rb.h/2;
-        const col=rb.isSteel?'#8a9bb0':rb.isPaint?rb.color:rb.color||'#ffffff';
-        spawnParticles(rx, ry, col, 8);
-      });
-      for(let i=0;i<4;i++) spawnDiamondBurst(b.x+b.w/2, b.y+b.h/2);
-      screenFlash=12;
-      setTimeout(()=>{ endGame('diamonds'); }, 1200);
+    // Diamonds no longer end the map - find the exit to escape!
+    // (admin/demo mode only - non-admin players still win by collecting all diamonds)
+    if (!adminMode) {
+      const remaining = bricks.filter(x => x.isDiamond).length;
+      if (remaining === 0 && gameMode === 'escape') {
+        if(ballLaunched && gameStartTime) totalElapsed += (performance.now() - gameStartTime) / 1000;
+        gameStartTime = 0;
+        const allBricks=[...bricks];
+        bricks=[];
+        allBricks.forEach(rb=>{
+          const rx=rb.x+rb.w/2, ry=rb.y+rb.h/2;
+          const col=rb.isSteel?'#8a9bb0':rb.isPaint?rb.color:rb.color||'#ffffff';
+          spawnParticles(rx, ry, col, 8);
+        });
+        for(let i=0;i<4;i++) spawnDiamondBurst(b.x+b.w/2, b.y+b.h/2);
+        screenFlash=12;
+        setTimeout(()=>{ endGame('diamonds'); }, 1200);
+      }
     }
   }
   else if(b.isBomb){
@@ -2060,6 +2063,7 @@ function resolveBrick(b){
       keyDisplay.textContent=keysHeld;
       spawnParticles(b.x+b.w/2,b.y+b.h/2,'#ffd700',16);
       bricks.splice(bricks.indexOf(b),1);
+      // Lock removed - if it was a perimeter lock, the ball can now escape through that gap
     } else {
       b.cooldown=30;
       queueBrickTip('lock', 'images/brick_lock.png', 'Lock', 'Locks can only be removed if you\'ve obtained a Key first. Find the Key brick on the map.');
@@ -2752,11 +2756,23 @@ function update(dt){
     const effRight = controlsReversed ? moveLeft  : moveRight;
     const hMove=((effLeft?-BALL_MOVE:0)+(effRight?BALL_MOVE:0)+ball.vx)*subDt;
     ball.x+=hMove; ball.vx*=0.92;
-    if(ball.x-BALL_R<0){ball.x=BALL_R; ball.vx=Math.abs(ball.vx)*0.4+0.5;}
-    if(ball.x+BALL_R>W){ball.x=W-BALL_R; ball.vx=-(Math.abs(ball.vx)*0.4+0.5);}
+    if(ball.x-BALL_R<0){
+      if(adminMode && gameMode==='escape' && checkPerimeterEscape('left', ball.y)) return;
+      ball.x=BALL_R; ball.vx=Math.abs(ball.vx)*0.4+0.5;
+    }
+    if(ball.x+BALL_R>W){
+      if(adminMode && gameMode==='escape' && checkPerimeterEscape('right', ball.y)) return;
+      ball.x=W-BALL_R; ball.vx=-(Math.abs(ball.vx)*0.4+0.5);
+    }
     ball.y+=ball.vy*subDt;
-    if(ball.y-BALL_R<=0){ball.y=BALL_R;ball.vy=Math.abs(ball.vy);}
-    if(ball.y+BALL_R>=H){ball.y=H-BALL_R;ball.vy=-Math.abs(ball.vy);}
+    if(ball.y-BALL_R<=0){
+      if(adminMode && gameMode==='escape' && checkPerimeterEscape('top', ball.x)) return;
+      ball.y=BALL_R;ball.vy=Math.abs(ball.vy);
+    }
+    if(ball.y+BALL_R>=H){
+      if(adminMode && gameMode==='escape' && checkPerimeterEscape('bottom', ball.x)) return;
+      ball.y=H-BALL_R;ball.vy=-Math.abs(ball.vy);
+    }
     for(let b of bricks) if(b.cooldown>0) b.cooldown--;
     checkBrickCollisions();
     if(gameOver) return;
@@ -2842,6 +2858,39 @@ function updateFinale(dt){
   }
   // Safety: if finale runs too long, force end
   if(!finaleTimeout) finaleTimeout = setTimeout(()=>{ if(!gameOver && !gameRunning){ endGame('clear'); } finaleTimeout=null; }, 5000);
+}
+
+function checkPerimeterEscape(side, pos) {
+  // Find which brick column/row the ball is trying to exit through
+  let col, row;
+  if (side === 'left')   { col = 0;             row = Math.floor(pos / BRICK_H); }
+  if (side === 'right')  { col = BRICK_COLS - 1; row = Math.floor(pos / BRICK_H); }
+  if (side === 'top')    { col = Math.floor(pos / BRICK_W); row = 0; }
+  if (side === 'bottom') { col = Math.floor(pos / BRICK_W); row = BRICK_ROWS - 1; }
+
+  // Check if there's a blocking brick at this perimeter cell
+  const blocked = bricks.some(b => {
+    const bc = b.col !== undefined ? b.col : Math.round(b.x / BRICK_W);
+    const br = b.row !== undefined ? b.row : Math.round(b.y / BRICK_H);
+    return bc === col && br === row;
+  });
+
+  if (!blocked) {
+    // Ball escapes! Trigger win
+    if(ballLaunched && gameStartTime) totalElapsed += (performance.now() - gameStartTime) / 1000;
+    gameStartTime = 0;
+    for(let i=0;i<8;i++) spawnDiamondBurst(ball.x, ball.y);
+    for(let i=0;i<30;i++){
+      const a=Math.random()*Math.PI*2, s=4+Math.random()*8;
+      particles.push({x:ball.x,y:ball.y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,
+        color:Math.random()<0.5?'#ffd700':'#ffffff',life:1.5,size:3+Math.random()*5});
+    }
+    screenFlash=15;
+    gameRunning=false;
+    setTimeout(()=>{ endGame('clear'); }, 600);
+    return true;
+  }
+  return false;
 }
 
 function triggerBlackoutFinale(){
@@ -3108,7 +3157,7 @@ function startGame(levelData, forcedMode){
   }
 
   // Mode: escape if any diamonds, blackout otherwise
-  gameMode = bricks.some(b=>b.isDiamond) ? 'escape' : 'blackout';
+  gameMode = (forcedMode === 'blackout') ? 'blackout' : 'escape';
 
   // Spawn poison ball for blackout - never during builder testing
   poisonBall = null;
@@ -3162,7 +3211,7 @@ function restartGame(){
   } else {
     initBall(); bricks=buildRandomBricks();
   }
-  gameMode = bricks.some(b=>b.isDiamond) ? 'escape' : 'blackout';
+  gameMode = (forcedMode === 'blackout') ? 'blackout' : 'escape';
   const totalDiamonds=bricks.filter(b=>b.isDiamond).length;
   if(totalDiamonds>0){
     diamondHud.style.display='inline';
@@ -5789,11 +5838,18 @@ function endGame(reason){
   const inSeries=activeSeries && !testingLevel;
   const hasNext=inSeries && activeSeriesIdx < activeSeries.levels.length-1;
 
-  const icon = isEscape ? '💎' : '💥';
-  const titleText = 'SUCCESS!';
-  const titleColor = isEscape ? '#7bbfff' : '#ff9966';
-  const titleGlow = isEscape ? 'rgba(80,160,255,0.5)' : 'rgba(255,120,50,0.5)';
-  const subText = isEscape ? 'All diamonds collected' : 'All bricks cleared';
+  // Diamond tally for escape mode (admin/demo only)
+  const totalDiamondsInMap = currentLevelData && currentLevelData.bricks
+    ? currentLevelData.bricks.filter(b=>b.isDiamond).length : 0;
+  const diamondTally = adminMode && isEscape && totalDiamondsInMap > 0
+    ? `<div style="color:#00eeff;font-size:13px;font-family:'Lato',sans-serif;margin-top:2px;">💎 ${diamondsCollected}/${totalDiamondsInMap} diamonds collected</div>`
+    : '';
+
+  const icon = adminMode && isEscape ? '🔓' : isEscape ? '💎' : '💥';
+  const titleText = adminMode && isEscape ? 'ESCAPED!' : 'SUCCESS!';
+  const titleColor = isEscape ? '#f5c842' : '#ff9966';
+  const titleGlow = isEscape ? 'rgba(245,200,66,0.5)' : 'rgba(255,120,50,0.5)';
+  const subText = adminMode && isEscape ? 'You found the exit' : isEscape ? 'All diamonds collected' : 'All bricks cleared';
   const seriesInfo = inSeries
     ? `<div style="color:rgba(180,140,60,0.55);font-size:11px">Map ${activeSeriesIdx+1} of ${activeSeries.levels.length} · ${activeSeries.name}</div>`
     : '';
@@ -5893,6 +5949,7 @@ function endGame(reason){
     <div style="font-size:38px;filter:drop-shadow(0 0 10px ${titleGlow})">${icon}</div>
     <div style="font-family:'Cinzel',serif;font-size:20px;font-weight:700;color:${titleColor};letter-spacing:1px;text-shadow:0 0 12px ${titleGlow}">${titleText}</div>
     <div style="color:rgba(180,150,80,0.7);font-size:12px">${subText}</div>
+    ${diamondTally}
     ${seriesInfo}
     ${seriesCompleteBanner}
     <div style="height:1px;background:linear-gradient(90deg,transparent,rgba(180,140,50,0.3),transparent);width:100%;margin:2px 0;"></div>
@@ -5949,11 +6006,17 @@ function endGame(reason){
       if (!testingLevel && !alreadyCompleted) {
         const diamondsInMap = currentLevelData.bricks ? currentLevelData.bricks.filter(b => b.isDiamond).length : 0;
         let diamondsEarned = diamondsInMap;
-        // Blackout gets a flat 5 diamonds (no diamonds in map by design)
+        // Blackout gets flat 5
         if (gameMode === 'blackout') diamondsEarned = 5;
+        // Admin/demo: earn based on diamonds collected + 1 escape bonus
+        // Regular players: earn full diamond count in map
+        if (adminMode && gameMode === 'escape' && diamondsInMap > 0) {
+          diamondsEarned = diamondsCollected + 1;
+        } else if (adminMode && gameMode === 'escape') {
+          diamondsEarned = 1;
+        }
         // Cap challenge diamonds
         if (isChallengeMap) diamondsEarned = Math.min(diamondsEarned, CHALLENGE_DIAMOND_CAP);
-        // Award at least 1 diamond for completing any map
         diamondsEarned = Math.max(diamondsEarned, 1);
         // Only mark named maps as completed (not random arcade games)
         if (!isRandomGame) markMapCompleted(slug);
