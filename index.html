@@ -4189,11 +4189,34 @@ let selectedTool={ type:'color', color:COLORS[0] };
 const BW=BRICK_W, BH=BRICK_H;
 const BUILDER_COLS=BRICK_COLS, BUILDER_ROWS=BRICK_ROWS;
 
+function buildSteelPerimeter() {
+  const perimeter = [];
+  const mk = (col, row) => ({
+    col, row, x: col*BRICK_W, y: row*BRICK_H, w: BRICK_W, h: BRICK_H,
+    color: '#8a9bb0', isPaint:false, isSteel:true, isKey:false, isLock:false,
+    isDiamond:false, isWhite:false, isSkull:false, isReverse:false, isBomb:false,
+    hit:0, cooldown:0
+  });
+  for (let c = 0; c < BRICK_COLS; c++) {
+    perimeter.push(mk(c, 0));
+    perimeter.push(mk(c, BRICK_ROWS-1));
+  }
+  for (let r = 1; r < BRICK_ROWS-1; r++) {
+    perimeter.push(mk(0, r));
+    perimeter.push(mk(BRICK_COLS-1, r));
+  }
+  return perimeter;
+}
+
 function openBuilder(){
   builderOpen=true;
   paused=true;
   builderCurrentLevelName=null;
   updateAdminStar();
+  // Start with steel perimeter
+  if (builderBricks.length === 0) {
+    builderBricks = buildSteelPerimeter();
+  }
 
   document.getElementById('builderScreen').style.display='flex';
   buildPalette();
@@ -5667,11 +5690,10 @@ document.getElementById('builderClearBtn').addEventListener('click',()=>{
   document.body.appendChild(overlay);
   overlay.querySelector('#clearYes').addEventListener('click',()=>{
     overlay.remove();
-    builderBricks=[];
+    builderBricks = buildSteelPerimeter();
     builderBallPos={ col:Math.floor(BRICK_COLS/2), row:Math.floor(BRICK_ROWS/2) };
     builderPortalPos=null;
     builderCurrentLevelName=null;
-
     drawBuilder();
   });
   overlay.querySelector('#clearNo').addEventListener('click',()=>{ overlay.remove(); });
