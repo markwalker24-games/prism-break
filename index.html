@@ -539,6 +539,7 @@ let finaleTriggered=false;
 let finaleTimeout=null;
 let gameMode=null; // 'escape' | 'blackout'
 let poisonBall=null; // {x,y,vx,vy,flaming,flameTimer,trail:[]}
+let _escaping=false; // ball is traveling off screen after escape
 let ball={ x:0,y:0,vy:0,vx:0,color:'#ffffff',trail:[] };
 let moveLeft=false, moveRight=false;
 let currentLevelBricks=null;
@@ -2466,6 +2467,62 @@ function drawGuardAlert() {
   ctx.restore();
 }
 
+function drawExitArrow(c) {
+  // Find the exit gap - a perimeter cell with no brick
+  const t = performance.now() * 0.003;
+  const pulse = 0.5 + 0.5 * Math.sin(t * 2.5);
+
+  // Check all perimeter cells for gaps
+  const perimeterCells = [];
+  for (let col = 0; col < BRICK_COLS; col++) {
+    perimeterCells.push({ col, row: 0, dx: 0, dy: -1 });
+    perimeterCells.push({ col, row: BRICK_ROWS-1, dx: 0, dy: 1 });
+  }
+  for (let row = 1; row < BRICK_ROWS-1; row++) {
+    perimeterCells.push({ col: 0, row, dx: -1, dy: 0 });
+    perimeterCells.push({ col: BRICK_COLS-1, row, dx: 1, dy: 0 });
+  }
+
+  perimeterCells.forEach(({ col, row, dx, dy }) => {
+    const blocked = bricks.some(b => {
+      const bc = b.col !== undefined ? b.col : Math.round(b.x / BRICK_W);
+      const br = b.row !== undefined ? b.row : Math.round(b.y / BRICK_H);
+      return bc === col && br === row;
+    });
+    if (blocked) return;
+
+    // Draw arrow at this gap pointing outward
+    const cx = col * BRICK_W + BRICK_W / 2;
+    const cy = row * BRICK_H + BRICK_H / 2;
+    const angle = Math.atan2(dy, dx);
+    const arrowSize = Math.min(BRICK_W, BRICK_H) * 0.35;
+    // Nudge arrow toward exit direction
+    const ax = cx + dx * arrowSize * 0.3;
+    const ay = cy + dy * arrowSize * 0.3;
+
+    c.save();
+    c.globalAlpha = 0.4 + 0.5 * pulse;
+    c.translate(ax, ay);
+    c.rotate(angle);
+
+    // Glow
+    c.shadowColor = '#ffd700';
+    c.shadowBlur = 10 + 8 * pulse;
+
+    // Arrow shape
+    c.fillStyle = '#ffd700';
+    c.beginPath();
+    c.moveTo(arrowSize, 0);
+    c.lineTo(-arrowSize * 0.5, -arrowSize * 0.6);
+    c.lineTo(-arrowSize * 0.2, 0);
+    c.lineTo(-arrowSize * 0.5, arrowSize * 0.6);
+    c.closePath();
+    c.fill();
+
+    c.restore();
+  });
+}
+
 function drawGuard(c) {
   const g = guardBall;
   if (!g) return;
@@ -2861,14 +2918,13 @@ function updateFinale(dt){
 }
 
 function checkPerimeterEscape(side, pos) {
-  // Find which brick column/row the ball is trying to exit through
+  if (_escaping) return true; // already escaping, let ball keep moving
   let col, row;
   if (side === 'left')   { col = 0;             row = Math.floor(pos / BRICK_H); }
   if (side === 'right')  { col = BRICK_COLS - 1; row = Math.floor(pos / BRICK_H); }
   if (side === 'top')    { col = Math.floor(pos / BRICK_W); row = 0; }
   if (side === 'bottom') { col = Math.floor(pos / BRICK_W); row = BRICK_ROWS - 1; }
 
-  // Check if there's a blocking brick at this perimeter cell
   const blocked = bricks.some(b => {
     const bc = b.col !== undefined ? b.col : Math.round(b.x / BRICK_W);
     const br = b.row !== undefined ? b.row : Math.round(b.y / BRICK_H);
@@ -2876,22 +2932,25 @@ function checkPerimeterEscape(side, pos) {
   });
 
   if (!blocked) {
-    // Ball escapes! Trigger win
+    _escaping = true;
     if(ballLaunched && gameStartTime) totalElapsed += (performance.now() - gameStartTime) / 1000;
     gameStartTime = 0;
-    for(let i=0;i<8;i++) spawnDiamondBurst(ball.x, ball.y);
-    for(let i=0;i<30;i++){
-      const a=Math.random()*Math.PI*2, s=4+Math.random()*8;
-      particles.push({x:ball.x,y:ball.y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,
-        color:Math.random()<0.5?'#ffd700':'#ffffff',life:1.5,size:3+Math.random()*5});
-    }
-    screenFlash=15;
-    gameRunning=false;
-    setTimeout(()=>{ endGame('clear'); }, 600);
+    screenFlash = 8;
+    // Check every 50ms until ball is off screen
+    const checkGone = setInterval(() => {
+      if (ball.x < -BALL_R*4 || ball.x > W+BALL_R*4 || ball.y < -BALL_R*4 || ball.y > H+BALL_R*4) {
+        clearInterval(checkGone);
+        _escaping = false;
+        endGame('clear');
+      }
+    }, 50);
+    // Safety timeout
+    setTimeout(() => { clearInterval(checkGone); if(_escaping){ _escaping=false; endGame('clear'); } }, 1500);
     return true;
   }
   return false;
 }
+
 
 function triggerBlackoutFinale(){
   if(finaleTriggered) return;
@@ -2981,6 +3040,7 @@ function draw(){
   // Draw placed bombs
   for(const bomb of activeBombs) drawPlacedBomb(ctx, bomb);
   if(guardBall && gameMode==='blackout') drawGuard(ctx);
+  if(adminMode && gameMode==='escape' && !_escaping) drawExitArrow(ctx);
   if(gameMode==='blackout') { updateGuardAlert(); drawGuardAlert(); }
   // Draw falling bricks during blackout finale
   for(const fb of fallingBricks){
@@ -3101,7 +3161,7 @@ function startGame(levelData, forcedMode){
   editBtn.style.display = isCustomLevel ? 'block' : 'none';
   score=0; particles=[]; gameOver=false; ballLaunched=false; paused=false;
   gameStartTime=0; totalElapsed=0; portal=null; keysHeld=0; diamondsCollected=0; screenFlash=0;
-  lives=3; usedContinue=false; controlsReversed=false; fallingBricks=[]; finaleTriggered=false; finaleTimeout=null; bombsHeld=0; activeBombs=[]; bothSidesHeld=false; bothSidesTimestamp=0; isRespawning=false; poisonBall=null; guardBall=null; _guardAlertFrame=-1; blownUpKeys=[]; deathFreeze=false;
+  lives=3; usedContinue=false; controlsReversed=false; fallingBricks=[]; finaleTriggered=false; finaleTimeout=null; bombsHeld=0; activeBombs=[]; bothSidesHeld=false; bothSidesTimestamp=0; isRespawning=false; poisonBall=null; guardBall=null; _guardAlertFrame=-1; _escaping=false; blownUpKeys=[]; deathFreeze=false;
   if(bothSidesReleaseTimer){ clearTimeout(bothSidesReleaseTimer); bothSidesReleaseTimer=null; }
   bombHud.style.display='none';
   renderLives();
@@ -3385,7 +3445,7 @@ document.getElementById('restartTopBtn').addEventListener('click',()=>{
 
 const selfDestructBtn = document.getElementById('selfDestructBtn');
 selfDestructBtn.addEventListener('click', ()=>{
-  if(!gameRunning || !ballLaunched || gameOver || isRespawning) return;
+  if((!gameRunning && !_escaping) || !ballLaunched || gameOver || isRespawning) return;
   killBall();
 });
 
