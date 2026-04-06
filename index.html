@@ -2089,25 +2089,7 @@ function resolveBrick(b){
     screenFlash=8;
     bricks.splice(bricks.indexOf(b),1);
     queueBrickTip('diamond', 'images/brick_diamond.png', 'Diamond!', 'Diamonds are your currency. Collect them to unlock new game modes and features. You\'ll earn them at the end of each map you complete for the first time.');
-    // Diamonds no longer end the map - find the exit to escape!
-    // (admin/demo mode only - non-admin players still win by collecting all diamonds)
-    if (!adminMode) {
-      const remaining = bricks.filter(x => x.isDiamond).length;
-      if (remaining === 0 && gameMode === 'escape') {
-        if(ballLaunched && gameStartTime) totalElapsed += (performance.now() - gameStartTime) / 1000;
-        gameStartTime = 0;
-        const allBricks=[...bricks];
-        bricks=[];
-        allBricks.forEach(rb=>{
-          const rx=rb.x+rb.w/2, ry=rb.y+rb.h/2;
-          const col=rb.isSteel?'#8a9bb0':rb.isPaint?rb.color:rb.color||'#ffffff';
-          spawnParticles(rx, ry, col, 8);
-        });
-        for(let i=0;i<4;i++) spawnDiamondBurst(b.x+b.w/2, b.y+b.h/2);
-        screenFlash=12;
-        setTimeout(()=>{ endGame('diamonds'); }, 1200);
-      }
-    }
+    // Diamonds are collectibles - find the exit to escape!
   }
   else if(b.isBomb){
     bombsHeld++;
@@ -2880,20 +2862,20 @@ function update(dt){
     const hMove=((effLeft?-BALL_MOVE:0)+(effRight?BALL_MOVE:0)+ball.vx)*subDt;
     ball.x+=hMove; ball.vx*=0.92;
     if(ball.x-BALL_R<0){
-      if(adminMode && gameMode==='escape' && checkPerimeterEscape('left', ball.y)) return;
+      if(gameMode==='escape' && checkPerimeterEscape('left', ball.y)) return;
       ball.x=BALL_R; ball.vx=Math.abs(ball.vx)*0.4+0.5;
     }
     if(ball.x+BALL_R>W){
-      if(adminMode && gameMode==='escape' && checkPerimeterEscape('right', ball.y)) return;
+      if(gameMode==='escape' && checkPerimeterEscape('right', ball.y)) return;
       ball.x=W-BALL_R; ball.vx=-(Math.abs(ball.vx)*0.4+0.5);
     }
     ball.y+=ball.vy*subDt;
     if(ball.y-BALL_R<=0){
-      if(adminMode && gameMode==='escape' && checkPerimeterEscape('top', ball.x)) return;
+      if(gameMode==='escape' && checkPerimeterEscape('top', ball.x)) return;
       ball.y=BALL_R;ball.vy=Math.abs(ball.vy);
     }
     if(ball.y+BALL_R>=H){
-      if(adminMode && gameMode==='escape' && checkPerimeterEscape('bottom', ball.x)) return;
+      if(gameMode==='escape' && checkPerimeterEscape('bottom', ball.x)) return;
       ball.y=H-BALL_R;ball.vy=-Math.abs(ball.vy);
     }
     for(let b of bricks) if(b.cooldown>0) b.cooldown--;
@@ -3107,7 +3089,7 @@ function draw(){
   // Draw placed bombs
   for(const bomb of activeBombs) drawPlacedBomb(ctx, bomb);
   if(guardBall && gameMode==='blackout') drawGuard(ctx);
-  if(adminMode && gameMode==='escape' && !_escaping) drawExitArrow(ctx);
+  if(gameMode==='escape' && !_escaping) drawExitArrow(ctx);
   if(gameMode==='blackout') { updateGuardAlert(); drawGuardAlert(); }
   // Draw falling bricks during blackout finale
   for(const fb of fallingBricks){
@@ -5328,8 +5310,23 @@ function openMapsPanel(defaultTab='maps') {
 
       const questHdr = document.createElement('div');
       questHdr.style.cssText = "font-family:'Cinzel',serif;font-size:12px;font-weight:700;color:#00eeff;letter-spacing:1px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;";
-      questHdr.innerHTML = `<span>💎 QUEST ORDER</span><span style="font-size:10px;color:rgba(0,200,220,0.5);font-family:'Lato',sans-serif;font-weight:400;">Drag to reorder</span>`;
+      questHdr.innerHTML = `<span>💎 QUEST ORDER</span><div style="display:flex;gap:6px;align-items:center;"><button id="questSyncBtn" style="background:rgba(0,60,80,0.8);border:1px solid rgba(0,238,255,0.4);color:#00eeff;font-family:'Cinzel',serif;font-size:9px;padding:4px 8px;cursor:pointer;border-radius:2px;letter-spacing:1px;">☁ SYNC</button><span style="font-size:10px;color:rgba(0,200,220,0.5);font-family:'Lato',sans-serif;font-weight:400;">Drag to reorder</span></div>`;
       questSection.appendChild(questHdr);
+
+      // Wire up sync button
+      questHdr.querySelector('#questSyncBtn').addEventListener('click', async () => {
+        const btn = questHdr.querySelector('#questSyncBtn');
+        const orig = btn.innerHTML; btn.innerHTML = '⏳'; btn.disabled = true;
+        try {
+          const order = getQuestOrder();
+          await syncQuestOrderToCloud(order);
+          showBuilderToast('☁ Quest order synced to cloud!');
+        } catch(e) {
+          showBuilderToast('⚠️ Sync failed');
+        } finally {
+          btn.innerHTML = orig; btn.disabled = false;
+        }
+      });
 
       if (!questOrder.length) {
         const empty = document.createElement('div');
@@ -5833,8 +5830,47 @@ document.getElementById('builderExitBtn').addEventListener('click',()=>{
   overlay.querySelector('#exitConfirmNo').addEventListener('click',()=>{ overlay.remove(); });
 });
 
+function hasPerimeterExit(bricks) {
+  // Check every perimeter cell - if any cell has no brick OR has a non-steel brick, there's a potential exit
+  // A lock counts as an exit (player can open it with a key)
+  for (let c = 0; c < BRICK_COLS; c++) {
+    for (const r of [0, BRICK_ROWS-1]) {
+      const b = bricks.find(b => b.col === c && b.row === r);
+      if (!b || !b.isSteel) return true;
+    }
+  }
+  for (let r = 1; r < BRICK_ROWS-1; r++) {
+    for (const c of [0, BRICK_COLS-1]) {
+      const b = bricks.find(b => b.col === c && b.row === r);
+      if (!b || !b.isSteel) return true;
+    }
+  }
+  return false;
+}
+
+function showNoExitWarning() {
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:400;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;';
+  ov.innerHTML = `
+    <div style="background:#1a0a0a;border:2px solid rgba(220,60,60,0.7);border-radius:4px;padding:24px 20px;max-width:300px;width:100%;text-align:center;box-shadow:0 8px 40px rgba(0,0,0,0.8);">
+      <div style="font-size:32px;margin-bottom:12px;">🔒</div>
+      <div style="font-family:'Cinzel',serif;font-size:14px;font-weight:700;color:#e63946;letter-spacing:1px;margin-bottom:10px;">NO EXIT FOUND</div>
+      <div style="font-family:'Lato',sans-serif;font-size:12px;color:rgba(220,180,180,0.75);line-height:1.8;margin-bottom:18px;">
+        The perimeter is fully sealed with steel bricks.<br><br>
+        Players won't be able to escape.<br><br>
+        Add a <strong style="color:#ffd700;">lock</strong> or leave a <strong style="color:#fff;">gap</strong> in the border so there's a way out.
+      </div>
+      <button id="noExitOk" style="width:100%;background:rgba(40,10,10,0.95);border:1px solid rgba(200,60,60,0.5);color:#e63946;font-family:'Cinzel',serif;font-size:12px;font-weight:700;letter-spacing:1px;padding:12px;cursor:pointer;border-radius:3px;">GOT IT</button>
+    </div>
+  `;
+  document.body.appendChild(ov);
+  ov.querySelector('#noExitOk').addEventListener('click', () => ov.remove());
+  ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+}
+
 document.getElementById('builderSaveBtn').addEventListener('click',()=>{
   if(!builderBricks.length){ alert('Place some bricks first!'); return; }
+  if(!hasPerimeterExit(builderBricks)){ showNoExitWarning(); return; }
   const ballPixX=builderBallPos.col*BRICK_W+BRICK_W/2;
   const ballPixY=builderBallPos.row*BRICK_H+BRICK_H/2;
   const saveable={ ballCol:builderBallPos.col, ballRow:builderBallPos.row, ballX:ballPixX, ballY:ballPixY, portal:null,
@@ -5967,6 +6003,7 @@ let builderPortalPosSnapshot=null;
 
 document.getElementById('builderTestBtn').addEventListener('click',()=>{
   if(!builderBricks.length){ alert('Place some bricks first!'); return; }
+  if(!hasPerimeterExit(builderBricks)){ showNoExitWarning(); return; }
   builderBricksSnapshot=builderBricks.map(b=>({...b}));
   builderBallPosSnapshot={...builderBallPos};
   builderPortalPosSnapshot=null;
@@ -6041,15 +6078,15 @@ function endGame(reason){
   // Diamond tally for escape mode (admin/demo only)
   const totalDiamondsInMap = currentLevelData && currentLevelData.bricks
     ? currentLevelData.bricks.filter(b=>b.isDiamond).length : 0;
-  const diamondTally = adminMode && isEscape && totalDiamondsInMap > 0
+  const diamondTally = isEscape && totalDiamondsInMap > 0
     ? `<div style="color:#00eeff;font-size:13px;font-family:'Lato',sans-serif;margin-top:2px;">💎 ${diamondsCollected}/${totalDiamondsInMap} diamonds collected</div>`
     : '';
 
   const icon = adminMode && isEscape ? '🔓' : isEscape ? '💎' : '💥';
-  const titleText = adminMode && isEscape ? 'ESCAPED!' : 'SUCCESS!';
+  const titleText = isEscape ? 'ESCAPED!' : 'SUCCESS!';
   const titleColor = isEscape ? '#f5c842' : '#ff9966';
   const titleGlow = isEscape ? 'rgba(245,200,66,0.5)' : 'rgba(255,120,50,0.5)';
-  const subText = adminMode && isEscape ? 'You found the exit' : isEscape ? 'All diamonds collected' : 'All bricks cleared';
+  const subText = isEscape ? 'You found the exit' : 'All bricks cleared';
   const seriesInfo = inSeries
     ? `<div style="color:rgba(180,140,60,0.55);font-size:11px">Map ${activeSeriesIdx+1} of ${activeSeries.levels.length} · ${activeSeries.name}</div>`
     : '';
@@ -6210,9 +6247,9 @@ function endGame(reason){
         if (gameMode === 'blackout') diamondsEarned = 5;
         // Admin/demo: earn based on diamonds collected + 1 escape bonus
         // Regular players: earn full diamond count in map
-        if (adminMode && gameMode === 'escape' && diamondsInMap > 0) {
+        if (gameMode === 'escape' && diamondsInMap > 0) {
           diamondsEarned = diamondsCollected + 1;
-        } else if (adminMode && gameMode === 'escape') {
+        } else if (gameMode === 'escape') {
           diamondsEarned = 1;
         }
         // Cap challenge diamonds
@@ -7421,6 +7458,14 @@ function setFeaturedSeriesName(name){
   if(idx>0){
     const [featured] = HARDCODED_SERIES.splice(idx,1);
     HARDCODED_SERIES.unshift(featured);
+  }
+  // Sync the new order to cloud so all players get it
+  if(adminMode){
+    const newOrder = HARDCODED_SERIES.map(s=>s.name);
+    setQuestOrder(newOrder);
+    syncQuestOrderToCloud(newOrder)
+      .then(()=>showToast('☁ Quest order saved to cloud', '#00eeff'))
+      .catch(e=>{ console.error('Quest sync failed', e); showToast('⚠️ Cloud sync failed', '#e63946'); });
   }
 }
 
