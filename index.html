@@ -6248,6 +6248,15 @@ function endGame(reason){
   const inSeries=activeSeries && !testingLevel;
   const hasNext=inSeries && activeSeriesIdx < activeSeries.levels.length-1;
 
+  // Save series progress immediately on win - don't wait for Next Level tap
+  if(inSeries && hasNext){
+    saveSeriesProgress(activeSeries.name, activeSeriesIdx + 1);
+    syncProgressToCloud().catch(()=>{});
+  } else if(inSeries && !hasNext){
+    saveSeriesProgress(activeSeries.name, activeSeries.levels.length);
+    syncProgressToCloud().catch(()=>{});
+  }
+
   // Diamond tally for escape mode (admin/demo only)
   const totalDiamondsInMap = currentLevelData && currentLevelData.bricks
     ? currentLevelData.bricks.filter(b=>b.isDiamond).length : 0;
@@ -6490,7 +6499,6 @@ function endGame(reason){
         startGame(null, gameMode);
       } else if(hasNext){
         activeSeriesIdx++;
-        saveSeriesProgress(activeSeries.name, activeSeriesIdx);
         hideMessage();
         startGame(activeSeries.levels[activeSeriesIdx]);
       } else {
