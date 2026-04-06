@@ -707,6 +707,58 @@ async function syncProgressFromCloud() {
   } catch(e) { console.warn('syncProgressFromCloud error:', e); }
 }
 
+// ─── RESET TOKEN ────────────────────────────────────────────────
+async function loadResetTokenFromCloud() {
+  try {
+    const res = await fetch(
+      `${SUPA_URL}/rest/v1/app_config?key=eq.reset_token&select=value&limit=1`,
+      { headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` } }
+    );
+    if (!res.ok) return;
+    const rows = await res.json();
+    if (!rows.length || !rows[0].value) return;
+    const cloudToken = rows[0].value;
+    const localToken = LS.get('pb_reset_token');
+    if (cloudToken && cloudToken !== localToken) {
+      console.log('Reset token changed - wiping progress');
+      performProgressReset();
+      LS.set('pb_reset_token', cloudToken);
+    }
+  } catch(e) { console.warn('loadResetTokenFromCloud error:', e); }
+}
+
+async function pushResetTokenToCloud(token) {
+  const authToken = await getSupabaseToken();
+  const res = await fetch(`${SUPA_URL}/rest/v1/app_config`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'apikey': SUPA_KEY,
+      'Authorization': `Bearer ${authToken}`,
+      'Prefer': 'resolution=merge-duplicates,return=minimal'
+    },
+    body: JSON.stringify({ key: 'reset_token', value: token, updated_at: new Date().toISOString() })
+  });
+  if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+}
+
+function performProgressReset() {
+  ['pb_total_diamonds','pb_spent_diamonds','pb_unlocked','pb_completed_maps',
+   'pb_quest_index','pb_shown_tips','pb_controls_shown','pb_owned_items',
+   'pb_active_trail','pb_featured_series'].forEach(k => LS.remove(k));
+  // Wipe series progress keys
+  try {
+    Object.keys(localStorage).filter(k => k.startsWith('pb_progress_')).forEach(k => localStorage.removeItem(k));
+  } catch(e) {}
+  // Delete cloud progress row
+  getSupabaseToken().then(token => {
+    fetch(`${SUPA_URL}/rest/v1/user_progress?user_id=eq.${supabase?.auth?.getUser?.()?.data?.user?.id}`, {
+      method: 'DELETE',
+      headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${token}` }
+    }).catch(() => {});
+  }).catch(() => {});
+}
+
 async function syncQuestOrderToCloud(order) {
   try {
     const token = await getSupabaseToken();
@@ -1863,7 +1915,6 @@ function drawBall(c,b){
   const matchingTrail = ownedTrails.find(i => i.ballColor && i.ballColor.toLowerCase() === currentBallColor);
 
   if (matchingTrail && b.trail.length > 1) {
-    const tc = matchingTrail.color;
     const tid = matchingTrail.id;
     const tNow = performance.now() * 0.001;
     const trailLen = b.trail.length;
@@ -1872,80 +1923,86 @@ function drawBall(c,b){
 
     for (let i = 0; i < trailLen; i++) {
       const t = b.trail[i];
-      const frac = i / trailLen; // 0 = newest, 1 = oldest
-      const ageFrac = 1 - frac;  // 1 = newest, 0 = oldest
-
-      // Size: newest point is small, oldest is largest (comet tail widens at back)
-      const blobR = R * (0.3 + 1.4 * frac);
-      const alpha = ageFrac * ageFrac * 0.7; // fade toward head
+      // trail[0]=oldest(tail end), trail[trailLen-1]=newest(near ball)
+      const frac = i / (trailLen - 1); // 0=oldest/tail, 1=newest/head
+      // Head is bright and large, tail fades out and shrinks
+      const alpha = Math.pow(frac, 0.5) * 0.85;  // bright near ball, gone at tail
+      const blobR = R * (0.4 + 2.2 * frac);      // big near ball, tiny at tail
 
       if (tid === 'trail_red') {
-        // Red: fiery - orange core, red outer
+        // Fiery comet - white hot core fading to deep red
         const grad = c.createRadialGradient(t.x, t.y, 0, t.x, t.y, blobR);
-        grad.addColorStop(0, `rgba(255,220,100,${alpha})`);
-        grad.addColorStop(0.4, `rgba(255,80,0,${alpha * 0.8})`);
-        grad.addColorStop(1, `rgba(180,0,0,0)`);
+        grad.addColorStop(0,   `rgba(255,255,200,${alpha})`);
+        grad.addColorStop(0.2, `rgba(255,180,50,${alpha * 0.9})`);
+        grad.addColorStop(0.5, `rgba(255,60,0,${alpha * 0.7})`);
+        grad.addColorStop(1,   `rgba(150,0,0,0)`);
         c.fillStyle = grad;
-        c.shadowBlur = 10; c.shadowColor = '#ff4400';
+        c.shadowBlur = 18 * frac; c.shadowColor = '#ff4400';
         c.beginPath(); c.arc(t.x, t.y, blobR, 0, Math.PI*2); c.fill();
-        // Occasional spark particles
-        if (i > trailLen * 0.3 && Math.random() < 0.3) {
-          const sx = t.x + (Math.random()-0.5)*blobR*2;
-          const sy = t.y + (Math.random()-0.5)*blobR*2;
-          c.fillStyle = `rgba(255,${Math.floor(100+Math.random()*155)},0,${alpha*0.6})`;
-          c.beginPath(); c.arc(sx, sy, R*0.15, 0, Math.PI*2); c.fill();
+        // Spark particles near the head
+        if (frac > 0.6 && Math.random() < 0.4) {
+          const angle = Math.random() * Math.PI * 2;
+          const sx = t.x + Math.cos(angle) * blobR * 0.8;
+          const sy = t.y + Math.sin(angle) * blobR * 0.8;
+          c.shadowBlur = 0;
+          c.fillStyle = `rgba(255,${Math.floor(150+Math.random()*100)},0,${alpha * 0.8})`;
+          c.beginPath(); c.arc(sx, sy, R * 0.2, 0, Math.PI*2); c.fill();
         }
 
       } else if (tid === 'trail_teal') {
-        // Teal: electric - bright cyan bolts
+        // Electric blue-cyan, sharp and bright
         const grad = c.createRadialGradient(t.x, t.y, 0, t.x, t.y, blobR);
-        grad.addColorStop(0, `rgba(180,255,255,${alpha})`);
-        grad.addColorStop(0.5, `rgba(0,200,255,${alpha * 0.7})`);
-        grad.addColorStop(1, `rgba(0,80,180,0)`);
+        grad.addColorStop(0,   `rgba(220,255,255,${alpha})`);
+        grad.addColorStop(0.3, `rgba(0,220,255,${alpha * 0.85})`);
+        grad.addColorStop(0.7, `rgba(0,100,220,${alpha * 0.4})`);
+        grad.addColorStop(1,   `rgba(0,0,100,0)`);
         c.fillStyle = grad;
-        c.shadowBlur = 12; c.shadowColor = '#00aaff';
+        c.shadowBlur = 20 * frac; c.shadowColor = '#00ddff';
         c.beginPath(); c.arc(t.x, t.y, blobR, 0, Math.PI*2); c.fill();
 
       } else if (tid === 'trail_purple') {
-        // Purple: smoky/mystical - dark haze with bright core
-        const grad = c.createRadialGradient(t.x, t.y, 0, t.x, t.y, blobR * 1.3);
-        grad.addColorStop(0, `rgba(220,180,255,${alpha * 0.9})`);
-        grad.addColorStop(0.3, `rgba(140,0,255,${alpha * 0.6})`);
-        grad.addColorStop(0.7, `rgba(60,0,120,${alpha * 0.3})`);
-        grad.addColorStop(1, `rgba(20,0,40,0)`);
+        // Smoky mystic - wide dark haze, bright violet core
+        const grad = c.createRadialGradient(t.x, t.y, 0, t.x, t.y, blobR * 1.6);
+        grad.addColorStop(0,   `rgba(240,200,255,${alpha})`);
+        grad.addColorStop(0.25,`rgba(180,50,255,${alpha * 0.8})`);
+        grad.addColorStop(0.6, `rgba(80,0,160,${alpha * 0.4})`);
+        grad.addColorStop(1,   `rgba(20,0,50,0)`);
         c.fillStyle = grad;
-        c.shadowBlur = 14; c.shadowColor = '#9933ff';
-        c.beginPath(); c.arc(t.x, t.y, blobR * 1.3, 0, Math.PI*2); c.fill();
+        c.shadowBlur = 22 * frac; c.shadowColor = '#aa22ff';
+        c.beginPath(); c.arc(t.x, t.y, blobR * 1.6, 0, Math.PI*2); c.fill();
 
       } else if (tid === 'trail_green') {
-        // Green: toxic/acid - bright neon streaks
+        // Toxic neon acid, tight and bright
         const grad = c.createRadialGradient(t.x, t.y, 0, t.x, t.y, blobR);
-        grad.addColorStop(0, `rgba(200,255,100,${alpha})`);
-        grad.addColorStop(0.5, `rgba(80,220,0,${alpha * 0.7})`);
-        grad.addColorStop(1, `rgba(0,80,0,0)`);
+        grad.addColorStop(0,   `rgba(220,255,150,${alpha})`);
+        grad.addColorStop(0.3, `rgba(100,255,0,${alpha * 0.85})`);
+        grad.addColorStop(0.7, `rgba(20,150,0,${alpha * 0.4})`);
+        grad.addColorStop(1,   `rgba(0,40,0,0)`);
         c.fillStyle = grad;
-        c.shadowBlur = 10; c.shadowColor = '#66ff00';
+        c.shadowBlur = 18 * frac; c.shadowColor = '#44ff00';
         c.beginPath(); c.arc(t.x, t.y, blobR, 0, Math.PI*2); c.fill();
 
       } else if (tid === 'trail_yellow') {
-        // Yellow: lightning/electric - sharp bright bolts
+        // Electric gold, crackling energy
         const grad = c.createRadialGradient(t.x, t.y, 0, t.x, t.y, blobR);
-        grad.addColorStop(0, `rgba(255,255,180,${alpha})`);
-        grad.addColorStop(0.4, `rgba(255,180,0,${alpha * 0.8})`);
-        grad.addColorStop(1, `rgba(180,80,0,0)`);
+        grad.addColorStop(0,   `rgba(255,255,200,${alpha})`);
+        grad.addColorStop(0.3, `rgba(255,200,0,${alpha * 0.9})`);
+        grad.addColorStop(0.7, `rgba(200,100,0,${alpha * 0.4})`);
+        grad.addColorStop(1,   `rgba(100,30,0,0)`);
         c.fillStyle = grad;
-        c.shadowBlur = 12; c.shadowColor = '#ffaa00';
+        c.shadowBlur = 20 * frac; c.shadowColor = '#ffcc00';
         c.beginPath(); c.arc(t.x, t.y, blobR, 0, Math.PI*2); c.fill();
 
       } else if (tid === 'trail_white') {
-        // White: icy/crystal - cool blue-white shimmer
-        const shimmer = 0.7 + 0.3 * Math.sin(tNow * 8 + i * 0.5);
+        // Icy crystal, shimmering blue-white
+        const shimmer = 0.8 + 0.2 * Math.sin(tNow * 10 + i * 0.8);
         const grad = c.createRadialGradient(t.x, t.y, 0, t.x, t.y, blobR);
-        grad.addColorStop(0, `rgba(220,240,255,${alpha * shimmer})`);
-        grad.addColorStop(0.5, `rgba(160,210,255,${alpha * 0.5})`);
-        grad.addColorStop(1, `rgba(100,160,255,0)`);
+        grad.addColorStop(0,   `rgba(240,250,255,${alpha * shimmer})`);
+        grad.addColorStop(0.4, `rgba(180,220,255,${alpha * 0.7 * shimmer})`);
+        grad.addColorStop(0.8, `rgba(100,170,255,${alpha * 0.3})`);
+        grad.addColorStop(1,   `rgba(50,100,200,0)`);
         c.fillStyle = grad;
-        c.shadowBlur = 8; c.shadowColor = '#aaddff';
+        c.shadowBlur = 16 * frac; c.shadowColor = '#aaddff';
         c.beginPath(); c.arc(t.x, t.y, blobR, 0, Math.PI*2); c.fill();
       }
     }
@@ -1962,7 +2019,6 @@ function drawBall(c,b){
     }
     c.globalAlpha=1;
   }
-
   const trailColor = matchingTrail ? matchingTrail.color : ballColor;
 
   // Ground glow halo
@@ -3026,7 +3082,7 @@ function update(dt){
     if(gameOver) return;
   }
   ball.trail.push({x:ball.x,y:ball.y});
-  const maxTrail = (()=>{ const bc=(ball.color||'#ffffff').toLowerCase(); return STORE_ITEMS.some(i=>i.category==='trails'&&isOwned(i.id)&&i.ballColor&&i.ballColor.toLowerCase()===bc) ? 20 : 8; })();
+  const maxTrail = (()=>{ const bc=(ball.color||'#ffffff').toLowerCase(); return STORE_ITEMS.some(i=>i.category==='trails'&&isOwned(i.id)&&i.ballColor&&i.ballColor.toLowerCase()===bc) ? 30 : 8; })();
   if(ball.trail.length>maxTrail) ball.trail.shift();
 
   // Tick active bombs - collect detonations first, then process
@@ -5003,6 +5059,9 @@ function openMapsPanel(defaultTab='maps') {
       <button id="tabSeries" style="flex:1;padding:14px 6px;font-family:'Cinzel',serif;font-weight:600;font-size:13px;cursor:pointer;border:none;border-bottom:2px solid transparent;transition:all 0.15s;display:flex;align-items:center;justify-content:center;gap:7px;">
         <span id="tabSeriesIcon"></span>SERIES
       </button>
+      <button id="tabUsers" style="flex:1;padding:14px 6px;font-family:'Cinzel',serif;font-weight:600;font-size:13px;cursor:pointer;border:none;border-bottom:2px solid transparent;transition:all 0.15s;display:flex;align-items:center;justify-content:center;gap:7px;">
+        👥 USERS
+      </button>
     </div>
     <!-- Content area -->
     <div id="mapsPanelBody" style="flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px;min-height:0;"></div>
@@ -5453,6 +5512,64 @@ function openMapsPanel(defaultTab='maps') {
 
     // QUEST MANAGEMENT (admin only)
     if (adminMode) {
+
+      // Force Reset All Users section
+      const resetSection = document.createElement('div');
+      resetSection.style.cssText = 'background:#1a0505;border:1px solid rgba(220,60,60,0.4);border-radius:4px;padding:12px;margin-bottom:12px;';
+      resetSection.innerHTML = `
+        <div style="font-family:'Cinzel',serif;font-size:11px;font-weight:700;color:#e63946;letter-spacing:1px;margin-bottom:8px;">⚠️ FORCE RESET ALL USERS</div>
+        <div style="font-size:10px;color:rgba(220,100,100,0.6);font-family:'Lato',sans-serif;margin-bottom:10px;line-height:1.6;">
+          Sets a new reset token in Supabase. Every player will have their progress wiped on next load.
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input id="resetTokenInput" type="text" placeholder="e.g. reset_v2" style="flex:1;background:rgba(40,10,10,0.8);border:1px solid rgba(200,60,60,0.4);color:#ffaaaa;font-family:'Lato',sans-serif;font-size:11px;padding:6px 8px;border-radius:2px;outline:none;">
+          <button id="resetTokenBtn" style="background:rgba(180,20,20,0.9);border:1px solid rgba(220,60,60,0.6);color:#fff;font-family:'Cinzel',serif;font-size:9px;padding:6px 10px;cursor:pointer;border-radius:2px;letter-spacing:1px;white-space:nowrap;">PUSH RESET</button>
+        </div>
+      `;
+      tabContent.appendChild(resetSection);
+
+      resetSection.querySelector('#resetTokenBtn').addEventListener('click', async () => {
+        const input = resetSection.querySelector('#resetTokenInput');
+        const token = input.value.trim();
+        if (!token) { showBuilderToast('Enter a token first'); return; }
+
+        // Confirmation overlay
+        const conf = document.createElement('div');
+        conf.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:600;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;';
+        conf.innerHTML = `
+          <div style="background:#1a0505;border:2px solid rgba(220,60,60,0.7);border-radius:4px;padding:28px 22px;width:min(300px,88vw);text-align:center;box-shadow:0 8px 40px rgba(0,0,0,0.9);">
+            <div style="font-size:32px;margin-bottom:12px;">⚠️</div>
+            <div style="font-family:'Cinzel',serif;font-size:14px;font-weight:700;color:#e63946;letter-spacing:1px;margin-bottom:10px;">RESET ALL USERS?</div>
+            <div style="font-size:11px;color:rgba(220,140,140,0.7);font-family:'Lato',sans-serif;line-height:1.8;margin-bottom:6px;">
+              Token: <strong style="color:#ffaaaa;">${token}</strong>
+            </div>
+            <div style="font-size:11px;color:rgba(220,140,140,0.6);font-family:'Lato',sans-serif;line-height:1.8;margin-bottom:20px;">
+              Every player's progress, diamonds, and unlocks will be wiped on their next load. This cannot be undone.
+            </div>
+            <div style="display:flex;gap:10px;">
+              <button id="confCancel" style="flex:1;background:none;border:1px solid rgba(200,200,200,0.3);color:rgba(220,220,220,0.7);font-family:'Cinzel',serif;font-size:11px;padding:11px;cursor:pointer;border-radius:3px;">CANCEL</button>
+              <button id="confConfirm" style="flex:1;background:rgba(180,20,20,0.9);border:1px solid rgba(220,60,60,0.6);color:#fff;font-family:'Cinzel',serif;font-size:11px;font-weight:700;padding:11px;cursor:pointer;border-radius:3px;">RESET ALL</button>
+            </div>
+          </div>
+        `;
+        document.body.appendChild(conf);
+        conf.querySelector('#confCancel').addEventListener('click', () => conf.remove());
+        conf.querySelector('#confConfirm').addEventListener('click', async () => {
+          conf.remove();
+          const btn = resetSection.querySelector('#resetTokenBtn');
+          const orig = btn.textContent; btn.textContent = '⏳'; btn.disabled = true;
+          try {
+            await pushResetTokenToCloud(token);
+            input.value = '';
+            showBuilderToast(`✓ Reset token "${token}" pushed - all users wiped on next load`);
+          } catch(e) {
+            showBuilderToast('⚠️ Push failed: ' + e.message);
+          } finally {
+            btn.textContent = orig; btn.disabled = false;
+          }
+        });
+      });
+
       const questSection = document.createElement('div');
       questSection.style.cssText = 'background:#0a0f1a;border:1px solid rgba(0,238,255,0.3);border-radius:4px;padding:12px;margin-bottom:12px;';
 
@@ -5787,6 +5904,91 @@ function openMapsPanel(defaultTab='maps') {
 
   tabMaps.addEventListener('click', renderMapsTab);
   tabSeries.addEventListener('click', renderSeriesTab);
+
+  const tabUsers = ov.querySelector('#tabUsers');
+  tabUsers.addEventListener('click', renderUsersTab);
+
+  async function renderUsersTab() {
+    tabUsers.style.cssText = tabUsers.style.cssText.replace(/background[^;]+;|color[^;]+;|border-bottom[^;]+;/g,'') + tabActiveStyle;
+    tabMaps.style.cssText  = tabMaps.style.cssText.replace(/background[^;]+;|color[^;]+;|border-bottom[^;]+;/g,'') + tabIdleStyle;
+    tabSeries.style.cssText= tabSeries.style.cssText.replace(/background[^;]+;|color[^;]+;|border-bottom[^;]+;/g,'') + tabIdleStyle;
+    tabContent.innerHTML = '<div style="color:rgba(200,150,60,0.5);font-size:11px;font-family:\'Lato\',sans-serif;text-align:center;padding:20px;">Loading users...</div>';
+
+    try {
+      const token = await getSupabaseToken();
+      const res = await fetch(
+        `${SUPA_URL}/rest/v1/user_progress?select=user_id,total_diamonds,spent_diamonds&order=total_diamonds.desc&limit=100`,
+        { headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${token}` } }
+      );
+      if (!res.ok) throw new Error(await res.text());
+      const users = await res.json();
+
+      // Fetch display names from profiles
+      const profileRes = await fetch(
+        `${SUPA_URL}/rest/v1/profiles?select=id,display_name,email&id=in.(${users.map(u=>`"${u.user_id}"`).join(',')})`,
+        { headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${token}` } }
+      );
+      const profiles = profileRes.ok ? await profileRes.json() : [];
+      const profileMap = {};
+      profiles.forEach(p => profileMap[p.id] = p.display_name || p.email || p.id.slice(0,8));
+
+      tabContent.innerHTML = '';
+
+      if (!users.length) {
+        tabContent.innerHTML = '<div style="color:rgba(200,150,60,0.4);font-size:11px;font-family:\'Lato\',sans-serif;text-align:center;padding:20px;">No users found</div>';
+        return;
+      }
+
+      users.forEach(u => {
+        const available = (u.total_diamonds||0) - (u.spent_diamonds||0);
+        const name = profileMap[u.user_id] || u.user_id.slice(0,8);
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px 12px;background:rgba(20,14,4,0.8);border:1px solid rgba(120,90,30,0.3);border-radius:3px;margin-bottom:4px;';
+        row.innerHTML = `
+          <div style="flex:1;min-width:0;">
+            <div style="font-family:'Cinzel',serif;font-size:11px;color:#c8963c;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${name}</div>
+            <div style="font-size:10px;color:rgba(200,150,60,0.5);margin-top:2px;">💎 ${available} available · ${u.total_diamonds||0} total</div>
+          </div>
+          <input type="number" value="${available}" min="0" style="width:60px;background:rgba(40,28,8,0.9);border:1px solid rgba(200,150,60,0.4);color:#f5c842;font-family:'Lato',sans-serif;font-size:12px;padding:5px 6px;border-radius:2px;text-align:center;" data-uid="${u.user_id}" data-spent="${u.spent_diamonds||0}">
+          <button class="giveDiamondsBtn" style="background:rgba(60,40,10,0.9);border:1px solid rgba(200,150,60,0.5);color:#c8963c;font-family:'Cinzel',serif;font-size:9px;padding:6px 8px;cursor:pointer;border-radius:2px;letter-spacing:1px;">SET</button>
+        `;
+        tabContent.appendChild(row);
+
+        row.querySelector('.giveDiamondsBtn').addEventListener('click', async (e) => {
+          const btn = e.currentTarget;
+          const input = row.querySelector('input');
+          const newAvailable = parseInt(input.value) || 0;
+          const spent = parseInt(input.dataset.spent) || 0;
+          const newTotal = newAvailable + spent;
+          const uid = input.dataset.uid;
+          btn.textContent = '⏳'; btn.disabled = true;
+          try {
+            const t = await getSupabaseToken();
+            const r = await fetch(`${SUPA_URL}/rest/v1/user_progress?user_id=eq.${uid}`, {
+              method: 'PATCH',
+              headers: {
+                'Content-Type': 'application/json',
+                'apikey': SUPA_KEY,
+                'Authorization': `Bearer ${t}`,
+                'Prefer': 'return=minimal'
+              },
+              body: JSON.stringify({ total_diamonds: newTotal })
+            });
+            if (!r.ok) throw new Error(await r.text());
+            btn.textContent = '✓';
+            row.querySelector('div > div:last-child').textContent = `💎 ${newAvailable} available · ${newTotal} total`;
+            setTimeout(() => { btn.textContent = 'SET'; btn.disabled = false; }, 1500);
+          } catch(err) {
+            btn.textContent = '✗'; btn.disabled = false;
+            showBuilderToast('Failed: ' + err.message);
+          }
+        });
+      });
+
+    } catch(e) {
+      tabContent.innerHTML = `<div style="color:#e63946;font-size:11px;font-family:'Lato',sans-serif;padding:16px;">${e.message}</div>`;
+    }
+  }
 
   if(defaultTab==='series') renderSeriesTab(); else renderMapsTab();
 }
@@ -6612,7 +6814,7 @@ function showModeSelect(){
   const featuredName = getFeaturedSeriesName();
   const featuredSeries = savedSeries().find(s => s.name === featuredName)
                       || HARDCODED_SERIES.find(s => s.name === featuredName)
-                      || HARDCODED_SERIES[0];
+                      || HARDCODED_SERIES[0] || null;
   const seriesButtons = featuredSeries ? (()=>{
     const s = featuredSeries;
     const id = 'modeHardcoded0';
@@ -6884,7 +7086,7 @@ function showModeSelect(){
       const featuredName = getFeaturedSeriesName();
       const live = savedSeries().find(x => x.name === featuredName)
                 || HARDCODED_SERIES.find(x => x.name === featuredName)
-                || HARDCODED_SERIES[0];
+                || HARDCODED_SERIES[0] || null;
       if(live){ hideMessage(); playSeries(live); }
     });
   }
@@ -7116,399 +7318,7 @@ function getCurrentLevelData(){
 // =====================================================================
 // HARDCODED SERIES - loaded on first run if not already present
 // =====================================================================
-const HARDCODED_SERIES = [
-  {
-    "name": "Getting Started",
-    "description": "Learn the ropes here!",
-    "levels": [
-      {
-        "name": "1- White",
-        "ballCol": 8, "ballRow": 17,
-        "ballX": 442, "ballY": 822.5, "portal": null,
-        "bricks": [
-          {"col":0,"row":18,"x":0,"y":846,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":1,"row":18,"x":52,"y":846,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":2,"row":18,"x":104,"y":846,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":3,"row":18,"x":156,"y":846,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":4,"row":18,"x":208,"y":846,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":5,"row":18,"x":260,"y":846,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":6,"row":18,"x":312,"y":846,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":7,"row":18,"x":364,"y":846,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":8,"row":18,"x":416,"y":846,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":0,"row":9,"x":0,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":1,"row":9,"x":52,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":2,"row":9,"x":104,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":3,"row":9,"x":156,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":5,"row":9,"x":260,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":6,"row":9,"x":312,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":7,"row":9,"x":364,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":8,"row":9,"x":416,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":4,"row":10,"x":208,"y":470,"w":52,"h":47,"color":"#00eeff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":true,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":3,"row":10,"x":156,"y":470,"w":52,"h":47,"color":"#ffffff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":true,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":3,"row":11,"x":156,"y":517,"w":52,"h":47,"color":"#ffffff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":true,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":4,"row":11,"x":208,"y":517,"w":52,"h":47,"color":"#ffffff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":true,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":5,"row":10,"x":260,"y":470,"w":52,"h":47,"color":"#ffffff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":true,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":5,"row":11,"x":260,"y":517,"w":52,"h":47,"color":"#ffffff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":true,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":4,"row":9,"x":208,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0}
-        ]
-      },
-      {
-        "name": "2- Red",
-        "ballCol": 8, "ballRow": 17,
-        "ballX": 442, "ballY": 822.5, "portal": null,
-        "bricks": [
-          {"col":0,"row":18,"x":0,"y":846,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":1,"row":18,"x":52,"y":846,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":2,"row":18,"x":104,"y":846,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":3,"row":18,"x":156,"y":846,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":4,"row":18,"x":208,"y":846,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":5,"row":18,"x":260,"y":846,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":6,"row":18,"x":312,"y":846,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":7,"row":18,"x":364,"y":846,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":8,"row":18,"x":416,"y":846,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":0,"row":9,"x":0,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":1,"row":9,"x":52,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":2,"row":9,"x":104,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":3,"row":9,"x":156,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":5,"row":9,"x":260,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":6,"row":9,"x":312,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":7,"row":9,"x":364,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":8,"row":9,"x":416,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":4,"row":10,"x":208,"y":470,"w":52,"h":47,"color":"#00eeff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":true,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":3,"row":10,"x":156,"y":470,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":3,"row":11,"x":156,"y":517,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":4,"row":11,"x":208,"y":517,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":5,"row":10,"x":260,"y":470,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":5,"row":11,"x":260,"y":517,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":4,"row":9,"x":208,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":4,"row":12,"x":208,"y":564,"w":52,"h":47,"color":"#ffffff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":true,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":5,"row":12,"x":260,"y":564,"w":52,"h":47,"color":"#ffffff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":true,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":6,"row":12,"x":312,"y":564,"w":52,"h":47,"color":"#ffffff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":true,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":6,"row":10,"x":312,"y":470,"w":52,"h":47,"color":"#ffffff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":true,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":6,"row":11,"x":312,"y":517,"w":52,"h":47,"color":"#ffffff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":true,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":3,"row":12,"x":156,"y":564,"w":52,"h":47,"color":"#ffffff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":true,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":2,"row":12,"x":104,"y":564,"w":52,"h":47,"color":"#ffffff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":true,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":2,"row":10,"x":104,"y":470,"w":52,"h":47,"color":"#ffffff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":true,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":2,"row":11,"x":104,"y":517,"w":52,"h":47,"color":"#ffffff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":true,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":0,"row":10,"x":0,"y":470,"w":52,"h":47,"color":"#e63946","isPaint":true,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":8,"row":10,"x":416,"y":470,"w":52,"h":47,"color":"#e63946","isPaint":true,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0}
-        ]
-      },
-      {
-        "name": "4- Keys",
-        "ballCol": 8, "ballRow": 17,
-        "ballX": 442, "ballY": 822.5, "portal": null,
-        "bricks": [
-          {"col":0,"row":9,"x":0,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":1,"row":9,"x":52,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":2,"row":9,"x":104,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":3,"row":9,"x":156,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":5,"row":9,"x":260,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":6,"row":9,"x":312,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":7,"row":9,"x":364,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":8,"row":9,"x":416,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":4,"row":9,"x":208,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":true,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":0,"row":20,"x":0,"y":940,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":1,"row":20,"x":52,"y":940,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":2,"row":20,"x":104,"y":940,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":3,"row":20,"x":156,"y":940,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":4,"row":20,"x":208,"y":940,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":5,"row":20,"x":260,"y":940,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":6,"row":20,"x":312,"y":940,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":7,"row":20,"x":364,"y":940,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":8,"row":20,"x":416,"y":940,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":0,"row":14,"x":0,"y":658,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":1,"row":14,"x":52,"y":658,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":2,"row":14,"x":104,"y":658,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":3,"row":14,"x":156,"y":658,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":4,"row":14,"x":208,"y":658,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":true,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":5,"row":14,"x":260,"y":658,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":6,"row":14,"x":312,"y":658,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":7,"row":14,"x":364,"y":658,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":8,"row":14,"x":416,"y":658,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":4,"row":17,"x":208,"y":799,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":true,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":0,"row":10,"x":0,"y":470,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":true,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":0,"row":11,"x":0,"y":517,"w":52,"h":47,"color":"#a8e63d","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":1,"row":11,"x":52,"y":517,"w":52,"h":47,"color":"#a8e63d","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":1,"row":10,"x":52,"y":470,"w":52,"h":47,"color":"#a8e63d","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":0,"row":19,"x":0,"y":893,"w":52,"h":47,"color":"#a8e63d","isPaint":true,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":4,"row":13,"x":208,"y":611,"w":52,"h":47,"color":"#ffffff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":true,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":5,"row":13,"x":260,"y":611,"w":52,"h":47,"color":"#ffffff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":true,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":3,"row":13,"x":156,"y":611,"w":52,"h":47,"color":"#ffffff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":true,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":4,"row":8,"x":208,"y":376,"w":52,"h":47,"color":"#00eeff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":true,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0}
-        ]
-      },
-      {
-        "name": "3- Unblock",
-        "ballCol": 8, "ballRow": 17,
-        "ballX": 442, "ballY": 822.5, "portal": null,
-        "bricks": [
-          {"col":0,"row":18,"x":0,"y":846,"w":52,"h":47,"color":"#a8e63d","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":1,"row":18,"x":52,"y":846,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":2,"row":18,"x":104,"y":846,"w":52,"h":47,"color":"#a8e63d","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":3,"row":18,"x":156,"y":846,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":4,"row":18,"x":208,"y":846,"w":52,"h":47,"color":"#a8e63d","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":5,"row":18,"x":260,"y":846,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":6,"row":18,"x":312,"y":846,"w":52,"h":47,"color":"#a8e63d","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":7,"row":18,"x":364,"y":846,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":8,"row":18,"x":416,"y":846,"w":52,"h":47,"color":"#a8e63d","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":0,"row":9,"x":0,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":1,"row":9,"x":52,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":2,"row":9,"x":104,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":3,"row":9,"x":156,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":5,"row":9,"x":260,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":6,"row":9,"x":312,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":7,"row":9,"x":364,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":8,"row":9,"x":416,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":4,"row":10,"x":208,"y":470,"w":52,"h":47,"color":"#00eeff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":true,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":3,"row":10,"x":156,"y":470,"w":52,"h":47,"color":"#a8e63d","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":3,"row":11,"x":156,"y":517,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":4,"row":11,"x":208,"y":517,"w":52,"h":47,"color":"#a8e63d","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":5,"row":10,"x":260,"y":470,"w":52,"h":47,"color":"#a8e63d","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":5,"row":11,"x":260,"y":517,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":4,"row":9,"x":208,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":4,"row":12,"x":208,"y":564,"w":52,"h":47,"color":"#a8e63d","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":5,"row":12,"x":260,"y":564,"w":52,"h":47,"color":"#ffffff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":true,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":6,"row":12,"x":312,"y":564,"w":52,"h":47,"color":"#ffffff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":true,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":6,"row":10,"x":312,"y":470,"w":52,"h":47,"color":"#a8e63d","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":6,"row":11,"x":312,"y":517,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":3,"row":12,"x":156,"y":564,"w":52,"h":47,"color":"#ffffff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":true,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":2,"row":12,"x":104,"y":564,"w":52,"h":47,"color":"#ffffff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":true,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":2,"row":10,"x":104,"y":470,"w":52,"h":47,"color":"#a8e63d","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":2,"row":11,"x":104,"y":517,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":0,"row":10,"x":0,"y":470,"w":52,"h":47,"color":"#a8e63d","isPaint":true,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":8,"row":10,"x":416,"y":470,"w":52,"h":47,"color":"#a8e63d","isPaint":true,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":7,"row":10,"x":364,"y":470,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":7,"row":11,"x":364,"y":517,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":8,"row":11,"x":416,"y":517,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":1,"row":10,"x":52,"y":470,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":1,"row":11,"x":52,"y":517,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":0,"row":11,"x":0,"y":517,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":7,"row":12,"x":364,"y":564,"w":52,"h":47,"color":"#ffffff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":true,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":8,"row":12,"x":416,"y":564,"w":52,"h":47,"color":"#ffffff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":true,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":0,"row":12,"x":0,"y":564,"w":52,"h":47,"color":"#ffffff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":true,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":1,"row":12,"x":52,"y":564,"w":52,"h":47,"color":"#ffffff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":true,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":0,"row":17,"x":0,"y":799,"w":52,"h":47,"color":"#e63946","isPaint":true,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":4,"row":19,"x":208,"y":893,"w":52,"h":47,"color":"#000000","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":true,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":5,"row":19,"x":260,"y":893,"w":52,"h":47,"color":"#000000","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":true,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":6,"row":19,"x":312,"y":893,"w":52,"h":47,"color":"#000000","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":true,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":7,"row":19,"x":364,"y":893,"w":52,"h":47,"color":"#000000","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":true,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":8,"row":19,"x":416,"y":893,"w":52,"h":47,"color":"#000000","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":true,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":0,"row":19,"x":0,"y":893,"w":52,"h":47,"color":"#000000","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":true,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":1,"row":19,"x":52,"y":893,"w":52,"h":47,"color":"#000000","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":true,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":2,"row":19,"x":104,"y":893,"w":52,"h":47,"color":"#000000","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":true,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":3,"row":19,"x":156,"y":893,"w":52,"h":47,"color":"#000000","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":true,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":0,"row":20,"x":0,"y":940,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":1,"row":20,"x":52,"y":940,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":2,"row":20,"x":104,"y":940,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":3,"row":20,"x":156,"y":940,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":4,"row":20,"x":208,"y":940,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":5,"row":20,"x":260,"y":940,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":6,"row":20,"x":312,"y":940,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":7,"row":20,"x":364,"y":940,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":8,"row":20,"x":416,"y":940,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0}
-        ]
-      },
-      {
-        "name": "5- Green and Red",
-        "ballCol": 8, "ballRow": 17,
-        "ballX": 442, "ballY": 822.5, "portal": null,
-        "bricks": [
-          {"col":0,"row":9,"x":0,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":1,"row":9,"x":52,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":2,"row":9,"x":104,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":3,"row":9,"x":156,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":5,"row":9,"x":260,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":6,"row":9,"x":312,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":7,"row":9,"x":364,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":8,"row":9,"x":416,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":4,"row":9,"x":208,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":true,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":0,"row":20,"x":0,"y":940,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":1,"row":20,"x":52,"y":940,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":2,"row":20,"x":104,"y":940,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":3,"row":20,"x":156,"y":940,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":4,"row":20,"x":208,"y":940,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":5,"row":20,"x":260,"y":940,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":6,"row":20,"x":312,"y":940,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":7,"row":20,"x":364,"y":940,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":8,"row":20,"x":416,"y":940,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":0,"row":14,"x":0,"y":658,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":1,"row":14,"x":52,"y":658,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":2,"row":14,"x":104,"y":658,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":3,"row":14,"x":156,"y":658,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":4,"row":14,"x":208,"y":658,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":5,"row":14,"x":260,"y":658,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":6,"row":14,"x":312,"y":658,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":7,"row":14,"x":364,"y":658,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":8,"row":14,"x":416,"y":658,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":true,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":4,"row":8,"x":208,"y":376,"w":52,"h":47,"color":"#00eeff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":true,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":0,"row":19,"x":0,"y":893,"w":52,"h":47,"color":"#e63946","isPaint":true,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":8,"row":15,"x":416,"y":705,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":true,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":0,"row":11,"x":0,"y":517,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":1,"row":11,"x":52,"y":517,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":1,"row":10,"x":52,"y":470,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":0,"row":10,"x":0,"y":470,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":true,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":0,"row":13,"x":0,"y":611,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":true,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":0,"row":12,"x":0,"y":564,"w":52,"h":47,"color":"#a8e63d","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":1,"row":12,"x":52,"y":564,"w":52,"h":47,"color":"#a8e63d","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":1,"row":13,"x":52,"y":611,"w":52,"h":47,"color":"#a8e63d","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":4,"row":10,"x":208,"y":470,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":true,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":3,"row":10,"x":156,"y":470,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":5,"row":10,"x":260,"y":470,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":1,"row":15,"x":52,"y":705,"w":52,"h":47,"color":"#9b5de5","isPaint":true,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":2,"row":19,"x":104,"y":893,"w":52,"h":47,"color":"#2ec4b6","isPaint":true,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":3,"row":15,"x":156,"y":705,"w":52,"h":47,"color":"#f4a261","isPaint":true,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":4,"row":19,"x":208,"y":893,"w":52,"h":47,"color":"#9b5de5","isPaint":true,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":5,"row":15,"x":260,"y":705,"w":52,"h":47,"color":"#2ec4b6","isPaint":true,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":6,"row":19,"x":312,"y":893,"w":52,"h":47,"color":"#f4a261","isPaint":true,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":7,"row":15,"x":364,"y":705,"w":52,"h":47,"color":"#9b5de5","isPaint":true,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":0,"row":15,"x":0,"y":705,"w":52,"h":47,"color":"#a8e63d","isPaint":true,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":8,"row":13,"x":416,"y":611,"w":52,"h":47,"color":"#00eeff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":true,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0}
-        ]
-      },
-      {
-        "name": "6- Stay White!",
-        "ballCol": 8, "ballRow": 17,
-        "ballX": 442, "ballY": 822.5, "portal": null,
-        "bricks": [
-          {"col":0,"row":9,"x":0,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":1,"row":9,"x":52,"y":423,"w":52,"h":47,"color":"#ffffff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":true,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":2,"row":9,"x":104,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":3,"row":9,"x":156,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":5,"row":9,"x":260,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":6,"row":9,"x":312,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":7,"row":9,"x":364,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":8,"row":9,"x":416,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":4,"row":9,"x":208,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":true,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":0,"row":20,"x":0,"y":940,"w":52,"h":47,"color":"#ffffff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":true,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":1,"row":20,"x":52,"y":940,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":2,"row":20,"x":104,"y":940,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":3,"row":20,"x":156,"y":940,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":4,"row":20,"x":208,"y":940,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":5,"row":20,"x":260,"y":940,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":6,"row":20,"x":312,"y":940,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":7,"row":20,"x":364,"y":940,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":8,"row":20,"x":416,"y":940,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":0,"row":14,"x":0,"y":658,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":1,"row":14,"x":52,"y":658,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":2,"row":14,"x":104,"y":658,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":3,"row":14,"x":156,"y":658,"w":52,"h":47,"color":"#ffffff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":true,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":4,"row":14,"x":208,"y":658,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":5,"row":14,"x":260,"y":658,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":6,"row":14,"x":312,"y":658,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":7,"row":14,"x":364,"y":658,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":8,"row":14,"x":416,"y":658,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":true,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":4,"row":8,"x":208,"y":376,"w":52,"h":47,"color":"#00eeff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":true,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":0,"row":3,"x":0,"y":141,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":1,"row":3,"x":52,"y":141,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":2,"row":3,"x":104,"y":141,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":3,"row":3,"x":156,"y":141,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":4,"row":3,"x":208,"y":141,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":5,"row":3,"x":260,"y":141,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":6,"row":3,"x":312,"y":141,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":7,"row":3,"x":364,"y":141,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":8,"row":3,"x":416,"y":141,"w":52,"h":47,"color":"#ffffff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":true,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":0,"row":25,"x":0,"y":1175,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":1,"row":25,"x":52,"y":1175,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":2,"row":25,"x":104,"y":1175,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":3,"row":25,"x":156,"y":1175,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":4,"row":25,"x":208,"y":1175,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":5,"row":25,"x":260,"y":1175,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":6,"row":25,"x":312,"y":1175,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":7,"row":25,"x":364,"y":1175,"w":52,"h":47,"color":"#ffffff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":true,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":8,"row":25,"x":416,"y":1175,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":true,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":6,"row":26,"x":312,"y":1222,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":true,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":7,"row":2,"x":364,"y":94,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":true,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":7,"row":1,"x":364,"y":47,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":true,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":8,"row":1,"x":416,"y":47,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":true,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":1,"row":16,"x":52,"y":752,"w":52,"h":47,"color":"#2ec4b6","isPaint":true,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":4,"row":18,"x":208,"y":846,"w":52,"h":47,"color":"#2ec4b6","isPaint":true,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":6,"row":15,"x":312,"y":705,"w":52,"h":47,"color":"#2ec4b6","isPaint":true,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":5,"row":12,"x":260,"y":564,"w":52,"h":47,"color":"#2ec4b6","isPaint":true,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":6,"row":6,"x":312,"y":282,"w":52,"h":47,"color":"#2ec4b6","isPaint":true,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":2,"row":4,"x":104,"y":188,"w":52,"h":47,"color":"#2ec4b6","isPaint":true,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":1,"row":22,"x":52,"y":1034,"w":52,"h":47,"color":"#2ec4b6","isPaint":true,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":4,"row":24,"x":208,"y":1128,"w":52,"h":47,"color":"#2ec4b6","isPaint":true,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":6,"row":22,"x":312,"y":1034,"w":52,"h":47,"color":"#2ec4b6","isPaint":true,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":4,"row":11,"x":208,"y":517,"w":52,"h":47,"color":"#a8e63d","isPaint":true,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":1,"row":13,"x":52,"y":611,"w":52,"h":47,"color":"#a8e63d","isPaint":true,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":6,"row":7,"x":312,"y":329,"w":52,"h":47,"color":"#a8e63d","isPaint":true,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":1,"row":6,"x":52,"y":282,"w":52,"h":47,"color":"#a8e63d","isPaint":true,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":5,"row":4,"x":260,"y":188,"w":52,"h":47,"color":"#a8e63d","isPaint":true,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":6,"row":17,"x":312,"y":799,"w":52,"h":47,"color":"#a8e63d","isPaint":true,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":2,"row":18,"x":104,"y":846,"w":52,"h":47,"color":"#a8e63d","isPaint":true,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":8,"row":23,"x":416,"y":1081,"w":52,"h":47,"color":"#a8e63d","isPaint":true,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":7,"row":19,"x":364,"y":893,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":true,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":7,"row":18,"x":364,"y":846,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":true,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":7,"row":17,"x":364,"y":799,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":true,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":7,"row":15,"x":364,"y":705,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":true,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":7,"row":16,"x":364,"y":752,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":true,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":5,"row":26,"x":260,"y":1222,"w":52,"h":47,"color":"#00eeff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":true,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":6,"row":2,"x":312,"y":94,"w":52,"h":47,"color":"#00eeff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":true,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":0,"row":10,"x":0,"y":470,"w":52,"h":47,"color":"#00eeff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":true,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0}
-        ]
-      },
-      {
-        "name": "7- Treasure",
-        "ballCol": 4, "ballRow": 13,
-        "ballX": 234, "ballY": 634.5, "portal": null,
-        "bricks": [
-          {"col":0,"row":2,"x":0,"y":94,"w":52,"h":47,"color":"#ffffff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":true,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":1,"row":2,"x":52,"y":94,"w":52,"h":47,"color":"#ffffff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":true,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":2,"row":2,"x":104,"y":94,"w":52,"h":47,"color":"#ffffff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":true,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":2,"row":1,"x":104,"y":47,"w":52,"h":47,"color":"#ffffff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":true,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":2,"row":0,"x":104,"y":0,"w":52,"h":47,"color":"#ffffff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":true,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":0,"row":0,"x":0,"y":0,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":true,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":8,"row":24,"x":416,"y":1128,"w":52,"h":47,"color":"#ffffff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":true,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":7,"row":24,"x":364,"y":1128,"w":52,"h":47,"color":"#ffffff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":true,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":6,"row":24,"x":312,"y":1128,"w":52,"h":47,"color":"#ffffff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":true,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":6,"row":25,"x":312,"y":1175,"w":52,"h":47,"color":"#ffffff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":true,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":6,"row":26,"x":312,"y":1222,"w":52,"h":47,"color":"#ffffff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":true,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":8,"row":26,"x":416,"y":1222,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":true,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":3,"row":8,"x":156,"y":376,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":true,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":4,"row":8,"x":208,"y":376,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":true,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":5,"row":8,"x":260,"y":376,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":true,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":6,"row":8,"x":312,"y":376,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":true,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":6,"row":9,"x":312,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":true,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":6,"row":10,"x":312,"y":470,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":true,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":6,"row":11,"x":312,"y":517,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":true,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":3,"row":11,"x":156,"y":517,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":true,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":4,"row":11,"x":208,"y":517,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":true,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":5,"row":11,"x":260,"y":517,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":true,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":3,"row":9,"x":156,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":true,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":3,"row":10,"x":156,"y":470,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":true,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":2,"row":11,"x":104,"y":517,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":true,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":2,"row":10,"x":104,"y":470,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":true,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":2,"row":9,"x":104,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":true,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":2,"row":8,"x":104,"y":376,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":true,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":6,"row":12,"x":312,"y":564,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":true,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":5,"row":12,"x":260,"y":564,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":true,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":4,"row":12,"x":208,"y":564,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":true,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":3,"row":12,"x":156,"y":564,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":true,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":2,"row":12,"x":104,"y":564,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":true,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":5,"row":9,"x":260,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":true,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":5,"row":10,"x":260,"y":470,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":true,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":4,"row":9,"x":208,"y":423,"w":52,"h":47,"color":"#e63946","isPaint":false,"isSteel":false,"isKey":false,"isLock":true,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":4,"row":10,"x":208,"y":470,"w":52,"h":47,"color":"#00eeff","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":true,"isWhite":false,"isSkull":false,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":1,"row":19,"x":52,"y":893,"w":52,"h":47,"color":"#888899","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":true,"hit":0,"cooldown":0},
-          {"col":5,"row":17,"x":260,"y":799,"w":52,"h":47,"color":"#888899","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":true,"hit":0,"cooldown":0},
-          {"col":2,"row":14,"x":104,"y":658,"w":52,"h":47,"color":"#888899","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":true,"hit":0,"cooldown":0},
-          {"col":6,"row":5,"x":312,"y":235,"w":52,"h":47,"color":"#888899","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":true,"hit":0,"cooldown":0},
-          {"col":2,"row":4,"x":104,"y":188,"w":52,"h":47,"color":"#888899","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":true,"hit":0,"cooldown":0},
-          {"col":3,"row":23,"x":156,"y":1081,"w":52,"h":47,"color":"#888899","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":false,"isReverse":true,"hit":0,"cooldown":0},
-          {"col":8,"row":17,"x":416,"y":799,"w":52,"h":47,"color":"#000000","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":true,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":0,"row":16,"x":0,"y":752,"w":52,"h":47,"color":"#000000","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":true,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":4,"row":20,"x":208,"y":940,"w":52,"h":47,"color":"#000000","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":true,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":0,"row":26,"x":0,"y":1222,"w":52,"h":47,"color":"#000000","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":true,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":8,"row":6,"x":416,"y":282,"w":52,"h":47,"color":"#000000","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":true,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":6,"row":0,"x":312,"y":0,"w":52,"h":47,"color":"#000000","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":true,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":0,"row":6,"x":0,"y":282,"w":52,"h":47,"color":"#000000","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":true,"isReverse":false,"hit":0,"cooldown":0},
-          {"col":7,"row":14,"x":364,"y":658,"w":52,"h":47,"color":"#000000","isPaint":false,"isSteel":false,"isKey":false,"isLock":false,"isDiamond":false,"isWhite":false,"isSkull":true,"isReverse":false,"hit":0,"cooldown":0}
-        ]
-      }
-    ]
-  }
-];
+const HARDCODED_SERIES = []; // Series live in Supabase only
 
 // =====================================================================
 // CLOUD SERIES (admin can push maps to quest via Supabase)
@@ -7597,7 +7407,7 @@ async function seedQuestToCloud() {
 function getFeaturedSeriesName(){
   // Return the current active quest based on player progress
   const questOrder = getQuestOrder();
-  if (!questOrder.length) return LS.get('pb_featured_series') || (HARDCODED_SERIES[0] && HARDCODED_SERIES[0].name) || '';
+  if (!questOrder.length) return LS.get('pb_featured_series') || '';
   const questIdx = getCurrentQuestIndex();
   return questOrder[questIdx] || questOrder[questOrder.length - 1];
 }
@@ -7686,16 +7496,12 @@ async function loadActiveSeries() {
 (function initSeries(){
   // Only seed hardcoded if user has no series stored yet (first ever load)
   const existing = savedSeries();
-  if(!existing.length){
-    HARDCODED_SERIES.forEach(hs=>{ saveSeries(hs); });
-  }
+  // Series seeded from cloud only (HARDCODED_SERIES is empty)
   // Restore stored featured series order
   const storedFeatured = LS.get('pb_featured_series');
   if(storedFeatured) setFeaturedSeriesName(storedFeatured);
   // Initialize quest order with Getting Started if not set yet
-  if(!getQuestOrder().length && HARDCODED_SERIES[0]) {
-    setQuestOrder([HARDCODED_SERIES[0].name]);
-  }
+  // Quest order seeded from cloud only
 })();
 
 // How to Play overlay
@@ -9419,6 +9225,7 @@ initAuth().then(() => {
   showModeSelect();
 });
 // Load cloud data after UI is shown
+loadResetTokenFromCloud().catch(() => {});
 loadQuestOrderFromCloud().catch(() => {});
 loadActiveSeries().catch(() => {});
 
