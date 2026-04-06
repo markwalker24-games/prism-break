@@ -1659,6 +1659,18 @@ function initBall(startX, startY) {
 // DRAW HELPERS
 // =====================================================================
 function drawBrickImage(c, b, imgKey){
+  if (imgKey === 'dynamite') {
+    // Draw red brick background with dynamite emoji
+    c.fillStyle = '#8b1a1a';
+    c.fillRect(b.x, b.y, b.w, b.h);
+    c.fillStyle = 'rgba(255,255,255,0.08)';
+    c.fillRect(b.x, b.y, b.w, 2);
+    c.font = `${Math.floor(b.h * 0.6)}px serif`;
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    c.fillText('🧨', b.x + b.w/2, b.y + b.h/2);
+    return;
+  }
   const img = BRICK_IMAGES[imgKey];
   if(img && img.complete && img.naturalWidth>0){
     c.drawImage(img, b.x, b.y, b.w, b.h);
@@ -1700,7 +1712,7 @@ function drawDiamondBrick(c,b){ drawBrickImage(c,b,'diamond'); }
 function drawWhiteBrick(c,b){ drawBrickImage(c,b,'white'); }
 function drawSkullBrick(c,b){ drawBrickImage(c,b,'skull'); }
 function drawReverseBrick(c,b){ drawBrickImage(c,b,'reverse'); }
-function drawBombBrick(c,b) { drawBrickImage(c,b,'bomb'); }
+function drawBombBrick(c,b) { drawBrickImage(c, b, isOwned('skin_dynamite') ? 'dynamite' : 'bomb'); }
 
 function drawBrick(c,b){
   if(b.isSteel)        drawSteelBrick(c,b);
@@ -1778,12 +1790,8 @@ function drawBall(c,b){
 
   // Trail - show glowing streak if player owns the trail for current ball color
   const ownedTrails = STORE_ITEMS.filter(i => i.category === 'trails' && isOwned(i.id));
-  const matchingTrail = ownedTrails.find(i => {
-    // Match ball color to trail color
-    const bc = (BALL_COLORS[b.color] || b.color || '#ffffff').toLowerCase();
-    return i.color.toLowerCase() === bc || 
-           (i.id === 'trail_white' && (bc === '#ffffff' || bc === 'white'));
-  });
+  const currentBallColor = (b.color || '#ffffff').toLowerCase();
+  const matchingTrail = ownedTrails.find(i => i.ballColor && i.ballColor.toLowerCase() === currentBallColor);
   const trailColor = matchingTrail ? matchingTrail.color : ballColor;
   const trailHex = trailColor.replace('#','');
   const tr_r = parseInt(trailHex.substring(0,2),16);
@@ -3225,8 +3233,17 @@ function startGame(levelData, forcedMode){
   if(levelData && levelData.background && BACKGROUNDS[levelData.background]){
     setBgKey(levelData.background);
   } else if(!levelData || !levelData.bricks){
-    // Random mode (Break Out or Blackout) — pick a random background
-    const bgKeys = Object.keys(BACKGROUNDS);
+    // Random mode (Break Out or Blackout) — pick from owned backgrounds
+    const allBgKeys = Object.keys(BACKGROUNDS);
+    const bgItems = STORE_ITEMS.filter(i => i.category === 'backgrounds');
+    const ownedBgKeys = allBgKeys.filter(k => {
+      // Forest Path is always available
+      if (k === 'Forest Path') return true;
+      // Check if this background is owned via store
+      const storeItem = bgItems.find(i => i.bg === k);
+      return storeItem ? isOwned(storeItem.id) : false;
+    });
+    const bgKeys = ownedBgKeys.length ? ownedBgKeys : allBgKeys;
     setBgKey(bgKeys[Math.floor(Math.random() * bgKeys.length)]);
   } else {
     setBgKey('Forest Path');
@@ -4369,7 +4386,12 @@ function updateBgPickerLabel(){
 }
 
 function showBgPicker(){
-  const bgNames=Object.keys(BACKGROUNDS);
+  const bgItems = STORE_ITEMS.filter(i => i.category === 'backgrounds');
+  const bgNames = Object.keys(BACKGROUNDS).filter(k => {
+    if (k === 'Forest Path') return true;
+    const storeItem = bgItems.find(i => i.bg === k);
+    return storeItem ? isOwned(storeItem.id) : false;
+  });
   const overlay=document.createElement('div');
   overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:200;display:flex;flex-direction:column;align-items:center;justify-content:center;';
   const box=document.createElement('div');
@@ -7967,12 +7989,12 @@ function showDiamondAlert(earned) {
 // =====================================================================
 const STORE_ITEMS = [
   // Ball trails (permanent, per color)
-  { id:'trail_white',  name:'White Trail',  desc:'Glowing streak when your ball is white', cost:8,  type:'cosmetic', category:'trails', color:'#ffffff', ballColor:'#ffffff' },
-  { id:'trail_red',    name:'Red Trail',    desc:'Glowing streak when your ball is red',   cost:10, type:'cosmetic', category:'trails', color:'#e63946', ballColor:'#e63946' },
-  { id:'trail_blue',   name:'Blue Trail',   desc:'Glowing streak when your ball is blue',  cost:10, type:'cosmetic', category:'trails', color:'#4895ef', ballColor:'#4895ef' },
-  { id:'trail_green',  name:'Green Trail',  desc:'Glowing streak when your ball is green', cost:10, type:'cosmetic', category:'trails', color:'#52b788', ballColor:'#52b788' },
-  { id:'trail_purple', name:'Purple Trail', desc:'Glowing streak when your ball is purple',cost:10, type:'cosmetic', category:'trails', color:'#7b2d8b', ballColor:'#7b2d8b' },
-  { id:'trail_gold',   name:'Gold Trail',   desc:'Glowing streak when your ball is gold',  cost:15, type:'cosmetic', category:'trails', color:'#f5c842', ballColor:'#f5c842' },
+  { id:'trail_white',  name:'White Trail',  desc:'Glowing streak when your ball is white',  cost:8,  type:'cosmetic', category:'trails', color:'#e8eeff', ballColor:'#ffffff' },
+  { id:'trail_red',    name:'Red Trail',    desc:'Glowing streak when your ball is red',    cost:10, type:'cosmetic', category:'trails', color:'#ff3333', ballColor:'#e63946' },
+  { id:'trail_teal',   name:'Teal Trail',   desc:'Glowing streak when your ball is teal',   cost:10, type:'cosmetic', category:'trails', color:'#00aaff', ballColor:'#2ec4b6' },
+  { id:'trail_green',  name:'Green Trail',  desc:'Glowing streak when your ball is green',  cost:10, type:'cosmetic', category:'trails', color:'#66ff00', ballColor:'#a8e63d' },
+  { id:'trail_purple', name:'Purple Trail', desc:'Glowing streak when your ball is purple', cost:10, type:'cosmetic', category:'trails', color:'#cc44ff', ballColor:'#9b5de5' },
+  { id:'trail_yellow', name:'Yellow Trail', desc:'Glowing streak when your ball is yellow', cost:10, type:'cosmetic', category:'trails', color:'#ffaa00', ballColor:'#f4a261' },
   // Gear reskins (permanent)
   { id:'skin_dynamite', name:'Dynamite',    desc:'Replaces bombs with sticks of dynamite',cost:20, type:'cosmetic', category:'gear',   emoji:'🧨' },
   // Backgrounds (permanent)
