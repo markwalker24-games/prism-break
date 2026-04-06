@@ -1776,11 +1776,27 @@ function drawBall(c,b){
   const bl=parseInt(hex.substring(4,6),16);
   const x=b.x, y=b.y, R=BALL_R;
 
-  // Trail
+  // Trail - show glowing streak if player owns the trail for current ball color
+  const ownedTrails = STORE_ITEMS.filter(i => i.category === 'trails' && isOwned(i.id));
+  const matchingTrail = ownedTrails.find(i => {
+    // Match ball color to trail color
+    const bc = (BALL_COLORS[b.color] || b.color || '#ffffff').toLowerCase();
+    return i.color.toLowerCase() === bc || 
+           (i.id === 'trail_white' && (bc === '#ffffff' || bc === 'white'));
+  });
+  const trailColor = matchingTrail ? matchingTrail.color : ballColor;
+  const trailHex = trailColor.replace('#','');
+  const tr_r = parseInt(trailHex.substring(0,2),16);
+  const tr_g = parseInt(trailHex.substring(2,4),16);
+  const tr_b = parseInt(trailHex.substring(4,6),16);
+
   for(let i=0;i<b.trail.length;i++){
-    const t=b.trail[i], alpha=(i/b.trail.length)*0.2, rad=R*(i/b.trail.length)*0.85;
-    c.globalAlpha=alpha; c.fillStyle=ballColor;
+    const t=b.trail[i], alpha=(i/b.trail.length)*(matchingTrail ? 0.5 : 0.2), rad=R*(i/b.trail.length)*0.85;
+    c.globalAlpha=alpha;
+    c.fillStyle=trailColor;
+    if(matchingTrail){ c.shadowBlur=6; c.shadowColor=trailColor; }
     c.beginPath(); c.arc(t.x,t.y,rad,0,Math.PI*2); c.fill();
+    c.shadowBlur=0;
   }
   c.globalAlpha=1;
 
@@ -5892,15 +5908,15 @@ function endGame(reason){
       <div style="font-family:'Cinzel',serif;font-size:18px;color:#e55;letter-spacing:1px;text-shadow:0 0 12px rgba(220,50,30,0.5)">GAME OVER</div>
       <div style="color:rgba(180,140,80,0.65);font-size:12px">No lives remaining</div>
       <div style="display:flex;flex-direction:column;gap:8px;width:100%;margin-top:8px;">
-        ${!usedContinue ? `<button id="gameOverContinueBtn" style="width:100%;padding:13px;border-radius:3px;cursor:pointer;font-family:'Cinzel',serif;font-size:13px;font-weight:700;letter-spacing:0.5px;color:${canContinue ? '#00eeff' : 'rgba(0,180,200,0.3)'};background:${canContinue ? 'rgba(0,30,40,0.95)' : 'rgba(10,10,15,0.95)'};border:1px solid ${canContinue ? 'rgba(0,238,255,0.5)' : 'rgba(0,100,120,0.2)'};box-shadow:${canContinue ? '0 0 12px rgba(0,238,255,0.2)' : 'none'};touch-action:manipulation;">💎 CONTINUE — ${CONTINUE_COST} 💎</button>` : ''}
         <button id="gameOverRetryBtn" style="width:100%;padding:13px;border-radius:3px;cursor:pointer;font-family:'Cinzel',serif;font-size:13px;font-weight:600;letter-spacing:0.5px;color:#ff8866;background:rgba(40,10,5,0.95);border:1px solid rgba(200,80,50,0.5);box-shadow:0 0 8px rgba(200,80,50,0.15);touch-action:manipulation;">↺ Try Again</button>
-        <button id="gameOverMenuBtn" style="background:none;border:none;color:rgba(180,140,60,0.5);font-family:'Cinzel',serif;font-size:11px;cursor:pointer;letter-spacing:1px;padding:6px;touch-action:manipulation;">Main Menu</button>
+        ${!usedContinue ? `<button id="gameOverContinueBtn" style="width:100%;padding:10px;border-radius:3px;cursor:pointer;font-family:'Cinzel',serif;font-size:11px;font-weight:600;letter-spacing:0.5px;color:${canContinue ? 'rgba(0,238,255,0.7)' : 'rgba(0,180,200,0.25)'};background:none;border:1px solid ${canContinue ? 'rgba(0,238,255,0.3)' : 'rgba(0,100,120,0.15)'};touch-action:manipulation;">💎 Bribe the Guard — ${CONTINUE_COST} 💎</button>` : ''}
+        <button id="gameOverMenuBtn" style="background:none;border:none;color:rgba(220,220,220,0.7);font-family:'Cinzel',serif;font-size:11px;cursor:pointer;letter-spacing:1px;padding:6px;touch-action:manipulation;">Main Menu</button>
       </div>
     `));
     if (!usedContinue) {
       document.getElementById('gameOverContinueBtn').addEventListener('click', () => {
         if (!canContinue) {
-          showToast(`Need ${CONTINUE_COST} 💎 to continue`, '#00eeff');
+          showToast(`Need ${CONTINUE_COST} 💎 to bribe the guard`, '#00eeff');
           return;
         }
         usedContinue = true;
@@ -6361,6 +6377,21 @@ function showModeSelect(){
       <span id="challengeBadge" style="display:none;background:#e63946;color:#fff;font-family:'Lato',sans-serif;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;letter-spacing:0;"></span>
     </button>
 
+    <!-- The Trade -->
+    <button id="modeStore" style="
+      width:100%;
+      background:linear-gradient(160deg,rgba(20,15,5,0.97),rgba(12,9,3,0.98));
+      border:1px solid rgba(180,130,40,0.5);
+      box-shadow:0 2px 12px rgba(0,0,0,0.5),inset 0 1px 0 rgba(220,170,60,0.1);
+      color:#c8963c;
+      font-family:'Cinzel',serif;font-size:13px;font-weight:700;letter-spacing:1px;
+      padding:12px 14px;cursor:pointer;border-radius:4px;
+      display:flex;align-items:center;justify-content:center;gap:10px;
+      touch-action:manipulation;">
+      <span style="font-size:16px;">💰</span>
+      <span>CONTRABAND</span>
+    </button>
+
     <!-- Leaderboard button -->
     <button id="modeLeaderboard" style="
       width:100%;
@@ -6540,6 +6571,7 @@ function showModeSelect(){
     if(!isUnlocked('full_builder')){ showSpendConfirm('full_builder', 'Map Builder', ()=>{ hideMessage(); openBuilder(); }); return; }
     hideMessage(); openBuilder();
   });
+  document.getElementById('modeStore').addEventListener('click', () => { hideMessage(); showTradeScreen(); });
   document.getElementById('modeLeaderboard').addEventListener('click', () => showLeaderboard());
 
 document.getElementById('modeSelectLevel').addEventListener('click',()=>{
@@ -7928,6 +7960,154 @@ function showDiamondAlert(earned) {
   panel.querySelector('#diamondAlertClose').addEventListener('click', () => ov.remove());
   ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
   setTimeout(() => ov.remove(), 4000);
+}
+
+// =====================================================================
+// THE TRADE - contraband store
+// =====================================================================
+const STORE_ITEMS = [
+  // Ball trails (permanent, per color)
+  { id:'trail_white',  name:'White Trail',  desc:'Glowing streak when your ball is white', cost:8,  type:'cosmetic', category:'trails', color:'#ffffff', ballColor:'#ffffff' },
+  { id:'trail_red',    name:'Red Trail',    desc:'Glowing streak when your ball is red',   cost:10, type:'cosmetic', category:'trails', color:'#e63946', ballColor:'#e63946' },
+  { id:'trail_blue',   name:'Blue Trail',   desc:'Glowing streak when your ball is blue',  cost:10, type:'cosmetic', category:'trails', color:'#4895ef', ballColor:'#4895ef' },
+  { id:'trail_green',  name:'Green Trail',  desc:'Glowing streak when your ball is green', cost:10, type:'cosmetic', category:'trails', color:'#52b788', ballColor:'#52b788' },
+  { id:'trail_purple', name:'Purple Trail', desc:'Glowing streak when your ball is purple',cost:10, type:'cosmetic', category:'trails', color:'#7b2d8b', ballColor:'#7b2d8b' },
+  { id:'trail_gold',   name:'Gold Trail',   desc:'Glowing streak when your ball is gold',  cost:15, type:'cosmetic', category:'trails', color:'#f5c842', ballColor:'#f5c842' },
+  // Gear reskins (permanent)
+  { id:'skin_dynamite', name:'Dynamite',    desc:'Replaces bombs with sticks of dynamite',cost:20, type:'cosmetic', category:'gear',   emoji:'🧨' },
+  // Backgrounds (permanent)
+  { id:'bg_shipwreck',  name:'Shipwreck',   desc:'Unlock the Shipwreck background',       cost:15, type:'cosmetic', category:'backgrounds', bg:'Shipwreck' },
+  { id:'bg_mine',       name:'Old Mine',    desc:'Unlock the Old Mine background',        cost:15, type:'cosmetic', category:'backgrounds', bg:'Old Mine' },
+  { id:'bg_bunker',     name:'Metal Bunker',desc:'Unlock the Metal Bunker background',    cost:15, type:'cosmetic', category:'backgrounds', bg:'Metal Bunker' },
+  { id:'bg_haunted',    name:'Haunted House',desc:'Unlock the Haunted House background',  cost:15, type:'cosmetic', category:'backgrounds', bg:'Haunted House' },
+  { id:'bg_egypt',      name:'Egypt Temple',desc:'Unlock the Ancient Egypt background',   cost:20, type:'cosmetic', category:'backgrounds', bg:'Ancient Egypt Temple' },
+  { id:'bg_treasure',   name:'Treasure Trove',desc:'Unlock the Treasure Trove background',cost:20, type:'cosmetic', category:'backgrounds', bg:'Treasure Trove' },
+];
+
+function getOwnedItems() {
+  try { return new Set(JSON.parse(LS.get('pb_owned_items') || '[]')); } catch(e) { return new Set(); }
+}
+function ownItem(id) {
+  const owned = getOwnedItems();
+  owned.add(id);
+  LS.set('pb_owned_items', JSON.stringify([...owned]));
+  syncProgressToCloud().catch(() => {});
+}
+function isOwned(id) {
+  if (adminMode) return true;
+  return getOwnedItems().has(id);
+}
+function showTradeScreen() {
+  const available = getAvailableDiamonds();
+
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.95);z-index:500;overflow-y:auto;-webkit-overflow-scrolling:touch;';
+
+  const buildItemHTML = (item) => {
+    const owned = isOwned(item.id);
+    const canAffordItem = available >= item.cost;
+    let swatchHTML = '';
+    if (item.category === 'trails') {
+      swatchHTML = `<div style="width:26px;height:26px;border-radius:50%;background:${item.color};box-shadow:0 0 8px ${item.color}88;flex-shrink:0;"></div>`;
+    } else if (item.emoji) {
+      swatchHTML = `<div style="width:26px;height:26px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;">${item.emoji}</div>`;
+    } else if (item.bg) {
+      swatchHTML = `<div style="width:26px;height:26px;border-radius:3px;background:#333;flex-shrink:0;border:1px solid rgba(200,150,60,0.3);overflow:hidden;"><div style="width:100%;height:100%;background:url(images/bg_default.jpeg) center/cover;opacity:0.6;"></div></div>`;
+    }
+
+    const actionHTML = owned
+      ? `<span style="font-family:'Cinzel',serif;font-size:10px;color:rgba(200,150,60,0.6);">OWNED</span>`
+      : canAffordItem
+        ? `<span style="font-family:'Cinzel',serif;font-size:10px;color:#c8963c;text-align:right;">trade<br><strong style="font-size:13px;">${item.cost} 💎</strong></span>`
+        : `<span style="font-family:'Cinzel',serif;font-size:10px;color:rgba(150,100,30,0.4);text-align:right;">trade<br><strong style="font-size:13px;">${item.cost} 💎</strong></span>`;
+
+    return `<div class="store-item" data-id="${item.id}" style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:${owned ? 'rgba(30,22,8,0.6)' : 'rgba(10,8,4,0.8)'};border:1px solid ${owned ? 'rgba(200,150,60,0.35)' : 'rgba(80,60,20,0.3)'};border-radius:3px;margin-bottom:4px;cursor:${owned || !canAffordItem ? 'default' : 'pointer'};">
+      ${swatchHTML}
+      <div style="flex:1;min-width:0;">
+        <div style="font-family:'Cinzel',serif;font-size:12px;font-weight:700;color:${owned ? '#c8963c' : '#e8d5a0'};">${item.name}</div>
+        <div style="font-size:10px;color:rgba(180,140,60,0.5);margin-top:1px;">${item.desc}</div>
+      </div>
+      ${actionHTML}
+    </div>`;
+  };
+
+  const cats = [
+    { key:'trails', label:'🎨 BALL TRAILS', desc:'Collect them all' },
+    { key:'gear', label:'💣 GEAR', desc:'Reskin your tools' },
+    { key:'backgrounds', label:'🖼 BACKGROUNDS', desc:'New environments' },
+  ];
+
+  let catHTML = '';
+  cats.forEach(cat => {
+    const items = STORE_ITEMS.filter(i => i.category === cat.key);
+    catHTML += `
+      <div style="margin-bottom:16px;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+          <span style="font-family:'Cinzel',serif;font-size:10px;font-weight:700;color:#c8963c;letter-spacing:2px;">${cat.label}</span>
+          <div style="flex:1;height:1px;background:rgba(200,150,60,0.2);"></div>
+          <span style="font-size:10px;color:rgba(200,150,60,0.35);font-family:'Lato',sans-serif;">${cat.desc}</span>
+        </div>
+        ${items.map(buildItemHTML).join('')}
+      </div>`;
+  });
+
+  ov.innerHTML = `
+    <div style="max-width:340px;margin:0 auto;padding:16px;box-sizing:border-box;">
+      <div style="text-align:center;padding:16px 0 14px;">
+        <div style="font-size:28px;">💰</div>
+        <div style="font-family:'Cinzel',serif;font-size:18px;font-weight:700;color:#c8963c;letter-spacing:2px;margin-top:6px;">CONTRABAND</div>
+        <div style="color:rgba(200,150,60,0.5);font-size:10px;font-family:'Cinzel',serif;letter-spacing:2px;margin-top:3px;">SPEAK EASY</div>
+        <div style="color:rgba(0,238,255,0.7);font-size:12px;font-family:'Lato',sans-serif;margin-top:6px;">💎 ${available} available</div>
+        <div style="height:1px;background:linear-gradient(90deg,transparent,rgba(200,150,60,0.4),transparent);margin-top:10px;"></div>
+      </div>
+      ${catHTML}
+      <button id="storeBackBtn" style="width:100%;background:none;border:none;color:rgba(220,220,220,0.7);font-family:'Cinzel',serif;font-size:12px;cursor:pointer;padding:12px;letter-spacing:1px;margin-top:4px;">BACK</button>
+    </div>
+  `;
+
+  document.body.appendChild(ov);
+
+  ov.querySelector('#storeBackBtn').addEventListener('click', () => { ov.remove(); showModeSelect(); });
+
+  // Wire up item clicks
+  ov.querySelectorAll('.store-item').forEach(el => {
+    const itemId = el.dataset.id;
+    const item = STORE_ITEMS.find(i => i.id === itemId);
+    if (!item || isOwned(itemId) || available < item.cost) return;
+    el.addEventListener('click', () => {
+      showTradeConfirm(item, () => { ov.remove(); showTradeScreen(); });
+    });
+  });
+}
+
+
+function showTradeConfirm(item, onComplete) {
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:600;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;';
+  const panel = document.createElement('div');
+  panel.style.cssText = "background:linear-gradient(160deg,#1a1206,#0f0a04);border:1px solid rgba(200,150,60,0.4);border-radius:4px;padding:28px 22px;width:min(300px,88vw);display:flex;flex-direction:column;align-items:center;gap:14px;box-shadow:0 8px 40px rgba(0,0,0,0.8);font-family:'Lato',sans-serif;text-align:center;";
+  panel.innerHTML = `
+    <div style="font-size:32px;">🤝</div>
+    <div style="font-family:'Cinzel',serif;font-size:14px;font-weight:700;color:#c8963c;letter-spacing:1px;">${item.name}</div>
+    <div style="color:rgba(200,160,80,0.6);font-size:12px;line-height:1.8;">${item.desc}</div>
+    <div style="color:rgba(200,160,80,0.5);font-size:12px;">Trade <strong style="color:#c8963c;">${item.cost} 💎</strong></div>
+    <button id="tradeYesBtn" style="width:100%;background:linear-gradient(180deg,rgba(60,40,10,0.98),rgba(40,25,5,0.99));border:1px solid rgba(200,150,60,0.6);color:#c8963c;font-family:'Cinzel',serif;font-weight:700;font-size:13px;letter-spacing:1px;padding:13px;cursor:pointer;border-radius:3px;">MAKE THE TRADE</button>
+    <button id="tradeNoBtn" style="background:none;border:none;color:rgba(220,220,220,0.7);font-family:'Cinzel',serif;font-size:11px;cursor:pointer;letter-spacing:1px;">CANCEL</button>
+  `;
+  ov.appendChild(panel);
+  document.body.appendChild(ov);
+
+  panel.querySelector('#tradeYesBtn').addEventListener('click', () => {
+    spendDiamonds(item.cost);
+    ownItem(item.id);
+    updateTotalDiamondDisplay();
+    ov.remove();
+    shatterUnlock(null, 'full_builder', () => {});
+    if (onComplete) onComplete();
+    showToast(`✓ ${item.name} acquired`, '#c8963c');
+  });
+  panel.querySelector('#tradeNoBtn').addEventListener('click', () => ov.remove());
+  ov.addEventListener('click', e => { if(e.target === ov) ov.remove(); });
 }
 
 function showLeaderboard() {
