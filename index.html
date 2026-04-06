@@ -1712,7 +1712,7 @@ function drawDiamondBrick(c,b){ drawBrickImage(c,b,'diamond'); }
 function drawWhiteBrick(c,b){ drawBrickImage(c,b,'white'); }
 function drawSkullBrick(c,b){ drawBrickImage(c,b,'skull'); }
 function drawReverseBrick(c,b){ drawBrickImage(c,b,'reverse'); }
-function drawBombBrick(c,b) { drawBrickImage(c, b, isOwned('skin_dynamite') ? 'dynamite' : 'bomb'); }
+function drawBombBrick(c,b) { drawBrickImage(c,b,'bomb'); }
 
 function drawBrick(c,b){
   if(b.isSteel)        drawSteelBrick(c,b);
@@ -1736,21 +1736,42 @@ function drawPlacedBomb(c, bomb){
   const isDetonator = bomb.timer===Infinity;
 
   if(isDetonator){
-    // Detonator charge - steady red pulse, no fuse
-    const pulse=0.5+0.5*Math.sin(t*3);
-    c.fillStyle=`rgba(220,0,0,${0.15+0.15*pulse})`;
-    c.beginPath(); c.arc(cx,cy,sc*1.4,0,Math.PI*2); c.fill();
-    // Red brick body
-    c.beginPath(); c.arc(cx,cy,sc*0.78,0,Math.PI*2);
-    const bg=c.createRadialGradient(cx-sc*0.2,cy-sc*0.1,0,cx,cy,sc*0.78);
-    bg.addColorStop(0,'#cc2222'); bg.addColorStop(0.5,'#881111'); bg.addColorStop(1,'#440000');
-    c.fillStyle=bg; c.fill();
-    c.strokeStyle='rgba(0,0,0,0.8)'; c.lineWidth=sc*0.08; c.stroke(); c.lineWidth=1;
-    // ! symbol
-    c.fillStyle=`rgba(255,255,255,${0.6+0.4*pulse})`;
-    c.font=`bold ${Math.floor(sc*1.2)}px Arial`;
-    c.textAlign='center'; c.textBaseline='middle';
-    c.fillText('!', cx, cy);
+    // Pulse between bomb image and red ! every ~0.8 seconds
+    const cycleSpeed = 2.5;
+    const phase = (Math.sin(t * cycleSpeed) + 1) / 2; // 0 to 1
+    const showBomb = phase > 0.5;
+
+    if(showBomb){
+      // Standard bomb look - no fuse, no countdown
+      const pulse = (phase - 0.5) * 2; // 0→1 as we move into bomb phase
+      c.globalAlpha = 0.4 + 0.6 * pulse;
+      // Bomb body
+      c.beginPath(); c.arc(cx, cy+sc*0.1, sc*0.78, 0, Math.PI*2);
+      const bg = c.createRadialGradient(cx-sc*0.2, cy-sc*0.1, 0, cx, cy+sc*0.1, sc*0.78);
+      bg.addColorStop(0,'#666'); bg.addColorStop(0.5,'#222'); bg.addColorStop(1,'#111');
+      c.fillStyle = bg; c.fill();
+      c.strokeStyle = 'rgba(0,0,0,0.8)'; c.lineWidth = sc*0.08; c.stroke(); c.lineWidth = 1;
+      // Shine
+      c.fillStyle = 'rgba(255,255,255,0.2)';
+      c.beginPath(); c.ellipse(cx-sc*0.25, cy-sc*0.25, sc*0.28, sc*0.18, -0.5, 0, Math.PI*2); c.fill();
+      c.globalAlpha = 1;
+    } else {
+      // Red ! look
+      const pulse = (0.5 - phase) * 2; // 0→1 as we move into ! phase
+      c.globalAlpha = 0.4 + 0.6 * pulse;
+      c.fillStyle = `rgba(220,0,0,0.25)`;
+      c.beginPath(); c.arc(cx, cy, sc*1.4, 0, Math.PI*2); c.fill();
+      c.beginPath(); c.arc(cx, cy, sc*0.78, 0, Math.PI*2);
+      const bg = c.createRadialGradient(cx-sc*0.2, cy-sc*0.1, 0, cx, cy, sc*0.78);
+      bg.addColorStop(0,'#cc2222'); bg.addColorStop(0.5,'#881111'); bg.addColorStop(1,'#440000');
+      c.fillStyle = bg; c.fill();
+      c.strokeStyle = 'rgba(0,0,0,0.8)'; c.lineWidth = sc*0.08; c.stroke(); c.lineWidth = 1;
+      c.fillStyle = 'rgba(255,255,255,0.9)';
+      c.font = `bold ${Math.floor(sc*1.2)}px Arial`;
+      c.textAlign = 'center'; c.textBaseline = 'middle';
+      c.fillText('!', cx, cy);
+      c.globalAlpha = 1;
+    }
     return;
   }
 
