@@ -716,12 +716,20 @@ async function syncQuestOrderToCloud(order) {
         'Content-Type': 'application/json',
         'apikey': SUPA_KEY,
         'Authorization': `Bearer ${token}`,
-        'Prefer': 'resolution=merge-duplicates'
+        'Prefer': 'resolution=merge-duplicates,return=minimal'
       },
       body: JSON.stringify({ key: 'quest_order', value: order, updated_at: new Date().toISOString() })
     });
-    if (!res.ok) console.warn('Quest order sync failed:', res.status, await res.text());
-  } catch(e) { console.warn('Quest order sync error:', e); }
+    if (!res.ok) {
+      const errText = await res.text();
+      console.error('Quest order sync failed:', res.status, errText);
+      throw new Error(`${res.status}: ${errText}`);
+    }
+    console.log('Quest order synced:', order);
+  } catch(e) {
+    console.error('Quest order sync error:', e);
+    throw e;
+  }
 }
 
 async function loadQuestOrderFromCloud() {
@@ -1192,7 +1200,7 @@ function showSharedMapIntro(levelData){
     <div style="display:flex;flex-direction:column;gap:10px;">
       <div style="display:flex;align-items:flex-start;gap:10px;">
         <span style="font-size:18px;flex-shrink:0;">💎</span>
-        <span style="color:#c9a84c;font-size:12px;line-height:1.6;"><strong style="color:#f5c842;">Collect all diamonds</strong> to escape the level - you don't have to clear all the bricks if there are diamonds</span>
+        <span style="color:#c9a84c;font-size:12px;line-height:1.6;"><strong style="color:#f5c842;">Find the exit</strong> to escape — collect diamonds along the way to earn more currency</span>
       </div>
       <div style="display:flex;align-items:flex-start;gap:10px;">
         <span style="font-size:18px;flex-shrink:0;">👆</span>
@@ -6425,7 +6433,10 @@ function showModeSelect(){
   showTopBarBtns(false);
   const available = getAvailableDiamonds();
   const canAfford = (feature) => !isUnlocked(feature) && available >= UNLOCK_COSTS[feature];
-  const featuredSeries = HARDCODED_SERIES[0];
+  const featuredName = getFeaturedSeriesName();
+  const featuredSeries = savedSeries().find(s => s.name === featuredName)
+                      || HARDCODED_SERIES.find(s => s.name === featuredName)
+                      || HARDCODED_SERIES[0];
   const seriesButtons = featuredSeries ? (()=>{
     const s = featuredSeries;
     const id = 'modeHardcoded0';
@@ -6690,12 +6701,15 @@ function showModeSelect(){
     showChallengesScreen();
   });
 
-  // Featured quest button (series index 0 only)
+  // Featured quest button - look up by name at click time so cloud updates are reflected
   const featuredBtn = document.getElementById('modeHardcoded0');
-  if(featuredBtn && HARDCODED_SERIES[0]){
+  if(featuredBtn){
     featuredBtn.addEventListener('click', ()=>{
-      const live = savedSeries().find(x=>x.name===HARDCODED_SERIES[0].name) || HARDCODED_SERIES[0];
-      hideMessage(); playSeries(live);
+      const featuredName = getFeaturedSeriesName();
+      const live = savedSeries().find(x => x.name === featuredName)
+                || HARDCODED_SERIES.find(x => x.name === featuredName)
+                || HARDCODED_SERIES[0];
+      if(live){ hideMessage(); playSeries(live); }
     });
   }
   document.getElementById('modeBreakout').addEventListener('click',()=>{
@@ -7524,7 +7538,7 @@ function showHowToPlay(){
     <div style="display:flex;flex-direction:column;gap:10px;">
       <div style="display:flex;align-items:flex-start;gap:10px;">
         <span style="font-size:18px;flex-shrink:0;">💎</span>
-        <span style="color:#c9a84c;font-size:12px;line-height:1.6;"><strong style="color:#f5c842;">Collect all diamonds</strong> to escape the level - you don't have to clear all the bricks if there are diamonds</span>
+        <span style="color:#c9a84c;font-size:12px;line-height:1.6;"><strong style="color:#f5c842;">Find the exit</strong> to escape — collect diamonds along the way to earn more currency</span>
       </div>
       <div style="display:flex;align-items:flex-start;gap:10px;">
         <span style="font-size:18px;flex-shrink:0;">👆</span>
@@ -9222,16 +9236,15 @@ async function syncChallenges() {
 
 // Kick off the game loop and show home screen
 requestAnimationFrame(loop);
-Promise.all([
-  loadQuestOrderFromCloud().catch(() => {}),
-  loadActiveSeries().catch(() => {})
-]).then(() => {
-  initAuth().then(() => {
-    updateAuthUI();
-    updateTotalDiamondDisplay();
-    showModeSelect();
-  });
+// Show app immediately, load cloud data in background
+initAuth().then(() => {
+  updateAuthUI();
+  updateTotalDiamondDisplay();
+  showModeSelect();
 });
+// Load cloud data after UI is shown
+loadQuestOrderFromCloud().catch(() => {});
+loadActiveSeries().catch(() => {});
 
 </script>
 </body>
