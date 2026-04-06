@@ -1731,11 +1731,32 @@ function drawPlacedBomb(c, bomb){
   const bw=BRICK_W, bh=BRICK_H;
   const bx=bomb.col*bw, by=bomb.row*bh;
   const cx=bx+bw/2, cy=by+bh/2;
-  const frac=Math.max(0,bomb.timer/2500);
   const t=performance.now()*0.003;
+  const sc=Math.min(bw,bh)*0.38;
+  const isDetonator = bomb.timer===Infinity;
+
+  if(isDetonator){
+    // Detonator charge - steady red pulse, no fuse
+    const pulse=0.5+0.5*Math.sin(t*3);
+    c.fillStyle=`rgba(220,0,0,${0.15+0.15*pulse})`;
+    c.beginPath(); c.arc(cx,cy,sc*1.4,0,Math.PI*2); c.fill();
+    // Red brick body
+    c.beginPath(); c.arc(cx,cy,sc*0.78,0,Math.PI*2);
+    const bg=c.createRadialGradient(cx-sc*0.2,cy-sc*0.1,0,cx,cy,sc*0.78);
+    bg.addColorStop(0,'#cc2222'); bg.addColorStop(0.5,'#881111'); bg.addColorStop(1,'#440000');
+    c.fillStyle=bg; c.fill();
+    c.strokeStyle='rgba(0,0,0,0.8)'; c.lineWidth=sc*0.08; c.stroke(); c.lineWidth=1;
+    // ! symbol
+    c.fillStyle=`rgba(255,255,255,${0.6+0.4*pulse})`;
+    c.font=`bold ${Math.floor(sc*1.2)}px Arial`;
+    c.textAlign='center'; c.textBaseline='middle';
+    c.fillText('!', cx, cy);
+    return;
+  }
+
+  const frac=Math.max(0,bomb.timer/2500);
   const speed=4+8*(1-frac);
   const pulse=0.5+0.5*Math.sin(t*speed);
-  const sc=Math.min(bw,bh)*0.38;
 
   // Pulsing glow
   c.fillStyle=`rgba(255,80,0,${0.12+0.18*pulse})`;
@@ -2864,6 +2885,7 @@ function update(dt){
   // Tick active bombs - collect detonations first, then process
   const toDetonate=[];
   activeBombs=activeBombs.filter(bomb=>{
+    if(bomb.timer===Infinity) return true; // detonator - sits until triggered
     bomb.timer-=dt*16.67;
     if(bomb.timer<=0){ toDetonate.push(bomb); return false; }
     return true;
@@ -3354,21 +3376,29 @@ function updateMoveFlags(){
         const stillLeft  = Object.values(activeTouches).some(s=>s==='left');
         const stillRight = Object.values(activeTouches).some(s=>s==='right');
         if(!stillLeft && !stillRight && heldDuration>=80 && bothSidesHeld){
+          const hasDetonator = isOwned('skin_dynamite');
           if(bombsHeld>0 && gameRunning && ballLaunched){
             const col=Math.round((ball.x-BRICK_W/2)/BRICK_W);
             const row=Math.round((ball.y-BRICK_H/2)/BRICK_H);
             const safeCol=Math.max(0,Math.min(BRICK_COLS-1,col));
             const safeRow=Math.max(0,Math.min(BRICK_ROWS-1,row));
-            const bombObj={col:safeCol,row:safeRow,timer:2500,fuseInterval:null};
-            // Start fuse ticking sound
-            bombObj.fuseInterval = setInterval(()=>{
+            const bombObj={col:safeCol,row:safeRow,timer:hasDetonator ? Infinity : 2500,fuseInterval:null};
+            if(!hasDetonator){
+              bombObj.fuseInterval = setInterval(()=>{
               if(bombObj.timer <= 0) clearInterval(bombObj.fuseInterval);
-            }, 180);
+              }, 180);
+            }
             activeBombs.push(bombObj);
             bombsHeld--;
             bombDisplay.textContent=bombsHeld;
             if(bombsHeld===0) bombHud.style.display='none';
             spawnParticles(safeCol*BRICK_W+BRICK_W/2,safeRow*BRICK_H+BRICK_H/2,'#ff6600',10);
+          } else if(hasDetonator && bombsHeld===0 && activeBombs.length>0 && gameRunning && ballLaunched){
+            // Detonate all planted charges
+            const toBlast=[...activeBombs];
+            activeBombs=[];
+            toBlast.forEach(bomb=>detonateBomb(bomb));
+            showToast('💥 DETONATED!', '#ff6600');
           }
         }
         bothSidesHeld=false;
@@ -3377,21 +3407,21 @@ function updateMoveFlags(){
   }
 }
 
+const touchStartPos = {}; // track start position per touch id
+
 gameArea.addEventListener('touchstart', e=>{
   if(builderOpen) return;
   e.preventDefault();
   for(const t of e.changedTouches){
     activeTouches[t.identifier] = getSide(t.clientX);
+    touchStartPos[t.identifier] = { x: t.clientX, y: t.clientY };
   }
   updateMoveFlags();
   if(gameRunning&&!paused&&!ballLaunched) launchBall();
-  // If on mode select screen, tapping the game area should do nothing
-  // (message box buttons handle that)
 }, {passive:false});
 
 gameArea.addEventListener('touchmove', e=>{
   e.preventDefault();
-  // Update side if finger slides across midpoint
   for(const t of e.changedTouches){
     if(activeTouches[t.identifier]!==undefined){
       activeTouches[t.identifier] = getSide(t.clientX);
@@ -3402,12 +3432,41 @@ gameArea.addEventListener('touchmove', e=>{
 
 gameArea.addEventListener('touchend', e=>{
   e.preventDefault();
-  for(const t of e.changedTouches) delete activeTouches[t.identifier];
+  if(isOwned('skin_dynamite') && activeBombs.length > 0 && gameRunning && ballLaunched){
+    const swipedDown = [];
+    for(const t of e.changedTouches){
+      const start = touchStartPos[t.identifier];
+      if(start){
+        const dy = t.clientY - start.y;
+        const dx = Math.abs(t.clientX - start.x);
+        if(dy >= 45 && dx < 60) swipedDown.push(getSide(start.x));
+      }
+    }
+    if(swipedDown.length >= 2 || (swipedDown.includes('left') && swipedDown.includes('right'))){
+      // Both sides swiped down - detonate ALL
+      const toBlast = [...activeBombs];
+      activeBombs = [];
+      toBlast.forEach(bomb => detonateBomb(bomb));
+      showToast('💥 ALL DETONATED!', '#ff6600');
+    } else if(swipedDown.length === 1 && activeBombs.length > 0){
+      // Single side swipe - detonate oldest (FIFO)
+      const bomb = activeBombs.shift();
+      detonateBomb(bomb);
+      if(activeBombs.length > 0) showToast(`💥 ${activeBombs.length} charge${activeBombs.length!==1?'s':''} remaining`, '#ff6600');
+    }
+  }
+  for(const t of e.changedTouches){
+    delete activeTouches[t.identifier];
+    delete touchStartPos[t.identifier];
+  }
   updateMoveFlags();
 }, {passive:false});
 
 gameArea.addEventListener('touchcancel', e=>{
-  for(const t of e.changedTouches) delete activeTouches[t.identifier];
+  for(const t of e.changedTouches){
+    delete activeTouches[t.identifier];
+    delete touchStartPos[t.identifier];
+  }
   updateMoveFlags();
 }, {passive:false});
 
@@ -7996,7 +8055,7 @@ const STORE_ITEMS = [
   { id:'trail_purple', name:'Purple Trail', desc:'Glowing streak when your ball is purple', cost:10, type:'cosmetic', category:'trails', color:'#cc44ff', ballColor:'#9b5de5' },
   { id:'trail_yellow', name:'Yellow Trail', desc:'Glowing streak when your ball is yellow', cost:10, type:'cosmetic', category:'trails', color:'#ffaa00', ballColor:'#f4a261' },
   // Gear reskins (permanent)
-  { id:'skin_dynamite', name:'Dynamite',    desc:'Replaces bombs with sticks of dynamite',cost:20, type:'cosmetic', category:'gear',   emoji:'🧨' },
+  { id:'skin_dynamite', name:'Detonator',    desc:'Plant charges, then double-press to detonate all at once',cost:20, type:'cosmetic', category:'gear',   emoji:'🔴' },
   // Backgrounds (permanent)
   { id:'bg_shipwreck',  name:'Shipwreck',   desc:'Unlock the Shipwreck background',       cost:15, type:'cosmetic', category:'backgrounds', bg:'Shipwreck' },
   { id:'bg_mine',       name:'Old Mine',    desc:'Unlock the Old Mine background',        cost:15, type:'cosmetic', category:'backgrounds', bg:'Old Mine' },
