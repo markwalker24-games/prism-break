@@ -1315,90 +1315,109 @@ function buildGuardModeMap() {
   const result = [];
   const mk = (c, r, opts={}) => ({
     col:c, row:r, x:c*BRICK_W, y:r*BRICK_H, w:BRICK_W, h:BRICK_H,
-    color: opts.color || COLORS[Math.floor(Math.random()*COLORS.length)],
-    isPaint:!!opts.isPaint, isSteel:!!opts.isSteel,
+    color: opts.color || '#ffffff',
+    isPaint:false, isSteel:!!opts.isSteel,
     isKey:!!opts.isKey, isLock:!!opts.isLock,
     isDiamond:!!opts.isDiamond, isWhite:!!opts.isWhite,
-    isSkull:!!opts.isSkull, isReverse:false, isBomb:!!opts.isBomb,
+    isSkull:false, isReverse:false, isBomb:!!opts.isBomb,
     hit:0, cooldown:0
   });
 
-  // Build steel perimeter
+  const occupied = new Set();
+  const place = (b) => { occupied.add(`${b.col},${b.row}`); result.push(b); };
+  const isFree = (c, r) => c > 0 && c < BRICK_COLS-1 && r > 0 && r < BRICK_ROWS-1 && !occupied.has(`${c},${r}`);
+
+  // Steel perimeter
   for (let c = 0; c < BRICK_COLS; c++) {
-    result.push(mk(c, 0, { isSteel:true }));           // top
-    result.push(mk(c, BRICK_ROWS-1, { isSteel:true })); // bottom
+    place(mk(c, 0, { isSteel:true }));
+    place(mk(c, BRICK_ROWS-1, { isSteel:true }));
   }
   for (let r = 1; r < BRICK_ROWS-1; r++) {
-    result.push(mk(0, r, { isSteel:true }));             // left
-    result.push(mk(BRICK_COLS-1, r, { isSteel:true }));  // right
+    place(mk(0, r, { isSteel:true }));
+    place(mk(BRICK_COLS-1, r, { isSteel:true }));
   }
 
-  // Place the lock randomly in the perimeter (not corners)
-  // Pick a side: 0=top, 1=bottom, 2=left, 3=right
+  // Random lock in perimeter
   const side = Math.floor(Math.random() * 4);
   let lockCol, lockRow;
-  if (side === 0) { lockCol = 1 + Math.floor(Math.random()*(BRICK_COLS-2)); lockRow = 0; }
+  if (side === 0)      { lockCol = 1 + Math.floor(Math.random()*(BRICK_COLS-2)); lockRow = 0; }
   else if (side === 1) { lockCol = 1 + Math.floor(Math.random()*(BRICK_COLS-2)); lockRow = BRICK_ROWS-1; }
   else if (side === 2) { lockCol = 0; lockRow = 1 + Math.floor(Math.random()*(BRICK_ROWS-2)); }
-  else { lockCol = BRICK_COLS-1; lockRow = 1 + Math.floor(Math.random()*(BRICK_ROWS-2)); }
-
-  // Replace the steel brick at that position with a lock
+  else                 { lockCol = BRICK_COLS-1; lockRow = 1 + Math.floor(Math.random()*(BRICK_ROWS-2)); }
   const lockIdx = result.findIndex(b => b.col === lockCol && b.row === lockRow);
   if (lockIdx >= 0) result.splice(lockIdx, 1);
-  result.push(mk(lockCol, lockRow, { isLock:true, color:'#b8860b' }));
+  occupied.delete(`${lockCol},${lockRow}`);
+  place(mk(lockCol, lockRow, { isLock:true, color:'#b8860b' }));
 
-  // Interior maze - scattered colored bricks, paint bricks, some skulls, a bomb
-  const occupied = new Set(result.map(b => `${b.col},${b.row}`));
-  const isFree = (c, r) => !occupied.has(`${c},${r}`);
-  const place = (b) => { occupied.add(`${b.col},${b.row}`); result.push(b); };
+  // Define protected zones - these must stay clear for gameplay
+  // Bomb corner: bottom-right, needs a clear 4x4 area + approach corridor
+  const bombCornerC = BRICK_COLS - 3;
+  const bombCornerR = BRICK_ROWS - 4;
 
-  // Add some paint bricks for color mechanic
-  const paintColors = COLORS.slice(0, 3);
-  paintColors.forEach(color => {
-    for (let attempt = 0; attempt < 20; attempt++) {
-      const c = 1 + Math.floor(Math.random()*(BRICK_COLS-2));
-      const r = 1 + Math.floor(Math.random()*(BRICK_ROWS-2));
-      if (isFree(c,r)) { place(mk(c, r, { isPaint:true, color })); break; }
+  // Protected cells: around bombs and a corridor leading to them
+  const protected_ = new Set();
+  // Clear zone around bomb cluster (3x4)
+  for (let dc = -2; dc <= 1; dc++)
+    for (let dr = -3; dr <= 1; dr++)
+      protected_.add(`${bombCornerC+dc},${bombCornerR+dr}`);
+  // Approach corridor from left side of bomb area
+  for (let c = 1; c <= bombCornerC-2; c++)
+    protected_.add(`${c},${bombCornerR-1}`);
+  // Approach corridor from top of bomb area
+  for (let r = Math.floor(BRICK_ROWS/2); r <= bombCornerR-2; r++)
+    protected_.add(`${bombCornerC-1},${r}`);
+  // Ball spawn area - upper center
+  const ballCol = Math.floor(BRICK_COLS / 2);
+  const ballRow = 3;
+  for (let dc=-2; dc<=2; dc++)
+    for (let dr=-1; dr<=2; dr++)
+      protected_.add(`${ballCol+dc},${ballRow+dr}`);
+
+  const isProtected = (c, r) => protected_.has(`${c},${r}`);
+
+  // Place short wall segments - skip protected zones
+  const segmentAttempts = 30;
+  for (let i = 0; i < segmentAttempts; i++) {
+    const horizontal = Math.random() < 0.5;
+    const segLen = 2 + Math.floor(Math.random() * 2); // 2-3 bricks
+    const startC = 1 + Math.floor(Math.random() * (BRICK_COLS - 3));
+    const startR = 2 + Math.floor(Math.random() * (BRICK_ROWS - 5));
+
+    // Check entire segment fits without touching protected zones
+    let fits = true;
+    for (let j = 0; j < segLen; j++) {
+      const c = horizontal ? startC + j : startC;
+      const r = horizontal ? startR : startR + j;
+      if (!isFree(c, r) || isProtected(c, r)) { fits = false; break; }
     }
-  });
+    if (!fits) continue;
 
-  // Add colored bricks
-  for (let i = 0; i < Math.floor(BRICK_COLS * BRICK_ROWS * 0.18); i++) {
-    const c = 1 + Math.floor(Math.random()*(BRICK_COLS-2));
-    const r = 1 + Math.floor(Math.random()*(BRICK_ROWS-2));
-    if (isFree(c,r)) {
-      const color = COLORS[Math.floor(Math.random()*COLORS.length)];
-      place(mk(c, r, { color }));
+    for (let j = 0; j < segLen; j++) {
+      const c = horizontal ? startC + j : startC;
+      const r = horizontal ? startR : startR + j;
+      const isWhite = Math.random() < 0.15;
+      place(mk(c, r, isWhite ? { isWhite:true } : { isSteel:true }));
     }
   }
 
-  // Add some steel interior obstacles
-  for (let i = 0; i < 6; i++) {
-    const c = 1 + Math.floor(Math.random()*(BRICK_COLS-2));
-    const r = 1 + Math.floor(Math.random()*(BRICK_ROWS-2));
-    if (isFree(c,r)) place(mk(c, r, { isSteel:true }));
-  }
-
-  // Add a bomb so player can bomb the guard
-  for (let attempt = 0; attempt < 30; attempt++) {
-    const c = 2 + Math.floor(Math.random()*(BRICK_COLS-4));
-    const r = 2 + Math.floor(Math.random()*(BRICK_ROWS-4));
-    if (isFree(c,r)) { place(mk(c, r, { isBomb:true })); break; }
-  }
-
-  // Make sure ball spawn area is clear (center-ish)
-  const ballCol = Math.floor(BRICK_COLS/2);
-  const ballRow = Math.floor(BRICK_ROWS*0.7);
-  for (let dc=-1; dc<=1; dc++) {
-    for (let dr=-1; dr<=1; dr++) {
-      const bc = ballCol+dc, br = ballRow+dr;
-      const idx = result.findIndex(b => b.col===bc && b.row===br && !b.isSteel && !b.isLock);
-      if (idx>=0) result.splice(idx,1);
+  // Place bomb pile in the cleared corner
+  const bombCount = 5 + Math.floor(Math.random() * 3);
+  let placed = 0;
+  for (let dc = 0; dc >= -1 && placed < bombCount; dc--) {
+    for (let dr = 0; dr >= -2 && placed < bombCount; dr--) {
+      const bc = bombCornerC + dc, br = bombCornerR + dr;
+      if (isFree(bc, br)) { place(mk(bc, br, { isBomb:true })); placed++; }
     }
+  }
+  for (let attempt = 0; attempt < 20 && placed < bombCount; attempt++) {
+    const bc = bombCornerC - 1 + Math.floor(Math.random()*2);
+    const br = bombCornerR - 2 + Math.floor(Math.random()*3);
+    if (isFree(bc, br)) { place(mk(bc, br, { isBomb:true })); placed++; }
   }
 
   return { bricks: result, ballCol, ballRow, lockCol, lockRow };
 }
+
 
 function buildRandomBricks(mode) {
   const result=[];
@@ -1838,25 +1857,113 @@ function drawBall(c,b){
   const bl=parseInt(hex.substring(4,6),16);
   const x=b.x, y=b.y, R=BALL_R;
 
-  // Trail - show glowing streak if player owns the trail for current ball color
+  // Trail - comet tail with per-color personality
   const ownedTrails = STORE_ITEMS.filter(i => i.category === 'trails' && isOwned(i.id));
   const currentBallColor = (b.color || '#ffffff').toLowerCase();
   const matchingTrail = ownedTrails.find(i => i.ballColor && i.ballColor.toLowerCase() === currentBallColor);
-  const trailColor = matchingTrail ? matchingTrail.color : ballColor;
-  const trailHex = trailColor.replace('#','');
-  const tr_r = parseInt(trailHex.substring(0,2),16);
-  const tr_g = parseInt(trailHex.substring(2,4),16);
-  const tr_b = parseInt(trailHex.substring(4,6),16);
 
-  for(let i=0;i<b.trail.length;i++){
-    const t=b.trail[i], alpha=(i/b.trail.length)*(matchingTrail ? 0.5 : 0.2), rad=R*(i/b.trail.length)*0.85;
-    c.globalAlpha=alpha;
-    c.fillStyle=trailColor;
-    if(matchingTrail){ c.shadowBlur=6; c.shadowColor=trailColor; }
-    c.beginPath(); c.arc(t.x,t.y,rad,0,Math.PI*2); c.fill();
-    c.shadowBlur=0;
+  if (matchingTrail && b.trail.length > 1) {
+    const tc = matchingTrail.color;
+    const tid = matchingTrail.id;
+    const tNow = performance.now() * 0.001;
+    const trailLen = b.trail.length;
+
+    c.save();
+
+    for (let i = 0; i < trailLen; i++) {
+      const t = b.trail[i];
+      const frac = i / trailLen; // 0 = newest, 1 = oldest
+      const ageFrac = 1 - frac;  // 1 = newest, 0 = oldest
+
+      // Size: newest point is small, oldest is largest (comet tail widens at back)
+      const blobR = R * (0.3 + 1.4 * frac);
+      const alpha = ageFrac * ageFrac * 0.7; // fade toward head
+
+      if (tid === 'trail_red') {
+        // Red: fiery - orange core, red outer
+        const grad = c.createRadialGradient(t.x, t.y, 0, t.x, t.y, blobR);
+        grad.addColorStop(0, `rgba(255,220,100,${alpha})`);
+        grad.addColorStop(0.4, `rgba(255,80,0,${alpha * 0.8})`);
+        grad.addColorStop(1, `rgba(180,0,0,0)`);
+        c.fillStyle = grad;
+        c.shadowBlur = 10; c.shadowColor = '#ff4400';
+        c.beginPath(); c.arc(t.x, t.y, blobR, 0, Math.PI*2); c.fill();
+        // Occasional spark particles
+        if (i > trailLen * 0.3 && Math.random() < 0.3) {
+          const sx = t.x + (Math.random()-0.5)*blobR*2;
+          const sy = t.y + (Math.random()-0.5)*blobR*2;
+          c.fillStyle = `rgba(255,${Math.floor(100+Math.random()*155)},0,${alpha*0.6})`;
+          c.beginPath(); c.arc(sx, sy, R*0.15, 0, Math.PI*2); c.fill();
+        }
+
+      } else if (tid === 'trail_teal') {
+        // Teal: electric - bright cyan bolts
+        const grad = c.createRadialGradient(t.x, t.y, 0, t.x, t.y, blobR);
+        grad.addColorStop(0, `rgba(180,255,255,${alpha})`);
+        grad.addColorStop(0.5, `rgba(0,200,255,${alpha * 0.7})`);
+        grad.addColorStop(1, `rgba(0,80,180,0)`);
+        c.fillStyle = grad;
+        c.shadowBlur = 12; c.shadowColor = '#00aaff';
+        c.beginPath(); c.arc(t.x, t.y, blobR, 0, Math.PI*2); c.fill();
+
+      } else if (tid === 'trail_purple') {
+        // Purple: smoky/mystical - dark haze with bright core
+        const grad = c.createRadialGradient(t.x, t.y, 0, t.x, t.y, blobR * 1.3);
+        grad.addColorStop(0, `rgba(220,180,255,${alpha * 0.9})`);
+        grad.addColorStop(0.3, `rgba(140,0,255,${alpha * 0.6})`);
+        grad.addColorStop(0.7, `rgba(60,0,120,${alpha * 0.3})`);
+        grad.addColorStop(1, `rgba(20,0,40,0)`);
+        c.fillStyle = grad;
+        c.shadowBlur = 14; c.shadowColor = '#9933ff';
+        c.beginPath(); c.arc(t.x, t.y, blobR * 1.3, 0, Math.PI*2); c.fill();
+
+      } else if (tid === 'trail_green') {
+        // Green: toxic/acid - bright neon streaks
+        const grad = c.createRadialGradient(t.x, t.y, 0, t.x, t.y, blobR);
+        grad.addColorStop(0, `rgba(200,255,100,${alpha})`);
+        grad.addColorStop(0.5, `rgba(80,220,0,${alpha * 0.7})`);
+        grad.addColorStop(1, `rgba(0,80,0,0)`);
+        c.fillStyle = grad;
+        c.shadowBlur = 10; c.shadowColor = '#66ff00';
+        c.beginPath(); c.arc(t.x, t.y, blobR, 0, Math.PI*2); c.fill();
+
+      } else if (tid === 'trail_yellow') {
+        // Yellow: lightning/electric - sharp bright bolts
+        const grad = c.createRadialGradient(t.x, t.y, 0, t.x, t.y, blobR);
+        grad.addColorStop(0, `rgba(255,255,180,${alpha})`);
+        grad.addColorStop(0.4, `rgba(255,180,0,${alpha * 0.8})`);
+        grad.addColorStop(1, `rgba(180,80,0,0)`);
+        c.fillStyle = grad;
+        c.shadowBlur = 12; c.shadowColor = '#ffaa00';
+        c.beginPath(); c.arc(t.x, t.y, blobR, 0, Math.PI*2); c.fill();
+
+      } else if (tid === 'trail_white') {
+        // White: icy/crystal - cool blue-white shimmer
+        const shimmer = 0.7 + 0.3 * Math.sin(tNow * 8 + i * 0.5);
+        const grad = c.createRadialGradient(t.x, t.y, 0, t.x, t.y, blobR);
+        grad.addColorStop(0, `rgba(220,240,255,${alpha * shimmer})`);
+        grad.addColorStop(0.5, `rgba(160,210,255,${alpha * 0.5})`);
+        grad.addColorStop(1, `rgba(100,160,255,0)`);
+        c.fillStyle = grad;
+        c.shadowBlur = 8; c.shadowColor = '#aaddff';
+        c.beginPath(); c.arc(t.x, t.y, blobR, 0, Math.PI*2); c.fill();
+      }
+    }
+
+    c.shadowBlur = 0;
+    c.restore();
+
+  } else {
+    // Default subtle trail - no upgrade
+    for(let i=0;i<b.trail.length;i++){
+      const t=b.trail[i], alpha=(i/b.trail.length)*0.15, rad=R*(i/b.trail.length)*0.7;
+      c.globalAlpha=alpha; c.fillStyle=ballColor;
+      c.beginPath(); c.arc(t.x,t.y,rad,0,Math.PI*2); c.fill();
+    }
+    c.globalAlpha=1;
   }
-  c.globalAlpha=1;
+
+  const trailColor = matchingTrail ? matchingTrail.color : ballColor;
 
   // Ground glow halo
   const groundGlow=c.createRadialGradient(x,y,0,x,y,R*2.2);
@@ -2113,6 +2220,11 @@ function resolveBrick(b){
     spawnParticles(b.x+b.w/2,b.y+b.h/2,'#ffd700',16);
     bricks.splice(bricks.indexOf(b),1);
     queueBrickTip('key', 'images/brick_key.png', 'Key!', 'You collected a Key! These open Locks. There\'s no limit to how many you can collect.');
+    // In Prism Guard mode - picking up the key triggers a second guard!
+    if (gameMode === 'blackout') {
+      showToast('⚠️ Second guard incoming!', '#ff2222');
+      setTimeout(() => { if(gameRunning) spawnGuard(); }, 1200);
+    }
   }
   else if(b.isLock){
     if(keysHeld>0){
@@ -2293,33 +2405,38 @@ function detonateBomb(bomb){
     }
   }
 
-  // Check if guard is in blast zone - drops key and respawns
-  if (guardBall && gameMode === 'blackout') {
-    const gc = Math.floor(guardBall.x / BRICK_W);
-    const gr = Math.floor(guardBall.y / BRICK_H);
-    if (affected.has(`${gc},${gr}`)) {
-      // Drop a key where the guard was
-      const keyX = guardBall.col * BRICK_W;
-      const keyY = guardBall.row * BRICK_H;
-      bricks.push({
-        col: guardBall.col, row: guardBall.row,
-        x: keyX, y: keyY, w: BRICK_W, h: BRICK_H,
-        color: '#ffd700', isPaint:false, isSteel:false,
-        isKey:true, isLock:false, isDiamond:false,
-        isWhite:false, isSkull:false, isReverse:false, isBomb:false,
-        hit:0, cooldown:0
-      });
-      // Explosion effect
-      for(let i=0;i<20;i++){
-        const a=Math.random()*Math.PI*2, s=2+Math.random()*5;
-        particles.push({x:guardBall.x,y:guardBall.y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,
-          color:'#cc00ff',life:1.0,size:2+Math.random()*4});
+  // Check if either guard is in blast zone - drops key and respawns
+  if (gameMode === 'blackout') {
+    [{ guard: guardBall, setter: (v) => { guardBall = v; } },
+     { guard: guardBall2, setter: (v) => { guardBall2 = v; } }].forEach(({ guard, setter }) => {
+      if (!guard) return;
+      const gc = Math.floor(guard.x / BRICK_W);
+      const gr = Math.floor(guard.y / BRICK_H);
+      if (affected.has(`${gc},${gr}`)) {
+        // Only first guard drops a key
+        const isFirst = guard === guardBall;
+        if (isFirst) {
+          bricks.push({
+            col: guard.col, row: guard.row,
+            x: guard.col * BRICK_W, y: guard.row * BRICK_H, w: BRICK_W, h: BRICK_H,
+            color: '#ffd700', isPaint:false, isSteel:false,
+            isKey:true, isLock:false, isDiamond:false,
+            isWhite:false, isSkull:false, isReverse:false, isBomb:false,
+            hit:0, cooldown:0
+          });
+          showToast('Guard down! Grab the key! 🔑', '#cc00ff');
+        } else {
+          showToast('Guard down!', '#cc00ff');
+        }
+        for(let i=0;i<20;i++){
+          const a=Math.random()*Math.PI*2, s=2+Math.random()*5;
+          particles.push({x:guard.x,y:guard.y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,
+            color:'#cc00ff',life:1.0,size:2+Math.random()*4});
+        }
+        setter(null);
+        setTimeout(() => { if(gameRunning && gameMode==='blackout') spawnGuard(); }, 3000);
       }
-      showToast('Guard down! Grab the key! 🔑', '#cc00ff');
-      // Respawn guard after delay
-      guardBall = null;
-      setTimeout(() => { if(gameRunning && gameMode==='blackout') spawnGuard(); }, 3000);
-    }
+    });
   }
 
   // Check if ball is in blast zone - but not if finale already triggered
@@ -2336,25 +2453,40 @@ function detonateBomb(bomb){
   });
 }
 
-let guardBall = null; // grid-walking guard for guard mode
+let guardBall = null; // primary guard
+let guardBall2 = null; // second guard - spawns when key collected
 
 function spawnGuard() {
-  // Find an open cell far from the player ball to start
+  // Find open cells that are far enough from the ball spawn position
+  const ballC = Math.floor(BRICK_COLS / 2);
+  const ballR = 3; // ball spawns upper-center
+  const minDist = 8; // minimum cell distance from player
+
   const openCells = [];
-  for (let c = 0; c < BRICK_COLS; c++) {
-    for (let r = 0; r < BRICK_ROWS; r++) {
-      const hasBrick = bricks.some(b => b.col === c && b.row === r);
-      if (!hasBrick) openCells.push({ c, r });
+  for (let c = 1; c < BRICK_COLS-1; c++) {
+    for (let r = 1; r < BRICK_ROWS-1; r++) {
+      const hasBrick = bricks.some(b => (b.col ?? Math.round(b.x/BRICK_W)) === c && (b.row ?? Math.round(b.y/BRICK_H)) === r);
+      if (hasBrick) continue;
+      const dist = Math.abs(c - ballC) + Math.abs(r - ballR);
+      if (dist >= minDist) openCells.push({ c, r });
     }
   }
+
+  // Fallback to any open cell if not enough far ones
+  if (!openCells.length) {
+    for (let c = 1; c < BRICK_COLS-1; c++) {
+      for (let r = 1; r < BRICK_ROWS-1; r++) {
+        if (!bricks.some(b => (b.col ?? Math.round(b.x/BRICK_W)) === c && (b.row ?? Math.round(b.y/BRICK_H)) === r)) {
+          openCells.push({ c, r });
+        }
+      }
+    }
+  }
+
   if (!openCells.length) return;
+  const start = openCells[Math.floor(Math.random() * openCells.length)];
 
-  // Pick a cell in the upper portion of the map
-  const topCells = openCells.filter(cell => cell.r < BRICK_ROWS * 0.4);
-  const startCells = topCells.length ? topCells : openCells;
-  const start = startCells[Math.floor(Math.random() * startCells.length)];
-
-  guardBall = {
+  const guardObj = {
     col: start.c,
     row: start.r,
     prevCol: start.c,
@@ -2363,17 +2495,17 @@ function spawnGuard() {
     y: start.r * BRICK_H + BRICK_H / 2,
     targetX: start.c * BRICK_W + BRICK_W / 2,
     targetY: start.r * BRICK_H + BRICK_H / 2,
-    // Direction: 0=right, 1=down, 2=left, 3=up
     dir: Math.floor(Math.random() * 4),
-    moveTimer: 494, // start at full so he moves on first frame
-    moveInterval: 494, // ms per cell move - 30% slower than original 380
+    moveTimer: 494,
+    moveInterval: 494,
     trail: [],
     flashlight: true,
   };
+  if (!guardBall) guardBall = guardObj;
+  else guardBall2 = guardObj;
 }
 
-function updateGuard(dt) {
-  const g = guardBall;
+function updateGuard(dt, g) {
   if (!g) return;
 
   const framems = dt * 16.67;
@@ -2488,8 +2620,12 @@ function updateGuardAlert() {
   _guardAlertFrame++;
   if (_guardAlertFrame > 25) {
     _guardAlertFrame = -1;
-    _guardAlertFrame = -1;
-    killBall();
+    if (gameMode === 'blackout') {
+      guardBall = null; guardBall2 = null;
+      endGame('guardCaught');
+    } else {
+      killBall();
+    }
   }
 }
 
@@ -2579,8 +2715,7 @@ function drawExitArrow(c) {
   });
 }
 
-function drawGuard(c) {
-  const g = guardBall;
+function drawGuard(c, g) {
   if (!g) return;
   const x = g.x, y = g.y, R = BALL_R;
   const t = performance.now() * 0.002;
@@ -2638,7 +2773,7 @@ function drawGuard(c) {
   c.globalAlpha = 1;
   c.restore();
 
-  // Detect player in flashlight - but only if no wall between guard and player
+  // Detect player in flashlight - strict line of sight check
   if (ballLaunched && ball) {
     const pdx = ball.x - x, pdy = ball.y - y;
     const pdist = Math.sqrt(pdx * pdx + pdy * pdy);
@@ -2647,9 +2782,9 @@ function drawGuard(c) {
       let angleDiff = Math.abs(playerAngle - angle);
       if (angleDiff > Math.PI) angleDiff = Math.PI * 2 - angleDiff;
       if (angleDiff < coneAngle / 2) {
-        // Check no wall between guard and player
+        // Ray must reach the player - no wall tolerance
         const wallDist = castRay(playerAngle);
-        if (pdist <= wallDist + BRICK_W) {
+        if (pdist <= wallDist) {
           guardCaughtPlayer();
         }
       }
@@ -2891,7 +3026,8 @@ function update(dt){
     if(gameOver) return;
   }
   ball.trail.push({x:ball.x,y:ball.y});
-  if(ball.trail.length>8) ball.trail.shift();
+  const maxTrail = (()=>{ const bc=(ball.color||'#ffffff').toLowerCase(); return STORE_ITEMS.some(i=>i.category==='trails'&&isOwned(i.id)&&i.ballColor&&i.ballColor.toLowerCase()===bc) ? 20 : 8; })();
+  if(ball.trail.length>maxTrail) ball.trail.shift();
 
   // Tick active bombs - collect detonations first, then process
   const toDetonate=[];
@@ -2917,7 +3053,8 @@ function update(dt){
   }
 
   // Update poison ball - freeze during respawn
-  if(guardBall && gameMode==='blackout' && !isRespawning) updateGuard(dt);
+  if(guardBall && gameMode==='blackout' && !isRespawning) updateGuard(dt, guardBall);
+  if(guardBall2 && gameMode==='blackout' && !isRespawning) updateGuard(dt, guardBall2);
 
   // Bomb regeneration - if any color bricks exist without a matching paint brick, spawn a bomb
   if(gameMode==='blackout' && gameRunning && !testingLevel && Math.random()<0.002*dt){
@@ -3074,8 +3211,11 @@ function drawTapHint(c, cx, cy, isLeft){
 }
 
 function draw(){
-  // Draw background image - fit to height, center & crop horizontally
-  if(BG_IMAGE.complete && BG_IMAGE.naturalWidth>0){
+  // Draw background
+  if (gameMode === 'blackout') {
+    // Prism Guard - pure black
+    ctx.fillStyle = '#000000'; ctx.fillRect(0,0,W,H);
+  } else if(BG_IMAGE.complete && BG_IMAGE.naturalWidth>0){
     const scaleX = W / BG_IMAGE.naturalWidth;
     const scaleY = H / BG_IMAGE.naturalHeight;
     const scale = Math.max(scaleX, scaleY);
@@ -3096,7 +3236,8 @@ function draw(){
   for(let b of bricks) drawBrick(ctx,b);
   // Draw placed bombs
   for(const bomb of activeBombs) drawPlacedBomb(ctx, bomb);
-  if(guardBall && gameMode==='blackout') drawGuard(ctx);
+  if(guardBall && gameMode==='blackout') drawGuard(ctx, guardBall);
+  if(guardBall2 && gameMode==='blackout') drawGuard(ctx, guardBall2);
   if(gameMode==='escape' && !_escaping) drawExitArrow(ctx);
   if(gameMode==='blackout') { updateGuardAlert(); drawGuardAlert(); }
   // Draw falling bricks during blackout finale
@@ -3218,7 +3359,7 @@ function startGame(levelData, forcedMode){
   editBtn.style.display = isCustomLevel ? 'block' : 'none';
   score=0; particles=[]; gameOver=false; ballLaunched=false; paused=false;
   gameStartTime=0; totalElapsed=0; portal=null; keysHeld=0; diamondsCollected=0; screenFlash=0;
-  lives=3; usedContinue=false; controlsReversed=false; fallingBricks=[]; finaleTriggered=false; finaleTimeout=null; bombsHeld=0; activeBombs=[]; bothSidesHeld=false; bothSidesTimestamp=0; isRespawning=false; poisonBall=null; guardBall=null; _guardAlertFrame=-1; _escaping=false; blownUpKeys=[]; deathFreeze=false;
+  lives=3; usedContinue=false; controlsReversed=false; fallingBricks=[]; finaleTriggered=false; finaleTimeout=null; bombsHeld=0; activeBombs=[]; bothSidesHeld=false; bothSidesTimestamp=0; isRespawning=false; poisonBall=null; guardBall=null; guardBall2=null; _guardAlertFrame=-1; _escaping=false; blownUpKeys=[]; deathFreeze=false;
   if(bothSidesReleaseTimer){ clearTimeout(bothSidesReleaseTimer); bothSidesReleaseTimer=null; }
   bombHud.style.display='none';
   renderLives();
@@ -3253,7 +3394,7 @@ function startGame(levelData, forcedMode){
       const guardMap = buildGuardModeMap();
       bricks = guardMap.bricks;
       initBall(guardMap.ballCol * BRICK_W + BRICK_W/2, guardMap.ballRow * BRICK_H + BRICK_H/2);
-      setBgKey('Metal Bunker');
+      // Pure black background handled in draw()
     } else {
       initBall();
       bricks = buildRandomBricks(forcedMode);
@@ -3266,18 +3407,18 @@ function startGame(levelData, forcedMode){
   if(levelData && levelData.background && BACKGROUNDS[levelData.background]){
     setBgKey(levelData.background);
   } else if(!levelData || !levelData.bricks){
-    // Random mode (Break Out or Blackout) — pick from owned backgrounds
-    const allBgKeys = Object.keys(BACKGROUNDS);
-    const bgItems = STORE_ITEMS.filter(i => i.category === 'backgrounds');
-    const ownedBgKeys = allBgKeys.filter(k => {
-      // Forest Path is always available
-      if (k === 'Forest Path') return true;
-      // Check if this background is owned via store
-      const storeItem = bgItems.find(i => i.bg === k);
-      return storeItem ? isOwned(storeItem.id) : false;
-    });
-    const bgKeys = ownedBgKeys.length ? ownedBgKeys : allBgKeys;
-    setBgKey(bgKeys[Math.floor(Math.random() * bgKeys.length)]);
+    // Random mode - pick from owned backgrounds (not for blackout - that's always black)
+    if (forcedMode !== 'blackout') {
+      const allBgKeys = Object.keys(BACKGROUNDS);
+      const bgItems = STORE_ITEMS.filter(i => i.category === 'backgrounds');
+      const ownedBgKeys = allBgKeys.filter(k => {
+        if (k === 'Forest Path') return true;
+        const storeItem = bgItems.find(i => i.bg === k);
+        return storeItem ? isOwned(storeItem.id) : false;
+      });
+      const bgKeys = ownedBgKeys.length ? ownedBgKeys : allBgKeys;
+      setBgKey(bgKeys[Math.floor(Math.random() * bgKeys.length)]);
+    }
   } else {
     setBgKey('Forest Path');
   }
@@ -3288,9 +3429,10 @@ function startGame(levelData, forcedMode){
   // Spawn poison ball for blackout - never during builder testing
   poisonBall = null;
   guardBall = null;
+  guardBall2 = null;
   if(gameMode==='blackout' && !testingLevel){
     guardBall = null;
-    setTimeout(()=>{ if(gameRunning) spawnGuard(); }, 2000);
+    spawnGuard();
   }
 
   // Update diamond HUD
@@ -6047,6 +6189,29 @@ function endGame(reason){
     font-family:'Lato',sans-serif;text-align:center;
   ">${inner}</div>`;
 
+  if(reason==='guardCaught'){
+    // Prism Guard caught - deduct 1 diamond
+    const current = getAvailableDiamonds();
+    if (current > 0) {
+      spendDiamonds(1);
+      updateTotalDiamondDisplay();
+    }
+    const lost = current > 0 ? 1 : 0;
+    showMessage(card(`
+      <div style="font-size:40px;filter:drop-shadow(0 0 10px rgba(255,40,0,0.6))">💎</div>
+      <div style="font-family:'Cinzel',serif;font-size:16px;color:#e55;letter-spacing:1px;text-shadow:0 0 12px rgba(220,50,30,0.5)">SHAKE DOWN</div>
+      <div style="color:rgba(180,140,80,0.65);font-size:12px;margin-top:2px;">The guard caught you and took your diamond</div>
+      ${lost > 0 ? `<div style="color:#e63946;font-size:13px;font-family:'Lato',sans-serif;margin-top:4px;">-1 💎 confiscated</div>` : '<div style="color:rgba(180,140,80,0.5);font-size:12px;margin-top:4px;">No diamonds to take</div>'}
+      <div style="display:flex;flex-direction:column;gap:8px;width:100%;margin-top:12px;">
+        <button id="guardRetryBtn" style="width:100%;padding:13px;border-radius:3px;cursor:pointer;font-family:'Cinzel',serif;font-size:13px;font-weight:600;letter-spacing:0.5px;color:#ff8866;background:rgba(40,10,5,0.95);border:1px solid rgba(200,80,50,0.5);box-shadow:0 0 8px rgba(200,80,50,0.15);touch-action:manipulation;">↺ Try Again</button>
+        <button id="guardMenuBtn" style="background:none;border:none;color:rgba(220,220,220,0.7);font-family:'Cinzel',serif;font-size:11px;cursor:pointer;letter-spacing:1px;padding:6px;touch-action:manipulation;">Main Menu</button>
+      </div>
+    `));
+    document.getElementById('guardRetryBtn').addEventListener('click', () => { hideMessage(); restartGame(); });
+    document.getElementById('guardMenuBtn').addEventListener('click', () => { hideMessage(); showModeSelect(); });
+    return;
+  }
+
   if(reason==='dead'){
     const CONTINUE_COST = 5;
     const canContinue = !usedContinue && getAvailableDiamonds() >= CONTINUE_COST;
@@ -6090,11 +6255,13 @@ function endGame(reason){
     ? `<div style="color:#00eeff;font-size:13px;font-family:'Lato',sans-serif;margin-top:2px;">💎 ${diamondsCollected}/${totalDiamondsInMap} diamonds collected</div>`
     : '';
 
-  const icon = adminMode && isEscape ? '🔓' : isEscape ? '💎' : '💥';
-  const titleText = isEscape ? 'ESCAPED!' : 'SUCCESS!';
-  const titleColor = isEscape ? '#f5c842' : '#ff9966';
-  const titleGlow = isEscape ? 'rgba(245,200,66,0.5)' : 'rgba(255,120,50,0.5)';
-  const subText = isEscape ? 'You found the exit' : 'All bricks cleared';
+  const isBlackout = gameMode === 'blackout';
+  const icon = isBlackout ? '🔓' : isEscape ? '🔓' : '💥';
+  const titleText = isBlackout ? 'ESCAPED!' : isEscape ? 'ESCAPED!' : 'SUCCESS!';
+  const titleColor = isBlackout ? '#f5c842' : isEscape ? '#f5c842' : '#ff9966';
+  const titleGlow = isBlackout ? 'rgba(245,200,66,0.5)' : isEscape ? 'rgba(245,200,66,0.5)' : 'rgba(255,120,50,0.5)';
+  const subText = isBlackout ? 'You slipped past the guard' : isEscape ? 'You found the exit' : 'All bricks cleared';
+  const guardReward = isBlackout ? `<div style="color:#f5c842;font-size:13px;font-family:'Lato',sans-serif;margin-top:4px;">+5 💎 earned</div>` : '';
   const seriesInfo = inSeries
     ? `<div style="color:rgba(180,140,60,0.55);font-size:11px">Map ${activeSeriesIdx+1} of ${activeSeries.levels.length} · ${activeSeries.name}</div>`
     : '';
@@ -6195,6 +6362,7 @@ function endGame(reason){
     <div style="font-family:'Cinzel',serif;font-size:20px;font-weight:700;color:${titleColor};letter-spacing:1px;text-shadow:0 0 12px ${titleGlow}">${titleText}</div>
     <div style="color:rgba(180,150,80,0.7);font-size:12px">${subText}</div>
     ${diamondTally}
+    ${guardReward}
     ${seriesInfo}
     ${seriesCompleteBanner}
     <div style="height:1px;background:linear-gradient(90deg,transparent,rgba(180,140,50,0.3),transparent);width:100%;margin:2px 0;"></div>
@@ -6604,8 +6772,8 @@ function showModeSelect(){
         display:flex;flex-direction:column;align-items:center;gap:6px;
         touch-action:manipulation;transition:box-shadow 0.2s;">
         <canvas id="blackoutIcon" width="40" height="26" style="width:40px;height:26px;border-radius:3px;filter:drop-shadow(0 0 8px rgba(255,100,40,0.4))"></canvas>
-        <span>BLACK OUT</span>
-        <span style="font-size:10px;color:rgba(255,140,80,0.6);font-family:'Lato',sans-serif;font-weight:400;letter-spacing:0">Clear all bricks</span>
+        <span>PRISM GUARD</span>
+        <span style="font-size:10px;color:rgba(255,140,80,0.6);font-family:'Lato',sans-serif;font-weight:400;letter-spacing:0">Escape the guard</span>
       </button>` : `
       <button id="modeBlackout" style="
         flex:1;${canAfford('blackout') ? '' : 'opacity:0.5;'}
@@ -6617,7 +6785,7 @@ function showModeSelect(){
         display:flex;flex-direction:column;align-items:center;gap:6px;
         touch-action:manipulation;">
         <span style="font-size:20px;">${canAfford('blackout') ? '💎' : '🔒'}</span>
-        <span>BLACK OUT</span>
+        <span>PRISM GUARD</span>
         <span style="font-size:10px;color:${canAfford('blackout') ? 'rgba(0,238,255,0.8)' : 'rgba(0,238,255,0.5)'};font-family:'Lato',sans-serif;">${UNLOCK_COSTS.blackout} 💎</span>
       </button>`}
     </div>
@@ -6717,7 +6885,7 @@ function showModeSelect(){
     hideMessage(); startGame(null,'escape');
   });
   document.getElementById('modeBlackout').addEventListener('click',()=>{
-    if(!isUnlocked('blackout')){ showSpendConfirm('blackout', 'Blackout Mode', ()=>{ hideMessage(); startGame(null,'blackout'); }); return; }
+    if(!isUnlocked('blackout')){ showSpendConfirm('blackout', 'Prism Guard', ()=>{ hideMessage(); startGame(null,'blackout'); }); return; }
     hideMessage(); startGame(null,'blackout');
   });
   document.getElementById('modeBuilder').addEventListener('click',()=>{
