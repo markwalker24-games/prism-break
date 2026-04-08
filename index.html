@@ -3564,6 +3564,14 @@ function hideMessage(){ msgBox.style.display='none'; msgBox.style.pointerEvents=
 
 function startGame(levelData, forcedMode){
   currentForcedMode = forcedMode || null; // persist for restarts
+
+  // Nuke any floating tip/overlay divs left over from previous game
+  document.querySelectorAll('body > div[style*="position:fixed"]').forEach(el => {
+    // Don't remove msgBox or the main UI - only tip/overlay panels
+    if (el !== msgBox && el.style.zIndex >= 500) el.remove();
+  });
+  _tipQueue = []; _tipShowing = false;
+
   selfDestructBtn.style.display='block';
   showTopBarBtns(true);
 
@@ -6908,6 +6916,12 @@ canvas.addEventListener('click',()=>{
 // MODE SELECT SCREEN
 // =====================================================================
 function showModeSelect(){
+  // Clear any stuck overlays from previous game
+  document.querySelectorAll('body > div[style*="position:fixed"]').forEach(el => {
+    if (el !== msgBox && el.style.zIndex >= 500) el.remove();
+  });
+  _tipQueue = []; _tipShowing = false;
+  gameRunning = false; guards = []; alarmGuards = []; _guardAlertFrame = -1;
   selfDestructBtn.style.display='none';
   document.getElementById('editMapBtn').style.display='none';
   showTopBarBtns(false);
