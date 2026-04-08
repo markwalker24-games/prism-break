@@ -222,6 +222,74 @@
 </head>
 <body>
 
+<!-- PWA Install Banner -->
+<div id="pwaInstallBanner" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:9999;padding:14px 16px;background:linear-gradient(180deg,rgba(20,15,5,0.98),rgba(10,8,3,0.99));border-top:1px solid rgba(245,200,66,0.4);box-shadow:0 -4px 20px rgba(0,0,0,0.6);font-family:'Lato',sans-serif;animation:pwaSlideUp 0.3s ease-out;">
+  <div style="display:flex;align-items:center;gap:12px;max-width:400px;margin:0 auto;">
+    <img src="icon-192.png" style="width:40px;height:40px;border-radius:8px;flex-shrink:0;">
+    <div style="flex:1;min-width:0;">
+      <div style="font-weight:700;font-size:13px;color:#f5c842;letter-spacing:0.5px;">Install Prism Break</div>
+      <div id="pwaInstallHint" style="font-size:11px;color:rgba(200,170,90,0.7);margin-top:2px;line-height:1.5;"></div>
+    </div>
+    <button id="pwaInstallBtn" style="background:linear-gradient(180deg,rgba(60,45,15,0.98),rgba(35,25,8,0.99));border:1px solid rgba(245,200,66,0.6);color:#f5c842;font-family:'Lato',sans-serif;font-weight:700;font-size:12px;padding:9px 14px;border-radius:4px;cursor:pointer;white-space:nowrap;flex-shrink:0;">INSTALL</button>
+    <button id="pwaInstallClose" style="background:none;border:none;color:rgba(200,170,90,0.4);font-size:20px;cursor:pointer;padding:0 2px;line-height:1;flex-shrink:0;">×</button>
+  </div>
+</div>
+<style>
+  @keyframes pwaSlideUp { from { transform:translateY(100%); } to { transform:translateY(0); } }
+</style>
+<script>
+(function(){
+  // Detect if running as installed PWA
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches
+                    || navigator.standalone === true;
+  if(isStandalone) return; // Already installed - don't show banner
+
+  const banner = document.getElementById('pwaInstallBanner');
+  const hint = document.getElementById('pwaInstallHint');
+  const installBtn = document.getElementById('pwaInstallBtn');
+  const closeBtn = document.getElementById('pwaInstallClose');
+
+  // Detect platform
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+  const isAndroid = /Android/.test(navigator.userAgent);
+
+  if(isIOS){
+    hint.innerHTML = 'Tap <strong style="color:#f5c842;">Share</strong> ↑ then <strong style="color:#f5c842;">Add to Home Screen</strong>';
+    installBtn.style.display = 'none'; // iOS can't trigger install programmatically
+  } else {
+    hint.textContent = 'Play fullscreen like a real app';
+  }
+
+  // Capture Android's beforeinstallprompt
+  let deferredPrompt = null;
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredPrompt = e;
+  });
+
+  installBtn.addEventListener('click', () => {
+    if(deferredPrompt){
+      deferredPrompt.prompt();
+      deferredPrompt.userChoice.then(() => { deferredPrompt = null; banner.style.display = 'none'; });
+    } else {
+      // Fallback - show manual instructions
+      hint.innerHTML = isAndroid
+        ? 'Tap <strong style="color:#f5c842;">⋮ menu</strong> → <strong style="color:#f5c842;">Install app</strong>'
+        : 'Tap <strong style="color:#f5c842;">⋮ menu</strong> → <strong style="color:#f5c842;">Add to Home Screen</strong>';
+      installBtn.style.display = 'none';
+    }
+  });
+
+  closeBtn.addEventListener('click', () => { banner.style.display = 'none'; });
+
+  // Show after installed app check
+  window.addEventListener('appinstalled', () => { banner.style.display = 'none'; });
+
+  // Show the banner after a short delay so it doesn't flash during load
+  setTimeout(() => { banner.style.display = 'block'; }, 1200);
+})();
+</script>
+
 <div id="topbar">
   <div id="ui"><span style="color:#00eeff;">💎</span> <span id="totalDiamondDisplay" style="color:#00eeff;font-weight:700;">0</span> &nbsp; <span style="color:#ffd700">🔑</span> <span id="keyDisplay" style="color:#ffd700">0</span> &nbsp; <span id="bombHud" style="color:#ff6600;display:none">💣 <span id="bombDisplay">0</span></span> &nbsp; <span id="diamondHud" style="color:#00eeff;display:none">💎 <span id="diamondDisplay">0</span>/<span id="diamondTotal">0</span></span></div>
   <div style="display:flex;align-items:center;gap:8px;">
