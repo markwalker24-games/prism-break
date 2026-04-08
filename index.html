@@ -6820,7 +6820,7 @@ function showModeSelect(){
     const id = 'modeHardcoded0';
     const progress = getSeriesProgress(s.name);
     const hasProgress = progress > 0 && progress < s.levels.length;
-    const btnLabel = hasProgress ? 'CONTINUE ESCAPE' : 'BEGIN ESCAPE';
+    const btnLabel = hasProgress ? 'KEEP GOING!' : 'BEGIN ESCAPE';
     const btnSub = hasProgress
       ? `Map ${progress+1} of ${s.levels.length} · keep moving`
       : `Begin your escape · ${s.levels.length} maps`;
