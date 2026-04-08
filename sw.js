@@ -1,4 +1,4 @@
-const CACHE_NAME = 'prismbreak-v1';
+const CACHE_NAME = 'prismbreak-v2';
 const PRECACHE = [
   '/',
   '/index.html',
@@ -27,12 +27,12 @@ self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
 
   // Always go to network for API calls (Supabase, Google auth, etc.)
-  if (url.origin !== location.origin) return;
+  // Only cache GET requests from our own origin
+  if (url.origin !== location.origin || e.request.method !== 'GET') return;
 
   e.respondWith(
     fetch(e.request)
       .then(res => {
-        // Cache successful responses
         if (res.ok) {
           const clone = res.clone();
           caches.open(CACHE_NAME).then(cache => cache.put(e.request, clone));

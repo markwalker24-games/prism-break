@@ -921,7 +921,7 @@ async function syncMyDataFromCloud(userId) {
 
     // Fetch all my series from Supabase
     const seriesRes = await fetch(
-      `${SUPA_URL}/rest/v1/series?creator_id=eq.${encodeURIComponent(userId)}&select=*&order=created_at.desc&limit=100`,
+      `${SUPA_URL}/rest/v1/series?creator_id=eq.${encodeURIComponent(userId)}&select=*&limit=100`,
       { headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` } }
     );
 
