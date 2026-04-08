@@ -1402,18 +1402,30 @@ function savedSeries() {
   try { return JSON.parse(LS.get('cc_series')||'[]'); } catch(e){ return []; }
 }
 function saveSeries(series) {
+  // Always stamp creator_id
+  if (!series.creator_id) series = { ...series, creator_id: CREATOR_ID };
   const all = savedSeries();
   const idx = all.findIndex(s=>s.name===series.name);
   if(idx>=0) {
-    // Merge - preserve local metadata, update content fields
     all[idx] = { ...all[idx], ...series };
   } else {
     all.push(series);
   }
   LS.set('cc_series', JSON.stringify(all));
+  // Always persist to Supabase immediately
+  const sortOrder = getQuestOrder().indexOf(series.name);
+  upsertCloudSeries(series, sortOrder >= 0 ? sortOrder : 999).catch(e => {
+    console.warn('saveSeries cloud sync failed:', e);
+  });
 }
 function deleteSeries(name) {
   LS.set('cc_series', JSON.stringify(savedSeries().filter(s=>s.name!==name)));
+  // Remove from Supabase too
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+  fetch(`${SUPA_URL}/rest/v1/series?slug=eq.${encodeURIComponent(slug)}`, {
+    method: 'DELETE',
+    headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` }
+  }).catch(e => console.warn('deleteSeries cloud sync failed:', e));
 }
 
 // =====================================================================
@@ -7506,13 +7518,16 @@ async function fetchCloudSeries() {
 }
 
 async function upsertCloudSeries(series, sortOrder) {
-  const slug = series.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  const slug = series.slug ||
+    series.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  const creatorId = series.creator_id || CREATOR_ID;
   const payload = {
     slug,
     name: series.name,
     description: series.description || '',
     levels: series.levels,
-    sort_order: sortOrder
+    sort_order: sortOrder,
+    creator_id: creatorId
   };
 
   // Try PATCH first (update existing row by slug)
@@ -7524,10 +7539,10 @@ async function upsertCloudSeries(series, sortOrder) {
       'Authorization': `Bearer ${SUPA_KEY}`,
       'Prefer': 'return=minimal'
     },
-    body: JSON.stringify({ name: series.name, description: series.description || '', levels: series.levels, sort_order: sortOrder })
+    body: JSON.stringify({ name: series.name, description: series.description || '', levels: series.levels, sort_order: sortOrder, creator_id: creatorId })
   });
   if (patch.ok) {
-    return { slug, name: series.name }; // PATCH worked - return immediately
+    return { slug, name: series.name };
   }
 
   // Row doesn't exist yet - INSERT
