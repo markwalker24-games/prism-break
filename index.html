@@ -2380,7 +2380,7 @@ function killBall(){
       ball.vx=0; ball.vy=0;
       ball.x=currentLevelBricks.ballX;
       ball.y=currentLevelBricks.ballY;
-      guards=[]; _guardAlertFrame=-1; // no guards on respawn
+      guards=[]; _guardAlertFrame=-1; alarmGuards=[]; // no guards on respawn
 
       // Restore only keys that were blown up by bombs (not collected/used)
       if(gameMode==='escape'){
@@ -2540,31 +2540,29 @@ Object.defineProperty(window, "guardBall",  { get: () => guards[0]||null, set: v
 Object.defineProperty(window, "guardBall2", { get: () => guards[1]||null, set: v => { if(v===null) guards[1]=null; else guards[1]=v; } });
 
 function spawnGuard() {
-  // Find open cells that are far enough from the ball spawn position
-  const ballC = Math.floor(BRICK_COLS / 2);
-  const ballR = 3; // ball spawns upper-center
-  const minDist = 14; // minimum cell distance from player
+  const ballC = ball ? Math.floor(ball.x / BRICK_W) : Math.floor(BRICK_COLS / 2);
+  const ballR = ball ? Math.floor(ball.y / BRICK_H) : 3;
+  const minDist = 14;
 
-  const openCells = [];
-  for (let c = 1; c < BRICK_COLS-1; c++) {
-    for (let r = 1; r < BRICK_ROWS-1; r++) {
-      const hasBrick = bricks.some(b => (b.col ?? Math.round(b.x/BRICK_W)) === c && (b.row ?? Math.round(b.y/BRICK_H)) === r);
-      if (hasBrick) continue;
-      const dist = Math.abs(c - ballC) + Math.abs(r - ballR);
-      if (dist >= minDist) openCells.push({ c, r });
+  // Flood-fill to find only reachable cells
+  const isSolid = (c, r) => bricks.some(b => (b.col ?? Math.round(b.x/BRICK_W)) === c && (b.row ?? Math.round(b.y/BRICK_H)) === r);
+  const reachable = new Set();
+  const queue = [[ballC, ballR]];
+  reachable.add(`${ballC},${ballR}`);
+  while (queue.length) {
+    const [c, r] = queue.shift();
+    for (const [dc, dr] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+      const nc = c+dc, nr = r+dr;
+      if (nc<0||nc>=BRICK_COLS||nr<0||nr>=BRICK_ROWS) continue;
+      if (reachable.has(`${nc},${nr}`) || isSolid(nc, nr)) continue;
+      reachable.add(`${nc},${nr}`);
+      queue.push([nc, nr]);
     }
   }
 
-  // Fallback to any open cell if not enough far ones
-  if (!openCells.length) {
-    for (let c = 1; c < BRICK_COLS-1; c++) {
-      for (let r = 1; r < BRICK_ROWS-1; r++) {
-        if (!bricks.some(b => (b.col ?? Math.round(b.x/BRICK_W)) === c && (b.row ?? Math.round(b.y/BRICK_H)) === r)) {
-          openCells.push({ c, r });
-        }
-      }
-    }
-  }
+  const farCells = [...reachable].map(k => { const [c,r]=k.split(',').map(Number); return {c,r}; })
+    .filter(({c,r}) => Math.abs(c-ballC)+Math.abs(r-ballR) >= minDist);
+  const openCells = farCells.length ? farCells : [...reachable].map(k => { const [c,r]=k.split(',').map(Number); return {c,r}; });
 
   if (!openCells.length) return;
   const start = openCells[Math.floor(Math.random() * openCells.length)];
@@ -2712,24 +2710,136 @@ function updateGuard(dt, g) {
 let _guardAlertFrame = -1; // -1 = inactive, 0+ = frame count
 let _alertX = 0, _alertY = 0; // position for alert ❗ (camera or guard)
 
-function triggerCameraAlarm(cx, cy) {
-  // Store position for any future alert but don't start the catch animation yet
-  _alertX = cx; _alertY = cy;
-  const count = 2;
-  showToast(`🚨 ALARM! Guards incoming!`, '#ff2222');
-  screenFlash = 15;
+// ── ALARM GUARDS (escape mode only, separate from Prism Guard) ────────
+let alarmGuards = []; // {col, row, prevCol, prevRow, x, y, dir, moveTimer, moveInterval, trail}
 
-  // Stagger spawns
-  spawnGuard();
-  for (let i = 1; i < count; i++) {
-    setTimeout(() => {
-      if (gameRunning) {
-        spawnGuard();
-        const g = guards[guards.length - 1];
-        if (g) g.moveInterval = 430;
-      }
-    }, i * 350);
+function spawnAlarmGuard() {
+  const ballC = Math.floor(ball.x / BRICK_W);
+  const ballR = Math.floor(ball.y / BRICK_H);
+  const minDist = 14;
+
+  // Flood-fill from ball position to find all reachable cells
+  const isSolid = (c, r) => bricks.some(b => (b.col ?? Math.round(b.x/BRICK_W)) === c && (b.row ?? Math.round(b.y/BRICK_H)) === r);
+  const reachable = new Set();
+  const queue = [[ballC, ballR]];
+  reachable.add(`${ballC},${ballR}`);
+  while (queue.length) {
+    const [c, r] = queue.shift();
+    for (const [dc, dr] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+      const nc = c+dc, nr = r+dr;
+      if (nc<0||nc>=BRICK_COLS||nr<0||nr>=BRICK_ROWS) continue;
+      if (reachable.has(`${nc},${nr}`) || isSolid(nc, nr)) continue;
+      reachable.add(`${nc},${nr}`);
+      queue.push([nc, nr]);
+    }
   }
+
+  // Pick from reachable cells that are far enough from ball
+  const openCells = [];
+  for (const key of reachable) {
+    const [c, r] = key.split(',').map(Number);
+    if (Math.abs(c - ballC) + Math.abs(r - ballR) >= minDist) openCells.push({c, r});
+  }
+
+  // Fallback: any reachable cell if none far enough
+  const candidates = openCells.length ? openCells : [...reachable].map(k => { const [c,r]=k.split(',').map(Number); return {c,r}; });
+  if (!candidates.length) return;
+
+  const start = candidates[Math.floor(Math.random() * candidates.length)];
+  alarmGuards.push({
+    col: start.c, row: start.r,
+    prevCol: start.c, prevRow: start.r,
+    x: start.c * BRICK_W + BRICK_W/2,
+    y: start.r * BRICK_H + BRICK_H/2,
+    dir: Math.floor(Math.random() * 4),
+    moveTimer: 430, moveInterval: 430,
+    trail: []
+  });
+}
+
+function updateAlarmGuards(dt) {
+  if (!alarmGuards.length || !ballLaunched) return;
+  const dirs = [{dc:1,dr:0},{dc:0,dr:1},{dc:-1,dr:0},{dc:0,dr:-1}];
+  const ballC = Math.floor(ball.x / BRICK_W);
+  const ballR = Math.floor(ball.y / BRICK_H);
+
+  alarmGuards.forEach(g => {
+    // Smooth position
+    const t = Math.min(g.moveTimer / g.moveInterval, 1);
+    g.x = (g.prevCol + (g.col - g.prevCol) * t) * BRICK_W + BRICK_W/2;
+    g.y = (g.prevRow + (g.row - g.prevRow) * t) * BRICK_H + BRICK_H/2;
+
+    g.moveTimer += dt * 16.67;
+    if (g.moveTimer >= g.moveInterval) {
+      g.moveTimer = 0;
+      g.prevCol = g.col; g.prevRow = g.row;
+      g.trail.unshift({x: g.x, y: g.y});
+      if (g.trail.length > 5) g.trail.pop();
+
+      const canMove = (dc, dr) => {
+        const nc = g.col+dc, nr = g.row+dr;
+        if (nc<0||nc>=BRICK_COLS||nr<0||nr>=BRICK_ROWS) return false;
+        return !bricks.some(b => (b.col??Math.round(b.x/BRICK_W))===nc && (b.row??Math.round(b.y/BRICK_H))===nr);
+      };
+
+      // Home toward ball 85% of the time
+      const valid = [0,1,2,3].filter(d => canMove(dirs[d].dc, dirs[d].dr));
+      if (valid.length) {
+        const scored = valid.map(d => ({
+          d, dist: Math.abs((g.col+dirs[d].dc)-ballC) + Math.abs((g.row+dirs[d].dr)-ballR)
+        })).sort((a,b) => a.dist-b.dist);
+        const pick = Math.random() < 0.85 ? scored[0].d : scored[Math.floor(Math.random()*scored.length)].d;
+        g.dir = pick;
+        g.col += dirs[pick].dc;
+        g.row += dirs[pick].dr;
+      }
+    }
+
+    // Contact detection
+    const dx = ball.x - g.x, dy = ball.y - g.y;
+    if (Math.sqrt(dx*dx + dy*dy) < BALL_R * 2.5) {
+      alarmGuards = [];
+      killBall();
+    }
+  });
+}
+
+function drawAlarmGuards(c) {
+  const t = performance.now() * 0.002;
+  alarmGuards.forEach(g => {
+    const x = g.x, y = g.y, R = BALL_R;
+    // Trail
+    g.trail.forEach((tr, i) => {
+      c.globalAlpha = (1 - i/g.trail.length) * 0.3;
+      c.fillStyle = '#1a4aaa';
+      c.beginPath(); c.arc(tr.x, tr.y, R*0.6, 0, Math.PI*2); c.fill();
+    });
+    c.globalAlpha = 1;
+    // Glow
+    const glow = c.createRadialGradient(x,y,0,x,y,R*3);
+    glow.addColorStop(0, `rgba(40,80,220,${0.5+0.2*Math.sin(t*4)})`);
+    glow.addColorStop(0.5, 'rgba(20,50,180,0.2)');
+    glow.addColorStop(1, 'rgba(0,0,0,0)');
+    c.fillStyle = glow; c.beginPath(); c.arc(x,y,R*3,0,Math.PI*2); c.fill();
+    // Body
+    const body = c.createRadialGradient(x-R*0.3,y-R*0.3,0,x,y,R);
+    body.addColorStop(0,'#6699ff'); body.addColorStop(0.4,'#1a3aaa'); body.addColorStop(1,'#0a1a55');
+    c.fillStyle = body; c.beginPath(); c.arc(x,y,R,0,Math.PI*2); c.fill();
+    // Eyes
+    const eyeR = R*0.2;
+    [[-R*0.3,-R*0.2],[R*0.3,-R*0.2]].forEach(([ex,ey]) => {
+      c.fillStyle='#fff'; c.beginPath(); c.arc(x+ex,y+ey,eyeR,0,Math.PI*2); c.fill();
+      c.fillStyle='#000'; c.beginPath(); c.arc(x+ex+1,y+ey+1,eyeR*0.5,0,Math.PI*2); c.fill();
+    });
+  });
+}
+
+function triggerCameraAlarm(cx, cy) {
+  alarmGuards = []; // clear any previous
+  showToast('🚨 ALARM! Guards incoming!', '#ff2222');
+  screenFlash = 15;
+  spawnAlarmGuard();
+  setTimeout(() => { if(gameRunning) spawnAlarmGuard(); }, 400);
 }
 
 function guardCaughtPlayer() {
@@ -3173,6 +3283,7 @@ function update(dt){
   // Update poison ball - freeze during respawn
   if((gameMode==='blackout' || guards.length > 0) && !isRespawning) guards.filter(Boolean).forEach(g => updateGuard(dt, g));
   if(gameMode==='blackout' || guards.length > 0) updateGuardAlert();
+  if(gameMode==='escape' && alarmGuards.length > 0 && !isRespawning) updateAlarmGuards(dt);
 
   // Bomb regeneration - if any color bricks exist without a matching paint brick, spawn a bomb
   if(gameMode==='blackout' && gameRunning && !testingLevel && Math.random()<0.002*dt){
@@ -3355,6 +3466,7 @@ function draw(){
   // Draw placed bombs
   for(const bomb of activeBombs) drawPlacedBomb(ctx, bomb);
   if(gameMode==='blackout' || guards.length > 0) guards.filter(Boolean).forEach(g => drawGuard(ctx, g));
+  if(gameMode==='escape' && alarmGuards.length > 0) drawAlarmGuards(ctx);
   if(gameMode==='escape' && !_escaping) drawExitArrow(ctx);
   if(gameMode==='blackout' || guards.length > 0) { drawGuardAlert(); guards = guards.filter(Boolean); }
   // Draw falling bricks during blackout finale
@@ -3477,7 +3589,7 @@ function startGame(levelData, forcedMode){
   editBtn.style.display = isCustomLevel ? 'block' : 'none';
   score=0; particles=[]; gameOver=false; ballLaunched=false; paused=false;
   gameStartTime=0; totalElapsed=0; portal=null; keysHeld=0; diamondsCollected=0; screenFlash=0;
-  lives=3; usedContinue=false; controlsReversed=false; fallingBricks=[]; finaleTriggered=false; finaleTimeout=null; bombsHeld=0; activeBombs=[]; bothSidesHeld=false; bothSidesTimestamp=0; isRespawning=false; poisonBall=null; guards=[]; _guardAlertFrame=-1; _escaping=false; blownUpKeys=[]; deathFreeze=false;
+  lives=3; usedContinue=false; controlsReversed=false; fallingBricks=[]; finaleTriggered=false; finaleTimeout=null; bombsHeld=0; activeBombs=[]; bothSidesHeld=false; bothSidesTimestamp=0; isRespawning=false; poisonBall=null; guards=[]; alarmGuards=[]; _guardAlertFrame=-1; _escaping=false; blownUpKeys=[]; deathFreeze=false;
   if(bothSidesReleaseTimer){ clearTimeout(bothSidesReleaseTimer); bothSidesReleaseTimer=null; }
   bombHud.style.display='none';
   renderLives();
