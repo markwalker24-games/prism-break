@@ -427,6 +427,7 @@ const BRICK_IMAGES = {};
     lock: 'images/brick_lock.png',
     skull: 'images/brick_skull.png',
     camera: 'images/brick_camera.png',
+    alarm: 'images/brick_alarm.png',
     bomb: 'images/brick_bomb.png',
     diamond: 'images/brick_diamond.png',
     white: 'images/brick_white.png',
@@ -1242,7 +1243,7 @@ function showSharedMapIntro(levelData){
   ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:500;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;';
 
   const panel = document.createElement('div');
-  panel.style.cssText = "background:linear-gradient(160deg,#2a1f10,#1c160d);border:1px solid rgba(200,160,60,0.5);box-shadow:0 0 0 1px rgba(120,80,20,0.3),0 8px 40px rgba(0,0,0,0.8);border-radius:4px;padding:28px 22px;width:min(320px,100%);display:flex;flex-direction:column;gap:14px;font-family:'Lato',sans-serif;";
+  panel.style.cssText = "background:linear-gradient(160deg,#2a1f10,#1c160d);border:1px solid rgba(200,160,60,0.5);box-shadow:0 0 0 1px rgba(120,80,20,0.3),0 8px 40px rgba(0,0,0,0.8);border-radius:4px;padding:28px 22px;width:min(360px,100%);display:flex;flex-direction:column;gap:18px;font-family:'Lato',sans-serif;";
 
   panel.innerHTML = `
     <div style="text-align:center;">
@@ -1257,16 +1258,16 @@ function showSharedMapIntro(levelData){
         <span style="color:#c9a84c;font-size:12px;line-height:1.6;"><strong style="color:#f5c842;">Find the exit</strong> and escape — grab diamonds along the way, they're yours anyway</span>
       </div>
       <div style="display:flex;align-items:flex-start;gap:10px;">
-        <span style="font-size:18px;flex-shrink:0;">👆</span>
-        <span style="color:#c9a84c;font-size:12px;line-height:1.6;">Tap <strong style="color:#f5c842;">and hold</strong> on the left or the right to move the ball. <strong style="color:#f5c842;">Don't swipe!</strong></span>
+        <span style="font-size:24px;flex-shrink:0;">👆</span>
+        <span style="color:#c9a84c;font-size:15px;line-height:1.7;">Tap <strong style="color:#f5c842;">and hold</strong> on the left or the right to move the ball. <strong style="color:#f5c842;">Don't swipe!</strong></span>
       </div>
       <div style="display:flex;align-items:flex-start;gap:10px;">
-        <span style="font-size:18px;flex-shrink:0;">🔑</span>
-        <span style="color:#c9a84c;font-size:12px;line-height:1.6;"><strong style="color:#f5c842;">Keys are needed to unlock locks</strong> — snag the key first.</span>
+        <span style="font-size:24px;flex-shrink:0;">🔑</span>
+        <span style="color:#c9a84c;font-size:15px;line-height:1.7;"><strong style="color:#f5c842;">Keys are needed to unlock locks</strong> — snag the key first.</span>
       </div>
       <div style="display:flex;align-items:flex-start;gap:10px;">
-        <span style="font-size:18px;flex-shrink:0;">💣</span>
-        <span style="color:#c9a84c;font-size:12px;line-height:1.6;">Collect bombs then plant them by holding <strong style="color:#f5c842;">both left and right</strong>, then <strong style="color:#f5c842;">release both at the same time.</strong></span>
+        <span style="font-size:24px;flex-shrink:0;">💣</span>
+        <span style="color:#c9a84c;font-size:15px;line-height:1.7;">Collect bombs then plant them by holding <strong style="color:#f5c842;">both left and right</strong>, then <strong style="color:#f5c842;">release both at the same time.</strong></span>
       </div>
     </div>
     <div style="height:1px;background:linear-gradient(90deg,transparent,rgba(200,160,60,0.2),transparent);"></div>
@@ -1791,7 +1792,7 @@ function drawKeyBrick(c,b)  { drawBrickImage(c,b,'key'); }
 function drawLockBrick(c,b) { drawBrickImage(c,b,'lock'); }
 function drawDiamondBrick(c,b){ drawBrickImage(c,b,'diamond'); }
 function drawWhiteBrick(c,b){ drawBrickImage(c,b,'white'); }
-function drawSkullBrick(c,b){ drawBrickImage(c,b,'camera'); }
+function drawSkullBrick(c,b){ drawBrickImage(c,b,'alarm'); }
 function drawReverseBrick(c,b){ drawBrickImage(c,b,'reverse'); }
 function drawBombBrick(c,b) { drawBrickImage(c,b,'bomb'); }
 
@@ -2235,11 +2236,17 @@ function resolveBrick(b){
   if(b.isSteel){ b.cooldown=20; }
   else if(b.isSkull){
     // Camera brick - triggers spotted animation then kills
-    queueBrickTip('skull', 'images/brick_camera.png', 'Security Camera', 'You\'ve been spotted. The warden sees everything.');
-    _alertX = b.x + b.w/2; // store position for alert animation
+    queueBrickTip('skull', 'images/brick_alarm.png', 'Alarm', 'You tripped the alarm. Guards are on their way.');
+    _alertX = b.x + b.w/2;
     _alertY = b.y + b.h/2;
     bricks.splice(bricks.indexOf(b),1);
-    guardCaughtPlayer();
+    if (gameMode === 'blackout') {
+      // In Prism Guard - just caught immediately
+      guardCaughtPlayer();
+    } else {
+      // In escape mode - trigger alarm, release 4-5 guards to hunt player
+      triggerCameraAlarm(b.x + b.w/2, b.y + b.h/2);
+    }
   }
   else if(b.isReverse){
     // Reverse controls and destroy
@@ -2480,17 +2487,15 @@ function detonateBomb(bomb){
     }
   }
 
-  // Check if either guard is in blast zone - drops key and respawns
+  // Check all guards in blast zone
   if (gameMode === 'blackout') {
-    [{ guard: guardBall, setter: (v) => { guardBall = v; } },
-     { guard: guardBall2, setter: (v) => { guardBall2 = v; } }].forEach(({ guard, setter }) => {
+    guards.forEach((guard, idx) => {
       if (!guard) return;
       const gc = Math.floor(guard.x / BRICK_W);
       const gr = Math.floor(guard.y / BRICK_H);
       if (affected.has(`${gc},${gr}`)) {
-        // Only first guard drops a key
-        const isFirst = guard === guardBall;
-        if (isFirst) {
+        // First guard drops a key
+        if (idx === 0) {
           bricks.push({
             col: guard.col, row: guard.row,
             x: guard.col * BRICK_W, y: guard.row * BRICK_H, w: BRICK_W, h: BRICK_H,
@@ -2508,7 +2513,7 @@ function detonateBomb(bomb){
           particles.push({x:guard.x,y:guard.y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,
             color:'#cc00ff',life:1.0,size:2+Math.random()*4});
         }
-        setter(null);
+        guards[idx] = null;
         setTimeout(() => { if(gameRunning && gameMode==='blackout') spawnGuard(); }, 3000);
       }
     });
@@ -2528,8 +2533,10 @@ function detonateBomb(bomb){
   });
 }
 
-let guardBall = null; // primary guard
-let guardBall2 = null; // second guard - spawns when key collected
+let guards = []; // all active guards
+// Legacy aliases for compatibility
+Object.defineProperty(window, "guardBall",  { get: () => guards[0]||null, set: v => { if(v===null) guards[0]=null; else guards[0]=v; } });
+Object.defineProperty(window, "guardBall2", { get: () => guards[1]||null, set: v => { if(v===null) guards[1]=null; else guards[1]=v; } });
 
 function spawnGuard() {
   // Find open cells that are far enough from the ball spawn position
@@ -2576,8 +2583,7 @@ function spawnGuard() {
     trail: [],
     flashlight: true,
   };
-  if (!guardBall) guardBall = guardObj;
-  else guardBall2 = guardObj;
+  guards.push(guardObj);
 }
 
 function updateGuard(dt, g) {
@@ -2685,11 +2691,34 @@ function updateGuard(dt, g) {
 let _guardAlertFrame = -1; // -1 = inactive, 0+ = frame count
 let _alertX = 0, _alertY = 0; // position for alert ❗ (camera or guard)
 
+function triggerCameraAlarm(cx, cy) {
+  // Flash the alert animation at camera position
+  _alertX = cx; _alertY = cy;
+  _guardAlertFrame = 0;
+  // Don't stop the game - just spawn a swarm of fast guards
+  const count = 4 + Math.floor(Math.random() * 2); // 4 or 5 guards
+  showToast(`🚨 ALARM! ${count} guards incoming!`, '#ff2222');
+  screenFlash = 15;
+
+  // Stagger spawns - first one immediate, rest over 1.5s
+  spawnGuard();
+  for (let i = 1; i < count; i++) {
+    setTimeout(() => {
+      if (gameRunning) {
+        spawnGuard();
+        // These alarm guards move faster
+        const g = guards[guards.length - 1];
+        if (g) g.moveInterval = 300;
+      }
+    }, i * 350);
+  }
+}
+
 function guardCaughtPlayer() {
   if (_guardAlertFrame >= 0 || gameOver) return;
   // Set alert position - use guard position if available, else ball position
-  if (guardBall) { _alertX = guardBall.x; _alertY = guardBall.y; }
-  else if (guardBall2) { _alertX = guardBall2.x; _alertY = guardBall2.y; }
+  const activeGuard = guards.find(Boolean);
+  if (activeGuard) { _alertX = activeGuard.x; _alertY = activeGuard.y; }
   else { _alertX = ball ? ball.x : W/2; _alertY = ball ? ball.y : H/2; }
   _guardAlertFrame = 0;
   gameRunning = false;
@@ -2701,7 +2730,7 @@ function updateGuardAlert() {
   if (_guardAlertFrame > 25) {
     _guardAlertFrame = -1;
     if (gameMode === 'blackout') {
-      guardBall = null; guardBall2 = null;
+      guards = [];
       endGame('guardCaught');
     } else {
       killBall();
@@ -3133,8 +3162,7 @@ function update(dt){
   }
 
   // Update poison ball - freeze during respawn
-  if(guardBall && gameMode==='blackout' && !isRespawning) updateGuard(dt, guardBall);
-  if(guardBall2 && gameMode==='blackout' && !isRespawning) updateGuard(dt, guardBall2);
+  if(gameMode==='blackout' && !isRespawning) guards.filter(Boolean).forEach(g => updateGuard(dt, g));
 
   // Bomb regeneration - if any color bricks exist without a matching paint brick, spawn a bomb
   if(gameMode==='blackout' && gameRunning && !testingLevel && Math.random()<0.002*dt){
@@ -3230,7 +3258,7 @@ function triggerBlackoutFinale(){
   if(finaleTriggered) return;
   finaleTriggered=true;
   gameRunning=false;
-  guardBall = null;
+  guards = [];
   activeBombs=[];
   // Celebration burst
   for(let i=0;i<8;i++) spawnDiamondBurst(ball.x, ball.y);
@@ -3316,10 +3344,9 @@ function draw(){
   for(let b of bricks) drawBrick(ctx,b);
   // Draw placed bombs
   for(const bomb of activeBombs) drawPlacedBomb(ctx, bomb);
-  if(guardBall && gameMode==='blackout') drawGuard(ctx, guardBall);
-  if(guardBall2 && gameMode==='blackout') drawGuard(ctx, guardBall2);
+  if(gameMode==='blackout') guards.filter(Boolean).forEach(g => drawGuard(ctx, g));
   if(gameMode==='escape' && !_escaping) drawExitArrow(ctx);
-  if(gameMode==='blackout') { updateGuardAlert(); drawGuardAlert(); }
+  if(gameMode==='blackout') { updateGuardAlert(); drawGuardAlert(); guards = guards.filter(Boolean); }
   // Draw falling bricks during blackout finale
   for(const fb of fallingBricks){
     if(!fb.exploded){
@@ -3440,7 +3467,7 @@ function startGame(levelData, forcedMode){
   editBtn.style.display = isCustomLevel ? 'block' : 'none';
   score=0; particles=[]; gameOver=false; ballLaunched=false; paused=false;
   gameStartTime=0; totalElapsed=0; portal=null; keysHeld=0; diamondsCollected=0; screenFlash=0;
-  lives=3; usedContinue=false; controlsReversed=false; fallingBricks=[]; finaleTriggered=false; finaleTimeout=null; bombsHeld=0; activeBombs=[]; bothSidesHeld=false; bothSidesTimestamp=0; isRespawning=false; poisonBall=null; guardBall=null; guardBall2=null; _guardAlertFrame=-1; _escaping=false; blownUpKeys=[]; deathFreeze=false;
+  lives=3; usedContinue=false; controlsReversed=false; fallingBricks=[]; finaleTriggered=false; finaleTimeout=null; bombsHeld=0; activeBombs=[]; bothSidesHeld=false; bothSidesTimestamp=0; isRespawning=false; poisonBall=null; guards=[]; _guardAlertFrame=-1; _escaping=false; blownUpKeys=[]; deathFreeze=false;
   if(bothSidesReleaseTimer){ clearTimeout(bothSidesReleaseTimer); bothSidesReleaseTimer=null; }
   bombHud.style.display='none';
   renderLives();
@@ -7201,23 +7228,23 @@ function showNextTip() {
   ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.82);z-index:600;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;';
 
   const panel = document.createElement('div');
-  panel.style.cssText = "background:linear-gradient(160deg,#0f0c18,#08060f);border:1px solid rgba(180,140,255,0.35);border-radius:4px;padding:24px 20px;width:min(290px,88vw);display:flex;flex-direction:column;align-items:center;gap:12px;box-shadow:0 8px 40px rgba(0,0,0,0.8);font-family:'Lato',sans-serif;text-align:center;";
+  panel.style.cssText = "background:linear-gradient(160deg,#0f0c18,#08060f);border:1px solid rgba(180,140,255,0.35);border-radius:4px;padding:28px 22px;width:min(340px,92vw);display:flex;flex-direction:column;align-items:center;gap:16px;box-shadow:0 8px 40px rgba(0,0,0,0.8);font-family:'Lato',sans-serif;text-align:center;";
 
   const swatch = document.createElement('div');
   swatch.style.cssText = 'display:flex;align-items:center;justify-content:center;';
   const img = document.createElement('img');
   img.src = tip.imgSrc;
-  img.style.cssText = 'width:104px;height:60px;object-fit:fill;image-rendering:pixelated;filter:drop-shadow(0 0 8px rgba(255,255,255,0.2));border-radius:4px;';
+  img.style.cssText = 'width:130px;height:75px;object-fit:fill;image-rendering:pixelated;filter:drop-shadow(0 0 8px rgba(255,255,255,0.2));border-radius:4px;';
   swatch.appendChild(img);
   panel.appendChild(swatch);
 
   const titleEl = document.createElement('div');
-  titleEl.style.cssText = "font-family:'Cinzel',serif;font-size:14px;font-weight:700;color:#e8d5ff;letter-spacing:1px;";
+  titleEl.style.cssText = "font-family:'Cinzel',serif;font-size:17px;font-weight:700;color:#e8d5ff;letter-spacing:1px;";
   titleEl.textContent = tip.title;
   panel.appendChild(titleEl);
 
   const bodyEl = document.createElement('div');
-  bodyEl.style.cssText = "color:rgba(200,180,240,0.75);font-size:12px;line-height:1.8;";
+  bodyEl.style.cssText = "color:rgba(200,180,240,0.85);font-size:15px;line-height:1.8;";
   bodyEl.innerHTML = tip.body;
   panel.appendChild(bodyEl);
 
@@ -7499,33 +7526,33 @@ function showHowToPlay(){
   ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:500;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;';
 
   const panel = document.createElement('div');
-  panel.style.cssText = "background:linear-gradient(160deg,#2a1f10,#1c160d);border:1px solid rgba(200,160,60,0.5);box-shadow:0 0 0 1px rgba(120,80,20,0.3),0 8px 40px rgba(0,0,0,0.8);border-radius:4px;padding:28px 22px;width:min(320px,100%);display:flex;flex-direction:column;gap:14px;font-family:'Lato',sans-serif;";
+  panel.style.cssText = "background:linear-gradient(160deg,#2a1f10,#1c160d);border:1px solid rgba(200,160,60,0.5);box-shadow:0 0 0 1px rgba(120,80,20,0.3),0 8px 40px rgba(0,0,0,0.8);border-radius:4px;padding:28px 22px;width:min(360px,100%);display:flex;flex-direction:column;gap:18px;font-family:'Lato',sans-serif;";
 
   panel.innerHTML = `
     <div style="text-align:center;">
-      <div style="font-family:'Cinzel',serif;font-size:15px;font-weight:600;color:#f5c842;letter-spacing:1px;text-shadow:0 0 12px rgba(245,200,66,0.4);">HOW TO ESCAPE</div>
+      <div style="font-family:'Cinzel',serif;font-size:18px;font-weight:700;color:#f5c842;letter-spacing:1px;text-shadow:0 0 12px rgba(245,200,66,0.4);">HOW TO ESCAPE</div>
       <div style="height:1px;background:linear-gradient(90deg,transparent,rgba(200,160,60,0.4),transparent);margin-top:10px;"></div>
     </div>
     <div style="display:flex;flex-direction:column;gap:10px;">
       <div style="display:flex;align-items:flex-start;gap:10px;">
-        <span style="font-size:18px;flex-shrink:0;">🔓</span>
-        <span style="color:#c9a84c;font-size:12px;line-height:1.6;"><strong style="color:#f5c842;">Find the exit and get out</strong> — grab your diamonds along the way. They're yours anyway.</span>
+        <span style="font-size:24px;flex-shrink:0;">🔓</span>
+        <span style="color:#c9a84c;font-size:15px;line-height:1.7;"><strong style="color:#f5c842;">Find the exit and get out</strong> — grab your diamonds along the way. They're yours anyway.</span>
       </div>
       <div style="display:flex;align-items:flex-start;gap:10px;">
-        <span style="font-size:18px;flex-shrink:0;">👆</span>
-        <span style="color:#c9a84c;font-size:12px;line-height:1.6;">Hold left or right to move. <strong style="color:#f5c842;">Hold, don't swipe.</strong></span>
+        <span style="font-size:24px;flex-shrink:0;">👆</span>
+        <span style="color:#c9a84c;font-size:15px;line-height:1.7;">Hold left or right to move. <strong style="color:#f5c842;">Hold, don't swipe.</strong></span>
       </div>
       <div style="display:flex;align-items:flex-start;gap:10px;">
-        <span style="font-size:18px;flex-shrink:0;">🔑</span>
-        <span style="color:#c9a84c;font-size:12px;line-height:1.6;">Locks don't open without a key. <strong style="color:#f5c842;">Find the key first.</strong></span>
+        <span style="font-size:24px;flex-shrink:0;">🔑</span>
+        <span style="color:#c9a84c;font-size:15px;line-height:1.7;">Locks don't open without a key. <strong style="color:#f5c842;">Find the key first.</strong></span>
       </div>
       <div style="display:flex;align-items:flex-start;gap:10px;">
-        <span style="font-size:18px;flex-shrink:0;">💣</span>
-        <span style="color:#c9a84c;font-size:12px;line-height:1.6;">Plant a bomb by pressing <strong style="color:#f5c842;">both sides at once</strong> then releasing. Stand clear.</span>
+        <span style="font-size:24px;flex-shrink:0;">💣</span>
+        <span style="color:#c9a84c;font-size:15px;line-height:1.7;">Plant a bomb by pressing <strong style="color:#f5c842;">both sides at once</strong> then releasing. Stand clear.</span>
       </div>
       <div style="display:flex;align-items:flex-start;gap:10px;">
-        <span style="font-size:18px;flex-shrink:0;">📷</span>
-        <span style="color:#c9a84c;font-size:12px;line-height:1.6;"><strong style="color:#f5c842;">Don't touch the cameras.</strong> The warden is watching.</span>
+        <span style="font-size:24px;flex-shrink:0;">📷</span>
+        <span style="color:#c9a84c;font-size:15px;line-height:1.7;"><strong style="color:#f5c842;">Don't trip the alarm.</strong> Guards will flood in.</span>
       </div>
     </div>
     <button id="howToPlayClose" style="width:100%;background:linear-gradient(180deg,rgba(60,45,20,0.95),rgba(35,25,10,0.98));border:1px solid rgba(245,200,66,0.6);border-bottom:2px solid rgba(80,50,10,0.9);color:#f5c842;font-family:'Cinzel',serif;font-weight:600;font-size:14px;letter-spacing:1px;padding:13px;cursor:pointer;border-radius:3px;margin-top:4px;">GOT IT</button>
