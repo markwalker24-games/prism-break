@@ -2627,7 +2627,27 @@ function updateGuard(dt, g) {
     };
 
     const cur = dirs[g.dir];
-    if (canMove(cur.dc, cur.dr)) {
+    const isAlarmGuard = g.moveInterval <= 300;
+
+    // Alarm guards home toward ball - pick direction that closes distance
+    if (isAlarmGuard && ballLaunched && ball) {
+      const ballCol = Math.floor(ball.x / BRICK_W);
+      const ballRow = Math.floor(ball.y / BRICK_H);
+      const validDirs = [0,1,2,3].filter(d => canMove(dirs[d].dc, dirs[d].dr));
+      if (validDirs.length) {
+        // Score each direction by how much it closes distance to ball
+        const scored = validDirs.map(d => ({
+          d,
+          dist: Math.abs((g.col+dirs[d].dc) - ballCol) + Math.abs((g.row+dirs[d].dr) - ballRow)
+        }));
+        scored.sort((a,b) => a.dist - b.dist);
+        // 75% chance to pick best direction, 25% random (to avoid getting stuck)
+        const pick = Math.random() < 0.75 ? scored[0].d : scored[Math.floor(Math.random()*scored.length)].d;
+        g.dir = pick;
+        g.col += dirs[g.dir].dc;
+        g.row += dirs[g.dir].dr;
+      }
+    } else if (canMove(cur.dc, cur.dr)) {
       const shouldTurn = Math.random() < 0.15;
       if (!shouldTurn) {
         g.col += cur.dc;
@@ -2885,8 +2905,9 @@ function drawGuard(c, g) {
   c.globalAlpha = 1;
   c.restore();
 
-  // Detect player in flashlight - strict line of sight check
-  if (ballLaunched && ball) {
+  // Detect player in flashlight - only in Prism Guard mode
+  // In escape mode, guard must physically reach the ball (contact only)
+  if (gameMode === 'blackout' && ballLaunched && ball) {
     const pdx = ball.x - x, pdy = ball.y - y;
     const pdist = Math.sqrt(pdx * pdx + pdy * pdy);
     if (pdist < maxConeLen) {
@@ -2894,7 +2915,6 @@ function drawGuard(c, g) {
       let angleDiff = Math.abs(playerAngle - angle);
       if (angleDiff > Math.PI) angleDiff = Math.PI * 2 - angleDiff;
       if (angleDiff < coneAngle / 2) {
-        // Ray must reach the player - no wall tolerance
         const wallDist = castRay(playerAngle);
         if (pdist <= wallDist) {
           guardCaughtPlayer();
