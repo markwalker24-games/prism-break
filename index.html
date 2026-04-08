@@ -1886,75 +1886,195 @@ function drawBall(c,b){
 
     for (let i = 0; i < trailLen; i++) {
       const t = b.trail[i];
-      // trail[0]=oldest(tail end), trail[trailLen-1]=newest(near ball)
       const frac = i / (trailLen - 1); // 0=oldest/tail, 1=newest/head
-      // Head is bright and large, tail fades out and shrinks
-      const alpha = Math.pow(frac, 0.5) * 0.85;  // bright near ball, gone at tail
-      const blobR = R * (0.4 + 2.2 * frac);      // big near ball, tiny at tail
+      const alpha = Math.pow(frac, 0.5) * 0.85;
+      const blobR = R * (0.4 + 2.2 * frac);
 
       if (tid === 'trail_red') {
-        // Fiery comet - white hot core fading to deep red
-        const grad = c.createRadialGradient(t.x, t.y, 0, t.x, t.y, blobR);
-        grad.addColorStop(0,   `rgba(255,255,200,${alpha})`);
-        grad.addColorStop(0.2, `rgba(255,180,50,${alpha * 0.9})`);
-        grad.addColorStop(0.5, `rgba(255,60,0,${alpha * 0.7})`);
-        grad.addColorStop(1,   `rgba(150,0,0,0)`);
+        // FIRE - flickering flame shapes that dance and lick upward
+        const flicker = Math.sin(tNow * 18 + i * 1.7) * 0.3 + Math.sin(tNow * 27 + i * 2.3) * 0.15;
+        const drift = Math.sin(tNow * 8 + i * 0.9) * blobR * 0.4;
+        const fireR = blobR * (1.1 + flicker);
+        // Core flame
+        const grad = c.createRadialGradient(t.x + drift * 0.3, t.y - blobR * 0.2, 0, t.x + drift * 0.3, t.y, fireR);
+        grad.addColorStop(0,   `rgba(255,255,220,${alpha})`);
+        grad.addColorStop(0.15,`rgba(255,240,80,${alpha * 0.95})`);
+        grad.addColorStop(0.35,`rgba(255,140,20,${alpha * 0.8})`);
+        grad.addColorStop(0.6, `rgba(220,50,0,${alpha * 0.5})`);
+        grad.addColorStop(0.85,`rgba(120,10,0,${alpha * 0.15})`);
+        grad.addColorStop(1,   `rgba(40,0,0,0)`);
         c.fillStyle = grad;
-        c.shadowBlur = 18 * frac; c.shadowColor = '#ff4400';
-        c.beginPath(); c.arc(t.x, t.y, blobR, 0, Math.PI*2); c.fill();
-        // Spark particles near the head
-        if (frac > 0.6 && Math.random() < 0.4) {
-          const angle = Math.random() * Math.PI * 2;
-          const sx = t.x + Math.cos(angle) * blobR * 0.8;
-          const sy = t.y + Math.sin(angle) * blobR * 0.8;
-          c.shadowBlur = 0;
-          c.fillStyle = `rgba(255,${Math.floor(150+Math.random()*100)},0,${alpha * 0.8})`;
-          c.beginPath(); c.arc(sx, sy, R * 0.2, 0, Math.PI*2); c.fill();
+        c.beginPath(); c.arc(t.x + drift * 0.3, t.y - blobR * 0.15, fireR, 0, Math.PI*2); c.fill();
+        // Flame tongues - small ellipses that flick upward
+        if (frac > 0.3) {
+          for (let f = 0; f < 2; f++) {
+            const fAngle = tNow * 12 + i * 2.5 + f * 3.1;
+            const fx = t.x + Math.cos(fAngle) * blobR * 0.6;
+            const fy = t.y - Math.abs(Math.sin(fAngle * 0.7)) * blobR * 1.2;
+            const fSize = blobR * (0.2 + 0.15 * Math.sin(fAngle * 1.3));
+            const fAlpha = alpha * (0.3 + 0.3 * frac);
+            c.fillStyle = `rgba(255,${Math.floor(80 + Math.sin(fAngle) * 60)},0,${fAlpha})`;
+            c.beginPath(); c.arc(fx, fy, fSize, 0, Math.PI*2); c.fill();
+          }
+        }
+        // Hot embers near the head
+        if (frac > 0.7 && Math.random() < 0.5) {
+          const eAngle = Math.random() * Math.PI * 2;
+          const ex = t.x + Math.cos(eAngle) * blobR * 0.9;
+          const ey = t.y + Math.sin(eAngle) * blobR * 0.6 - blobR * 0.3;
+          c.fillStyle = `rgba(255,${Math.floor(200+Math.random()*55)},${Math.floor(Math.random()*80)},${alpha * 0.9})`;
+          c.beginPath(); c.arc(ex, ey, R * 0.12 + Math.random() * R * 0.1, 0, Math.PI*2); c.fill();
+        }
+
+      } else if (tid === 'trail_yellow') {
+        // SPARKLE - glittering gold dust shower
+        const shimmer = 0.7 + 0.3 * Math.sin(tNow * 14 + i * 1.2);
+        // Soft golden glow base
+        const grad = c.createRadialGradient(t.x, t.y, 0, t.x, t.y, blobR * 0.8);
+        grad.addColorStop(0,   `rgba(255,255,180,${alpha * 0.5 * shimmer})`);
+        grad.addColorStop(0.5, `rgba(255,200,50,${alpha * 0.25})`);
+        grad.addColorStop(1,   `rgba(200,120,0,0)`);
+        c.fillStyle = grad;
+        c.beginPath(); c.arc(t.x, t.y, blobR * 0.8, 0, Math.PI*2); c.fill();
+        // Sparkle particles - lots of tiny bright dots
+        const sparkCount = Math.floor(frac * 5) + 1;
+        for (let s = 0; s < sparkCount; s++) {
+          const sAngle = tNow * 6 + i * 1.8 + s * 2.094;
+          const sDist = blobR * (0.3 + 0.7 * Math.abs(Math.sin(sAngle * 0.8 + s)));
+          const sx = t.x + Math.cos(sAngle) * sDist;
+          const sy = t.y + Math.sin(sAngle) * sDist;
+          const sFlash = Math.sin(tNow * 25 + s * 4.7 + i * 1.3);
+          if (sFlash > -0.2) {
+            const sBright = Math.pow(Math.max(0, sFlash), 0.5);
+            const sSize = R * (0.08 + 0.18 * sBright);
+            c.fillStyle = `rgba(255,${Math.floor(240 - sBright * 40)},${Math.floor(150 * (1-sBright))},${alpha * (0.4 + 0.6 * sBright)})`;
+            c.beginPath(); c.arc(sx, sy, sSize, 0, Math.PI*2); c.fill();
+            // Star cross on the brightest sparks
+            if (sBright > 0.7 && frac > 0.4) {
+              c.strokeStyle = `rgba(255,255,200,${alpha * sBright * 0.5})`;
+              c.lineWidth = 0.5;
+              c.beginPath(); c.moveTo(sx - sSize*1.5, sy); c.lineTo(sx + sSize*1.5, sy); c.stroke();
+              c.beginPath(); c.moveTo(sx, sy - sSize*1.5); c.lineTo(sx, sy + sSize*1.5); c.stroke();
+            }
+          }
+        }
+
+      } else if (tid === 'trail_purple') {
+        // SMOKE - wispy tendrils that drift and fade
+        const drift1 = Math.sin(tNow * 3.5 + i * 0.6) * blobR * 0.7;
+        const drift2 = Math.cos(tNow * 2.8 + i * 0.9) * blobR * 0.5;
+        const smokeAlpha = alpha * 0.6 * (1 - frac * 0.3);
+        // Layer multiple smoke puffs with different drift
+        for (let p = 0; p < 3; p++) {
+          const pDrift = p * 1.3;
+          const px = t.x + Math.sin(tNow * 2.2 + i * 0.4 + pDrift) * blobR * (0.5 + p * 0.3);
+          const py = t.y + Math.cos(tNow * 1.8 + i * 0.5 + pDrift) * blobR * (0.3 + p * 0.2);
+          const pR = blobR * (0.8 + p * 0.5) * (0.6 + 0.4 * (1 - frac));
+          const pAlpha = smokeAlpha * (0.5 - p * 0.12);
+          if (pAlpha <= 0) continue;
+          const grad = c.createRadialGradient(px, py, 0, px, py, pR);
+          const purp = Math.floor(50 + p * 30);
+          grad.addColorStop(0,   `rgba(${140+p*20},${purp},${180+p*20},${pAlpha})`);
+          grad.addColorStop(0.4, `rgba(${80+p*15},${Math.floor(purp*0.5)},${130+p*15},${pAlpha * 0.5})`);
+          grad.addColorStop(1,   `rgba(30,0,50,0)`);
+          c.fillStyle = grad;
+          c.beginPath(); c.arc(px, py, pR, 0, Math.PI*2); c.fill();
+        }
+        // Wispy tendril lines at the tail end
+        if (frac < 0.5 && i > 0) {
+          const prev = b.trail[i-1];
+          c.strokeStyle = `rgba(160,80,220,${smokeAlpha * 0.3})`;
+          c.lineWidth = blobR * 0.3;
+          c.lineCap = 'round';
+          c.beginPath();
+          c.moveTo(prev.x + drift1 * 0.5, prev.y + drift2 * 0.5);
+          c.quadraticCurveTo(t.x + drift1, t.y + drift2, t.x + drift1 * 0.3, t.y + drift2 * 0.3);
+          c.stroke();
         }
 
       } else if (tid === 'trail_teal') {
-        // Electric blue-cyan, sharp and bright
-        const grad = c.createRadialGradient(t.x, t.y, 0, t.x, t.y, blobR);
-        grad.addColorStop(0,   `rgba(220,255,255,${alpha})`);
-        grad.addColorStop(0.3, `rgba(0,220,255,${alpha * 0.85})`);
-        grad.addColorStop(0.7, `rgba(0,100,220,${alpha * 0.4})`);
-        grad.addColorStop(1,   `rgba(0,0,100,0)`);
+        // ICE - crystalline fractal shards that crack and melt
+        const shimmer = 0.75 + 0.25 * Math.sin(tNow * 8 + i * 0.9);
+        // Icy core glow
+        const grad = c.createRadialGradient(t.x, t.y, 0, t.x, t.y, blobR * 0.7);
+        grad.addColorStop(0,   `rgba(230,250,255,${alpha * shimmer})`);
+        grad.addColorStop(0.3, `rgba(150,220,255,${alpha * 0.6 * shimmer})`);
+        grad.addColorStop(0.7, `rgba(60,140,220,${alpha * 0.2})`);
+        grad.addColorStop(1,   `rgba(20,60,120,0)`);
         c.fillStyle = grad;
-        c.shadowBlur = 20 * frac; c.shadowColor = '#00ddff';
-        c.beginPath(); c.arc(t.x, t.y, blobR, 0, Math.PI*2); c.fill();
-
-      } else if (tid === 'trail_purple') {
-        // Smoky mystic - wide dark haze, bright violet core
-        const grad = c.createRadialGradient(t.x, t.y, 0, t.x, t.y, blobR * 1.6);
-        grad.addColorStop(0,   `rgba(240,200,255,${alpha})`);
-        grad.addColorStop(0.25,`rgba(180,50,255,${alpha * 0.8})`);
-        grad.addColorStop(0.6, `rgba(80,0,160,${alpha * 0.4})`);
-        grad.addColorStop(1,   `rgba(20,0,50,0)`);
-        c.fillStyle = grad;
-        c.shadowBlur = 22 * frac; c.shadowColor = '#aa22ff';
-        c.beginPath(); c.arc(t.x, t.y, blobR * 1.6, 0, Math.PI*2); c.fill();
+        c.beginPath(); c.arc(t.x, t.y, blobR * 0.7, 0, Math.PI*2); c.fill();
+        // Crystal shards - tiny angular lines radiating out
+        if (frac > 0.15) {
+          const shardCount = Math.floor(frac * 4) + 2;
+          for (let s = 0; s < shardCount; s++) {
+            const sAngle = (Math.PI * 2 / shardCount) * s + tNow * 1.5 + i * 0.4;
+            const sLen = blobR * (0.5 + 0.6 * Math.sin(tNow * 6 + s * 2.1 + i));
+            // Branch fractal - main line + one fork
+            const sx = t.x + Math.cos(sAngle) * blobR * 0.2;
+            const sy = t.y + Math.sin(sAngle) * blobR * 0.2;
+            const ex = t.x + Math.cos(sAngle) * sLen;
+            const ey = t.y + Math.sin(sAngle) * sLen;
+            const iceAlpha = alpha * (0.3 + 0.4 * shimmer) * frac;
+            c.strokeStyle = `rgba(200,240,255,${iceAlpha})`;
+            c.lineWidth = 0.8;
+            c.beginPath(); c.moveTo(sx, sy); c.lineTo(ex, ey); c.stroke();
+            // Fork branch
+            if (sLen > blobR * 0.4) {
+              const forkAngle = sAngle + (s % 2 === 0 ? 0.5 : -0.5);
+              const forkLen = sLen * 0.4;
+              const mx = (sx + ex) * 0.6 + ex * 0.4;
+              const my = (sy + ey) * 0.6 + ey * 0.4;
+              c.strokeStyle = `rgba(180,230,255,${iceAlpha * 0.5})`;
+              c.lineWidth = 0.5;
+              c.beginPath();
+              c.moveTo(mx - (mx - sx) * 0.3, my - (my - sy) * 0.3);
+              c.lineTo(mx + Math.cos(forkAngle) * forkLen, my + Math.sin(forkAngle) * forkLen);
+              c.stroke();
+            }
+          }
+        }
+        // Melt drip - fading droplets at the tail
+        if (frac < 0.4 && Math.random() < 0.3) {
+          const dx = t.x + (Math.random() - 0.5) * blobR;
+          const dy = t.y + Math.random() * blobR * 0.5;
+          c.fillStyle = `rgba(150,210,255,${alpha * 0.4})`;
+          c.beginPath(); c.arc(dx, dy, R * 0.1, 0, Math.PI*2); c.fill();
+        }
 
       } else if (tid === 'trail_green') {
-        // Toxic neon acid, tight and bright
-        const grad = c.createRadialGradient(t.x, t.y, 0, t.x, t.y, blobR);
-        grad.addColorStop(0,   `rgba(220,255,150,${alpha})`);
-        grad.addColorStop(0.3, `rgba(100,255,0,${alpha * 0.85})`);
-        grad.addColorStop(0.7, `rgba(20,150,0,${alpha * 0.4})`);
-        grad.addColorStop(1,   `rgba(0,40,0,0)`);
-        c.fillStyle = grad;
-        c.shadowBlur = 18 * frac; c.shadowColor = '#44ff00';
-        c.beginPath(); c.arc(t.x, t.y, blobR, 0, Math.PI*2); c.fill();
-
-      } else if (tid === 'trail_yellow') {
-        // Electric gold, crackling energy
-        const grad = c.createRadialGradient(t.x, t.y, 0, t.x, t.y, blobR);
-        grad.addColorStop(0,   `rgba(255,255,200,${alpha})`);
-        grad.addColorStop(0.3, `rgba(255,200,0,${alpha * 0.9})`);
-        grad.addColorStop(0.7, `rgba(200,100,0,${alpha * 0.4})`);
-        grad.addColorStop(1,   `rgba(100,30,0,0)`);
-        c.fillStyle = grad;
-        c.shadowBlur = 20 * frac; c.shadowColor = '#ffcc00';
-        c.beginPath(); c.arc(t.x, t.y, blobR, 0, Math.PI*2); c.fill();
+        // TOXIC - no trail, just a sizzling aura around the ball
+        // Only render near the ball head, not along the trail
+        if (frac > 0.7) {
+          // Bubbling toxic aura
+          const bubbleCount = 3;
+          for (let b2 = 0; b2 < bubbleCount; b2++) {
+            const bAngle = tNow * 5 + b2 * 2.094 + i * 0.7;
+            const bDist = blobR * (0.5 + 0.5 * Math.sin(tNow * 8 + b2 * 1.7));
+            const bx = t.x + Math.cos(bAngle) * bDist;
+            const by = t.y + Math.sin(bAngle) * bDist;
+            const bSize = R * (0.15 + 0.15 * Math.sin(tNow * 12 + b2 * 3));
+            // Toxic green bubble
+            c.fillStyle = `rgba(100,255,0,${alpha * 0.4})`;
+            c.beginPath(); c.arc(bx, by, bSize, 0, Math.PI*2); c.fill();
+            // Highlight on bubble
+            c.fillStyle = `rgba(200,255,100,${alpha * 0.25})`;
+            c.beginPath(); c.arc(bx - bSize*0.2, by - bSize*0.2, bSize*0.4, 0, Math.PI*2); c.fill();
+          }
+          // Sizzle sparks - tiny dots that pop randomly
+          if (Math.random() < 0.6) {
+            const sx = t.x + (Math.random()-0.5) * blobR * 1.2;
+            const sy = t.y + (Math.random()-0.5) * blobR * 1.2;
+            c.fillStyle = `rgba(${Math.random()<0.5?'180,255,0':'255,255,100'},${alpha * 0.6})`;
+            c.beginPath(); c.arc(sx, sy, R * 0.08, 0, Math.PI*2); c.fill();
+          }
+        }
+        // Dripping acid at the tail positions
+        if (frac < 0.4 && frac > 0.05) {
+          const drip = Math.sin(tNow * 4 + i * 2) * 0.5 + 0.5;
+          const dripY = t.y + drip * blobR * 0.6;
+          c.fillStyle = `rgba(80,200,0,${alpha * 0.3 * (1-frac)})`;
+          c.beginPath(); c.arc(t.x, dripY, R * 0.12, 0, Math.PI*2); c.fill();
+        }
 
       } else if (tid === 'trail_white') {
         // Icy crystal, shimmering blue-white
@@ -6752,12 +6872,14 @@ function showModeSelect(){
     font-family:'Lato',sans-serif;
   ">
     <!-- Title -->
-    <div id="homeAuthIndicator" style="text-align:right;margin-bottom:4px;cursor:pointer;" onclick="(window._currentUser ? showConfirmOverlay('Sign out of Prism Break?', ()=>signOut(), 'SIGN OUT', 'CANCEL') : signInWithGoogle())">
+    <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-bottom:4px;">
+      ${isAdminUser() ? `<span id="adminToggleBtn" style="font-family:'Cinzel',serif;font-size:9px;cursor:pointer;padding:2px 6px;border-radius:2px;border:1px solid ${adminMode ? 'rgba(245,200,66,0.5)' : 'rgba(120,120,120,0.3)'};color:${adminMode ? '#f5c842' : 'rgba(150,150,150,0.5)'};-webkit-tap-highlight-color:transparent;">★ ${adminMode ? 'ADMIN' : 'ADMIN'}</span>` : ''}
+      <div id="homeAuthIndicator" style="cursor:pointer;" onclick="(window._currentUser ? showConfirmOverlay('Sign out of Prism Break?', ()=>signOut(), 'SIGN OUT', 'CANCEL') : signInWithGoogle())">
       ${_currentUser
         ? `<span style="font-family:'Lato',sans-serif;font-size:10px;color:rgba(245,200,66,0.7);letter-spacing:0.5px;">👤 ${getDisplayName()}</span>`
         : `<span style="font-family:'Lato',sans-serif;font-size:10px;color:rgba(245,200,66,0.5);letter-spacing:0.5px;">Sign In</span>`
       }
-      ${isAdminUser() ? `<span id="adminToggleBtn" style="margin-left:8px;font-family:'Cinzel',serif;font-size:9px;cursor:pointer;padding:2px 6px;border-radius:2px;border:1px solid ${adminMode ? 'rgba(245,200,66,0.5)' : 'rgba(120,120,120,0.3)'};color:${adminMode ? '#f5c842' : 'rgba(150,150,150,0.5)'};">★ ${adminMode ? 'ADMIN' : 'ADMIN'}</span>` : ''}
+      </div>
     </div>
     <div style="text-align:center;margin-bottom:2px;">
       <div style="
