@@ -1321,7 +1321,12 @@ function savedSeries() {
 function saveSeries(series) {
   const all = savedSeries();
   const idx = all.findIndex(s=>s.name===series.name);
-  if(idx>=0) all[idx]=series; else all.push(series);
+  if(idx>=0) {
+    // Merge - preserve local metadata, update content fields
+    all[idx] = { ...all[idx], ...series };
+  } else {
+    all.push(series);
+  }
   LS.set('cc_series', JSON.stringify(all));
 }
 function deleteSeries(name) {
@@ -4161,7 +4166,10 @@ function renderLevelList(autoOpen){
   list.innerHTML = '';
 
   const featuredName = getFeaturedSeriesName();
-  const allSeries = savedSeries();
+  const localSeries = savedSeries();
+  // Merge in cloud quest series (HARDCODED_SERIES) that aren't already in local storage
+  const localNames = new Set(localSeries.map(s => s.name));
+  const allSeries = [...localSeries, ...HARDCODED_SERIES.filter(s => !localNames.has(s.name))];
   const allLevels = savedLevels();
   const allSeriesLevelNames = new Set(allSeries.filter(s => !s._isChallengeSeries).flatMap(s => s.levels.map(l => l.name)));
 
@@ -5626,7 +5634,9 @@ function openMapsPanel(defaultTab='maps') {
 
     const hardcodedNames = new Set(HARDCODED_SERIES.map(s=>s.name));
     const featuredName = getFeaturedSeriesName();
-    const all = savedSeries(); // includes hardcoded (seeded on init) + user-created
+    const localAll = savedSeries();
+    const localNames = new Set(localAll.map(s => s.name));
+    const all = [...localAll, ...HARDCODED_SERIES.filter(s => !localNames.has(s.name))];
 
     function rebuildSeriesTab(){ renderSeriesTab(); }
 
@@ -7529,8 +7539,6 @@ async function loadActiveSeries() {
       // Keep hardcoded synced for local progress tracking
       HARDCODED_SERIES.length = 0;
       cloud.forEach(s => HARDCODED_SERIES.push(s));
-      // Persist to localStorage
-      HARDCODED_SERIES.forEach(hs => { saveSeries(hs); });
       // Re-init quest order if needed
       if (!getQuestOrder().length && HARDCODED_SERIES[0]) {
         setQuestOrder([HARDCODED_SERIES[0].name]);
