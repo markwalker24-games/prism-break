@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Prism Break">
 <title>PRISM BREAK</title>
@@ -312,9 +312,6 @@
 </div>
 
 <!-- MENU OVERLAY -->
-<!-- SERIES SELECT OVERLAY removed - functionality merged into MAPS panel -->
-
-<!-- SERIES MANAGER OVERLAY removed - functionality merged into MAPS panel -->
 
 <!-- LEVEL SELECT OVERLAY -->
 <div class="overlay" id="levelSelectOverlay">
@@ -426,7 +423,6 @@ const BRICK_IMAGES = {};
     key: 'images/brick_key.png',
     lock: 'images/brick_lock.png',
     skull: 'images/brick_skull.png',
-    camera: 'images/brick_camera.png',
     alarm: 'images/brick_alarm.png',
     bomb: 'images/brick_bomb.png',
     diamond: 'images/brick_diamond.png',
@@ -467,7 +463,6 @@ const canvas      = document.getElementById('gameCanvas');
 const ctx         = canvas.getContext('2d');
 const bCanvas     = document.getElementById('builderCanvas');
 const bCtx        = bCanvas.getContext('2d');
-const scoreDisplay= { textContent: 0 }; // removed from UI but keep reference to avoid errors
 const keyDisplay  = document.getElementById('keyDisplay');
 const diamondDisplay = document.getElementById('diamondDisplay');
 const diamondTotal   = document.getElementById('diamondTotal');
@@ -520,10 +515,9 @@ const BALL_MOVE    = 3.2;
 // =====================================================================
 // GAME STATE
 // =====================================================================
-let score=0, gameRunning=false, gameOver=false, ballLaunched=false, paused=false;
+let gameRunning=false, gameOver=false, ballLaunched=false, paused=false;
 let particles=[];
 let bricks=[];
-let portal=null;
 let gameStartTime=0;
 let totalElapsed=0; // aggregate time across all lives
 let keysHeld=0;
@@ -541,7 +535,6 @@ let finaleTriggered=false;
 let finaleTimeout=null;
 let gameMode=null; // 'escape' | 'blackout'
 let currentForcedMode=null; // persists across restarts
-let poisonBall=null; // {x,y,vx,vy,flaming,flameTimer,trail:[]}
 let _escaping=false; // ball is traveling off screen after escape
 let ball={ x:0,y:0,vy:0,vx:0,color:'#ffffff',trail:[] };
 let moveLeft=false, moveRight=false;
@@ -723,7 +716,6 @@ async function loadResetTokenFromCloud() {
     const cloudToken = rows[0].value;
     const localToken = LS.get('pb_reset_token');
     if (cloudToken && cloudToken !== localToken) {
-      console.log('Reset token changed - wiping progress');
       performProgressReset();
       LS.set('pb_reset_token', cloudToken);
     }
@@ -780,7 +772,6 @@ async function syncQuestOrderToCloud(order) {
       console.error('Quest order sync failed:', res.status, errText);
       throw new Error(`${res.status}: ${errText}`);
     }
-    console.log('Quest order synced:', order);
   } catch(e) {
     console.error('Quest order sync error:', e);
     throw e;
@@ -936,7 +927,6 @@ async function upsertMyProfile(user) {
     avatar_url: user.user_metadata?.avatar_url || null,
   }, { onConflict: 'id' });
   if (error) console.warn('Profile upsert failed:', error);
-  else console.log('Profile upserted:', displayName);
 }
 
 const _profileCache = {};
@@ -1071,7 +1061,6 @@ function slugify(name) {
 
 async function upsertMapToCloud(levelData) {
   // Check if this map already exists in cloud - reuse its slug if so
-  console.log('upsertMapToCloud called for:', levelData.name, 'creator:', CREATOR_ID);
   const existing = await fetch(`${SUPA_URL}/rest/v1/maps?creator_id=eq.${encodeURIComponent(CREATOR_ID)}&name=eq.${encodeURIComponent(levelData.name)}&select=slug&limit=1`, {
     headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` }
   });
@@ -1085,30 +1074,19 @@ async function upsertMapToCloud(levelData) {
         headers: { 'Content-Type':'application/json','apikey':SUPA_KEY,'Authorization':`Bearer ${SUPA_KEY}`,'Prefer':'return=minimal' },
         body: JSON.stringify({ data: levelData, name: levelData.name })
       });
-      console.log('upsertMapToCloud: updated existing map, slug:', existingSlug);
       return existingSlug; // always return the stable slug
     }
   }
   // New map - generate slug once and insert
   const slug = slugify(levelData.name || 'map');
   const payload = { slug, name: levelData.name || 'Unnamed', data: levelData, creator_id: CREATOR_ID };
-  console.log('Inserting new map to Supabase:', slug, 'creator:', CREATOR_ID);
   const res = await fetch(`${SUPA_URL}/rest/v1/maps`, {
     method: 'POST',
     headers: { 'Content-Type':'application/json','apikey':SUPA_KEY,'Authorization':`Bearer ${SUPA_KEY}`,'Prefer':'return=representation' },
     body: JSON.stringify(payload)
   });
   if(!res.ok) { const err=await res.text(); console.error('Supabase insert failed:', res.status, err); throw new Error(err); }
-  console.log('Supabase insert success, slug:', slug);
   return slug;
-}
-
-async function fetchCloudMaps() {
-  const res = await fetch(`${SUPA_URL}/rest/v1/maps?select=slug,name,creator_id,created_at&creator_id=eq.${encodeURIComponent(CREATOR_ID)}&order=created_at.desc&limit=100`, {
-    headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` }
-  });
-  if(!res.ok) throw new Error('Failed to fetch cloud maps');
-  return await res.json();
 }
 
 async function deleteCloudMap(slug) {
@@ -1348,14 +1326,6 @@ function saveSeries(series) {
 function deleteSeries(name) {
   LS.set('cc_series', JSON.stringify(savedSeries().filter(s=>s.name!==name)));
 }
-function importSeriesFromJSON(json) {
-  try {
-    const s = JSON.parse(json);
-    if(!s.name || !Array.isArray(s.levels)) throw new Error('Invalid format');
-    saveSeries(s);
-    return s.name;
-  } catch(e) { return null; }
-}
 
 // =====================================================================
 // BRICK BUILDERS
@@ -1472,7 +1442,6 @@ function buildGuardModeMap() {
 
   return { bricks: result, ballCol, ballRow, lockCol, lockRow };
 }
-
 
 function buildRandomBricks(mode) {
   const result=[];
@@ -1759,15 +1728,6 @@ function drawBrickImage(c, b, imgKey){
   } else {
     c.fillStyle='#333'; c.fillRect(b.x,b.y,b.w,b.h);
   }
-}
-
-function drawPixelRect(c,x,y,w,h,color,dark){
-  c.fillStyle='rgba(0,0,0,0.45)'; c.fillRect(~~x+2,~~y+2,w,h);
-  c.fillStyle=color; c.fillRect(~~x,~~y,w,h);
-  c.fillStyle='rgba(255,255,255,0.22)';
-  c.fillRect(~~x,~~y,w,2); c.fillRect(~~x,~~y,2,h);
-  c.fillStyle=dark||'rgba(0,0,0,0.4)';
-  c.fillRect(~~x,~~(y+h-2),w,2); c.fillRect(~~(x+w-2),~~y,2,h);
 }
 
 // Color -> image key map
@@ -2082,146 +2042,10 @@ function drawBall(c,b){
 // =====================================================================
 // POISON BALL
 // =====================================================================
-function drawPoisonBall(c, pb){
-  if(!pb) return;
-  const x=pb.x, y=pb.y, R=BALL_R;
-  const t=performance.now()*0.003;
-
-  if(pb.flaming){
-    // Flaming state - bright orange/red fireball
-    const pulse=0.7+0.3*Math.sin(t*8);
-
-    // Trail
-    for(let i=0;i<pb.trail.length;i++){
-      const tr=pb.trail[i], alpha=(i/pb.trail.length)*0.4;
-      const rad=R*(0.5+0.5*i/pb.trail.length);
-      c.globalAlpha=alpha;
-      c.fillStyle=i%2===0?'#ff6600':'#ffcc00';
-      c.beginPath(); c.arc(tr.x,tr.y,rad,0,Math.PI*2); c.fill();
-    }
-    c.globalAlpha=1;
-
-    // Outer glow - much bigger and brighter
-    const glow=c.createRadialGradient(x,y,0,x,y,R*5);
-    glow.addColorStop(0,`rgba(255,220,100,${0.9*pulse})`);
-    glow.addColorStop(0.3,`rgba(255,120,0,${0.6*pulse})`);
-    glow.addColorStop(0.7,`rgba(255,50,0,0.25)`);
-    glow.addColorStop(1,'rgba(0,0,0,0)');
-    c.fillStyle=glow; c.beginPath(); c.arc(x,y,R*5,0,Math.PI*2); c.fill();
-
-    // Core - larger
-    const core=c.createRadialGradient(x-R*0.2,y-R*0.2,0,x,y,R*1.8);
-    core.addColorStop(0,'rgba(255,255,255,1)');
-    core.addColorStop(0.2,'rgba(255,255,150,1)');
-    core.addColorStop(0.5,`rgba(255,160,0,1)`);
-    core.addColorStop(0.8,`rgba(255,60,0,1)`);
-    core.addColorStop(1,`rgba(180,0,0,0.8)`);
-    c.fillStyle=core; c.beginPath(); c.arc(x,y,R*1.8,0,Math.PI*2); c.fill();
-
-    // Flame flickers - bigger
-    for(let i=0;i<6;i++){
-      const a=t*3+i*Math.PI/3;
-      const fx=x+Math.cos(a)*R*1.2*pulse;
-      const fy=y+Math.sin(a)*R*1.2*pulse;
-      c.fillStyle=`rgba(255,${Math.floor(100+Math.random()*155)},0,0.7)`;
-      c.beginPath(); c.arc(fx,fy,R*0.6,0,Math.PI*2); c.fill();
-    }
-  } else {
-    // Poison state - sickly purple/green
-    const pulse=0.6+0.4*Math.sin(t*4);
-
-    // Trail
-    for(let i=0;i<pb.trail.length;i++){
-      const tr=pb.trail[i], alpha=(i/pb.trail.length)*0.3;
-      c.globalAlpha=alpha;
-      c.fillStyle='#1a4aaa';
-      c.beginPath(); c.arc(tr.x,tr.y,R*0.7,0,Math.PI*2); c.fill();
-    }
-    c.globalAlpha=1;
-
-    // Outer glow - pulsing menace
-    const glow=c.createRadialGradient(x,y,0,x,y,R*2.5);
-    glow.addColorStop(0,`rgba(120,0,200,${0.3*pulse})`);
-    glow.addColorStop(1,'rgba(0,0,0,0)');
-    c.fillStyle=glow; c.beginPath(); c.arc(x,y,R*2.5,0,Math.PI*2); c.fill();
-
-    // Base - dark poison
-    const base=c.createRadialGradient(x,y+R*0.2,0,x,y,R);
-    base.addColorStop(0,`rgba(160,0,255,1)`);
-    base.addColorStop(0.5,`rgba(80,0,160,1)`);
-    base.addColorStop(1,`rgba(20,0,60,1)`);
-    c.fillStyle=base; c.beginPath(); c.arc(x,y,R,0,Math.PI*2); c.fill();
-
-    // Swirling toxic pattern
-    c.strokeStyle=`rgba(0,255,100,${0.5*pulse})`;
-    c.lineWidth=1.5;
-    c.beginPath();
-    c.arc(x,y,R*0.55,t*2,t*2+Math.PI*1.2);
-    c.stroke();
-    c.strokeStyle=`rgba(180,0,255,${0.4*pulse})`;
-    c.beginPath();
-    c.arc(x,y,R*0.75,t*2+Math.PI,t*2+Math.PI*2.2);
-    c.stroke();
-    c.lineWidth=1;
-
-    // Skull symbol
-    c.fillStyle=`rgba(255,255,255,${0.6*pulse})`;
-    c.font=`${Math.floor(R*1.2)}px serif`;
-    c.textAlign='center'; c.textBaseline='middle';
-    c.fillText('☠',x,y+1);
-    c.textAlign='left'; c.textBaseline='alphabetic';
-
-    // Rim
-    c.strokeStyle=`rgba(200,0,255,0.6)`;
-    c.lineWidth=1.5;
-    c.beginPath(); c.arc(x,y,R,0,Math.PI*2); c.stroke();
-    c.lineWidth=1;
-  }
-}
 
 // =====================================================================
 // PORTAL
 // =====================================================================
-function drawPortal(c, p, t){
-  if(!p) return;
-  const cx=p.x+p.w/2, cy=p.y+p.h/2;
-  const pulse=0.7+0.3*Math.sin(t*0.004);
-  const outerR=Math.min(p.w,p.h)*0.42*pulse;
-  const innerR=outerR*0.55;
-
-  // Outer glow
-  const grad=c.createRadialGradient(cx,cy,innerR*0.5,cx,cy,outerR*1.4);
-  grad.addColorStop(0,'rgba(255,215,0,0.0)');
-  grad.addColorStop(0.5,'rgba(255,215,0,0.18)');
-  grad.addColorStop(1,'rgba(255,215,0,0.0)');
-  c.fillStyle=grad; c.fillRect(p.x,p.y,p.w,p.h);
-
-  // Spinning ring segments
-  c.save(); c.translate(cx,cy);
-  for(let i=0;i<8;i++){
-    const angle=(i/8)*Math.PI*2 + t*0.002;
-    const len=i%2===0?0.9:0.65;
-    c.strokeStyle=i%2===0?'rgba(255,215,0,0.95)':'rgba(255,180,0,0.5)';
-    c.lineWidth=i%2===0?2.5:1.5;
-    c.beginPath();
-    c.arc(0,0,outerR,angle,angle+Math.PI/8*len);
-    c.stroke();
-  }
-  // Inner fill
-  c.fillStyle='rgba(255,215,0,0.12)';
-  c.beginPath(); c.arc(0,0,innerR,0,Math.PI*2); c.fill();
-  // Core bright dot
-  c.fillStyle='rgba(255,240,100,0.95)';
-  c.beginPath(); c.arc(0,0,innerR*0.35,0,Math.PI*2); c.fill();
-  c.restore();
-
-  // "EXIT" label
-  c.fillStyle='rgba(255,215,0,0.9)';
-  c.font=`${Math.max(5,Math.floor(p.h*0.22))}px "Press Start 2P",monospace`;
-  c.textAlign='center'; c.textBaseline='bottom';
-  c.fillText('EXIT',cx,p.y+p.h-2);
-  c.textAlign='left'; c.textBaseline='alphabetic';
-}
 
 let screenFlash=0; // countdown for white screen flash
 
@@ -2470,23 +2294,6 @@ function detonateBomb(bomb){
     spawnParticles(b.x+b.w/2,b.y+b.h/2,b.color||'#ff6600',8);
     return false;
   });
-
-  // Check if poison ball is in blast zone - ignite it!
-  if(poisonBall && !poisonBall.flaming && affected.has(`${Math.floor(poisonBall.x/BRICK_W)},${Math.floor(poisonBall.y/BRICK_H)}`)){
-    poisonBall.flaming=true;
-    poisonBall.flameTimer=6000; // 6 seconds (doubled)
-    poisonBall.trail=[];
-    screenFlash=15;
-    // Keep current direction, speed it up
-    const spd=Math.sqrt(poisonBall.vx*poisonBall.vx+poisonBall.vy*poisonBall.vy)||1;
-    poisonBall.vx=(poisonBall.vx/spd)*4;
-    poisonBall.vy=(poisonBall.vy/spd)*4;
-    for(let i=0;i<20;i++){
-      const a=Math.random()*Math.PI*2, s=3+Math.random()*5;
-      particles.push({x:poisonBall.x,y:poisonBall.y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,
-        color:'#ff6600',life:1.2,size:3+Math.random()*5});
-    }
-  }
 
   // Check all guards in blast zone
   if (gameMode === 'blackout') {
@@ -2808,32 +2615,60 @@ function drawAlarmGuards(c) {
   const t = performance.now() * 0.002;
   alarmGuards.forEach(g => {
     const x = g.x, y = g.y, R = BALL_R;
-    // Trail
+    const dirs = [[1,0],[0,1],[-1,0],[0,-1]];
+    const [dx, dy] = dirs[g.dir] || [0, -1];
+    const perpCX = -dy, perpCY = dx;
+
+    // Trail - red/blue alternating
     g.trail.forEach((tr, i) => {
-      c.globalAlpha = (1 - i/g.trail.length) * 0.3;
-      c.fillStyle = '#1a4aaa';
-      c.beginPath(); c.arc(tr.x, tr.y, R*0.6, 0, Math.PI*2); c.fill();
+      c.globalAlpha = (1 - i/g.trail.length) * 0.25;
+      c.fillStyle = i % 2 === 0 ? '#ff2244' : '#2244ff';
+      c.beginPath(); c.arc(tr.x, tr.y, R*0.5, 0, Math.PI*2); c.fill();
     });
     c.globalAlpha = 1;
-    // Glow
-    const glow = c.createRadialGradient(x,y,0,x,y,R*3);
-    glow.addColorStop(0, `rgba(40,80,220,${0.5+0.2*Math.sin(t*4)})`);
-    glow.addColorStop(0.5, 'rgba(20,50,180,0.2)');
+
+    // Red/blue siren flash
+    const sirenPhase = Math.sin(t * 8);
+    const sirenColor = sirenPhase > 0 ? 'rgba(255,30,60,0.4)' : 'rgba(30,60,255,0.4)';
+    const glow = c.createRadialGradient(x,y,0,x,y,R*2.5);
+    glow.addColorStop(0, sirenColor);
+    glow.addColorStop(0.6, 'rgba(0,0,0,0.05)');
     glow.addColorStop(1, 'rgba(0,0,0,0)');
-    c.fillStyle = glow; c.beginPath(); c.arc(x,y,R*3,0,Math.PI*2); c.fill();
-    // Body
-    const body = c.createRadialGradient(x-R*0.3,y-R*0.3,0,x,y,R);
-    body.addColorStop(0,'#6699ff'); body.addColorStop(0.4,'#1a3aaa'); body.addColorStop(1,'#0a1a55');
+    c.fillStyle = glow; c.beginPath(); c.arc(x,y,R*2.5,0,Math.PI*2); c.fill();
+
+    // Body - dark navy uniform
+    const body = c.createRadialGradient(x-R*0.2,y-R*0.2,0,x,y,R);
+    body.addColorStop(0,'#2a3a5c'); body.addColorStop(0.6,'#1a2844'); body.addColorStop(1,'#0c1628');
     c.fillStyle = body; c.beginPath(); c.arc(x,y,R,0,Math.PI*2); c.fill();
-    // Eyes
-    const eyeR = R*0.2;
-    [[-R*0.3,-R*0.2],[R*0.3,-R*0.2]].forEach(([ex,ey]) => {
-      c.fillStyle='#fff'; c.beginPath(); c.arc(x+ex,y+ey,eyeR,0,Math.PI*2); c.fill();
-      c.fillStyle='#000'; c.beginPath(); c.arc(x+ex+1,y+ey+1,eyeR*0.5,0,Math.PI*2); c.fill();
+
+    // Cap/visor - flat brim in movement direction
+    const capX = x + dx * R * 0.5;
+    const capY = y + dy * R * 0.5;
+    c.fillStyle = '#0c1628';
+    c.beginPath();
+    c.moveTo(capX + perpCX*R*0.7, capY + perpCY*R*0.7);
+    c.lineTo(capX - perpCX*R*0.7, capY - perpCY*R*0.7);
+    c.lineTo(capX + dx*R*0.6 - perpCX*R*0.5, capY + dy*R*0.6 - perpCY*R*0.5);
+    c.lineTo(capX + dx*R*0.6 + perpCX*R*0.5, capY + dy*R*0.6 + perpCY*R*0.5);
+    c.closePath(); c.fill();
+
+    // Badge - small gold dot
+    c.fillStyle = '#daa520';
+    c.beginPath();
+    c.arc(x - dx*R*0.15 + perpCX*R*0.2, y - dy*R*0.15 + perpCY*R*0.2, R*0.14, 0, Math.PI*2);
+    c.fill();
+
+    // Eyes - stern, looking in movement direction
+    const eyeFwd = R * 0.2;
+    const eyeSpread = R * 0.28;
+    [[-perpCX*eyeSpread, -perpCY*eyeSpread], [perpCX*eyeSpread, perpCY*eyeSpread]].forEach(([ex,ey]) => {
+      c.fillStyle='#c0c8d8';
+      c.beginPath(); c.arc(x+dx*eyeFwd+ex, y+dy*eyeFwd+ey, R*0.16, 0, Math.PI*2); c.fill();
+      c.fillStyle='#111';
+      c.beginPath(); c.arc(x+dx*eyeFwd+ex+dx*1.2, y+dy*eyeFwd+ey+dy*1.2, R*0.08, 0, Math.PI*2); c.fill();
     });
   });
 }
-
 function triggerCameraAlarm(cx, cy) {
   alarmGuards = []; // clear any previous
   showToast('🚨 ALARM! Guards incoming!', '#ff2222');
@@ -2958,20 +2793,21 @@ function drawGuard(c, g) {
   if (!g) return;
   const x = g.x, y = g.y, R = BALL_R;
   const t = performance.now() * 0.002;
+  const dirs = [[1,0],[0,1],[-1,0],[0,-1]];
+  const [dx, dy] = dirs[g.dir] || [0, -1];
+  const perpCX = -dy, perpCY = dx;
 
-  // Trail
+  // Trail - red/blue alternating
   g.trail.forEach((tr, i) => {
-    c.globalAlpha = (1 - i / g.trail.length) * 0.3;
-    c.fillStyle = '#1a4aaa';
-    c.beginPath(); c.arc(tr.x, tr.y, R * 0.6, 0, Math.PI * 2); c.fill();
+    c.globalAlpha = (1 - i / g.trail.length) * 0.25;
+    c.fillStyle = i % 2 === 0 ? '#ff2244' : '#2244ff';
+    c.beginPath(); c.arc(tr.x, tr.y, R * 0.5, 0, Math.PI * 2); c.fill();
   });
   c.globalAlpha = 1;
 
   // Flashlight - only in Prism Guard mode
   if (gameMode === 'blackout') {
-    const fDirs = [[1,0],[0,1],[-1,0],[0,-1]];
-    const [fdx, fdy] = fDirs[g.dir];
-    const fAngle = Math.atan2(fdy, fdx);
+    const fAngle = Math.atan2(dy, dx);
     const coneAngle = Math.PI / 4;
     const maxConeLen = BRICK_W * 3;
 
@@ -3019,167 +2855,50 @@ function drawGuard(c, g) {
     }
   }
 
-  // Outer glow
-  const glow = c.createRadialGradient(x, y, 0, x, y, R * 3);
-  glow.addColorStop(0, `rgba(40,80,220,${0.5 + 0.2 * Math.sin(t * 4)})`);
-  glow.addColorStop(0.5, 'rgba(20,50,180,0.2)');
+  // Siren glow - red/blue flash
+  const sirenPhase = Math.sin(t * 8);
+  const sirenColor = sirenPhase > 0 ? 'rgba(255,30,60,0.4)' : 'rgba(30,60,255,0.4)';
+  const glow = c.createRadialGradient(x, y, 0, x, y, R * 2.5);
+  glow.addColorStop(0, sirenColor);
+  glow.addColorStop(0.6, 'rgba(0,0,0,0.05)');
   glow.addColorStop(1, 'rgba(0,0,0,0)');
   c.fillStyle = glow;
-  c.beginPath(); c.arc(x, y, R * 3, 0, Math.PI * 2); c.fill();
+  c.beginPath(); c.arc(x, y, R * 2.5, 0, Math.PI * 2); c.fill();
 
-  // Body - dark purple
-  const body = c.createRadialGradient(x - R * 0.3, y - R * 0.3, 0, x, y, R);
-  body.addColorStop(0, '#6699ff');
-  body.addColorStop(0.4, '#1a3aaa');
-  body.addColorStop(1, '#0a1a55');
+  // Body - dark navy uniform
+  const body = c.createRadialGradient(x - R * 0.2, y - R * 0.2, 0, x, y, R);
+  body.addColorStop(0, '#2a3a5c');
+  body.addColorStop(0.6, '#1a2844');
+  body.addColorStop(1, '#0c1628');
   c.fillStyle = body;
   c.beginPath(); c.arc(x, y, R, 0, Math.PI * 2); c.fill();
 
-  // Eyes - two small white dots looking in movement direction
-  const eyeOffset = R * 0.35;
-  const perpX = -dy * eyeOffset * 0.5;
-  const perpY = dx * eyeOffset * 0.5;
-  const eyeForward = R * 0.25;
-  [[perpX, perpY], [-perpX, -perpY]].forEach(([ex, ey]) => {
-    c.fillStyle = '#ffffff';
-    c.beginPath();
-    c.arc(x + dx * eyeForward + ex, y + dy * eyeForward + ey, R * 0.18, 0, Math.PI * 2);
-    c.fill();
-    // Pupils
-    c.fillStyle = '#000000';
-    c.beginPath();
-    c.arc(x + dx * eyeForward + ex + dx * 1.5, y + dy * eyeForward + ey + dy * 1.5, R * 0.09, 0, Math.PI * 2);
-    c.fill();
+  // Cap/visor - flat brim in movement direction
+  const capX = x + dx * R * 0.5;
+  const capY = y + dy * R * 0.5;
+  c.fillStyle = '#0c1628';
+  c.beginPath();
+  c.moveTo(capX + perpCX*R*0.7, capY + perpCY*R*0.7);
+  c.lineTo(capX - perpCX*R*0.7, capY - perpCY*R*0.7);
+  c.lineTo(capX + dx*R*0.6 - perpCX*R*0.5, capY + dy*R*0.6 - perpCY*R*0.5);
+  c.lineTo(capX + dx*R*0.6 + perpCX*R*0.5, capY + dy*R*0.6 + perpCY*R*0.5);
+  c.closePath(); c.fill();
+
+  // Badge - small gold dot
+  c.fillStyle = '#daa520';
+  c.beginPath();
+  c.arc(x - dx*R*0.15 + perpCX*R*0.2, y - dy*R*0.15 + perpCY*R*0.2, R*0.14, 0, Math.PI*2);
+  c.fill();
+
+  // Eyes - stern, looking in movement direction
+  const eyeFwd = R * 0.2;
+  const eyeSpread = R * 0.28;
+  [[-perpCX*eyeSpread, -perpCY*eyeSpread], [perpCX*eyeSpread, perpCY*eyeSpread]].forEach(([ex,ey]) => {
+    c.fillStyle = '#c0c8d8';
+    c.beginPath(); c.arc(x+dx*eyeFwd+ex, y+dy*eyeFwd+ey, R*0.16, 0, Math.PI*2); c.fill();
+    c.fillStyle = '#111';
+    c.beginPath(); c.arc(x+dx*eyeFwd+ex+dx*1.2, y+dy*eyeFwd+ey+dy*1.2, R*0.08, 0, Math.PI*2); c.fill();
   });
-}
-
-function spawnPoisonBall(){
-  const spd = 2.2;
-  const angle = Math.random()*Math.PI*2;
-  poisonBall = {
-    x: Math.random()*W*0.6 + W*0.2,
-    y: Math.random()*H*0.3,
-    vx: Math.cos(angle)*spd,
-    vy: Math.sin(angle)*spd,
-    flaming: false,
-    flameTimer: 0,
-    trail: []
-  };
-}
-
-function updatePoisonBall(dt){
-  const pb=poisonBall;
-  if(!pb) return;
-
-  // Update trail
-  pb.trail.unshift({x:pb.x, y:pb.y});
-  if(pb.trail.length>8) pb.trail.pop();
-
-  if(pb.flaming){
-    // Flaming: move in straight line, burn through bricks
-    pb.x += pb.vx * dt * 1.75; // was 3.5, halved
-    pb.y += pb.vy * dt * 1.75;
-    pb.flameTimer -= dt * 16.67;
-
-    // Burn bricks in path - wider burn radius
-    const col=Math.floor(pb.x/BRICK_W);
-    const row=Math.floor(pb.y/BRICK_H);
-    const bombsToLight=[];
-    bricks=bricks.filter(b=>{
-      const bc=b.col!==undefined?b.col:Math.round(b.x/BRICK_W);
-      const br=b.row!==undefined?b.row:Math.round(b.y/BRICK_H);
-      const inPath=(bc===col&&br===row)||(bc===col&&Math.abs(br-row)<=1)||(br===row&&Math.abs(bc-col)<=1);
-      if(inPath&&b.isBomb){
-        bombsToLight.push({x:b.x+b.w/2,y:b.y+b.h/2,col:bc,row:br});
-        return false; // remove from bricks, will be detonated
-      }
-      if(inPath&&!b.isLock&&!b.isDiamond){
-        spawnParticles(b.x+b.w/2,b.y+b.h/2,b.color||'#ff6600',8);
-        return false;
-      }
-      return true;
-    });
-    // Detonate any lit bombs
-    bombsToLight.forEach(b=>detonateBomb(b));
-
-    // Bounce off walls
-    if(pb.x<BALL_R){ pb.x=BALL_R; pb.vx=Math.abs(pb.vx); }
-    if(pb.x>W-BALL_R){ pb.x=W-BALL_R; pb.vx=-Math.abs(pb.vx); }
-    if(pb.y<BALL_R){ pb.y=BALL_R; pb.vy=Math.abs(pb.vy); }
-    if(pb.y>H-BALL_R){ pb.y=H-BALL_R; pb.vy=-Math.abs(pb.vy); }
-
-    // Burn out - respawn as poison after delay
-    if(pb.flameTimer<=0){
-      poisonBall=null;
-      setTimeout(()=>{ if(gameRunning&&gameMode==='blackout') spawnPoisonBall(); }, 2000);
-    }
-  } else {
-    // Poison: lazy homing bounce physics
-    const spd=2.2;
-
-    // Lazy home toward player ball
-    if(ballLaunched){
-      const dx=ball.x-pb.x, dy=ball.y-pb.y;
-      const dist=Math.sqrt(dx*dx+dy*dy)||1;
-      const homingStrength=0.012*dt;
-      pb.vx += (dx/dist)*spd*homingStrength;
-      pb.vy += (dy/dist)*spd*homingStrength;
-    }
-
-    // Cap speed
-    const curSpd=Math.sqrt(pb.vx*pb.vx+pb.vy*pb.vy)||1;
-    if(curSpd>spd){ pb.vx=pb.vx/curSpd*spd; pb.vy=pb.vy/curSpd*spd; }
-
-    pb.x += pb.vx*dt;
-    pb.y += pb.vy*dt;
-
-    // Bounce off walls
-    if(pb.x<BALL_R){ pb.x=BALL_R; pb.vx=Math.abs(pb.vx); }
-    if(pb.x>W-BALL_R){ pb.x=W-BALL_R; pb.vx=-Math.abs(pb.vx); }
-    if(pb.y<BALL_R){ pb.y=BALL_R; pb.vy=Math.abs(pb.vy); }
-    if(pb.y>H-BALL_R){ pb.y=H-BALL_R; pb.vy=-Math.abs(pb.vy); }
-
-    // Bounce off bricks - proper separation to prevent sticking, corrupt on contact
-    for(const b of bricks){
-      if(overlaps(pb.x-BALL_R,pb.y-BALL_R,BALL_R*2,BALL_R*2,b.x,b.y,b.w,b.h)){
-        const cx=b.x+b.w/2, cy=b.y+b.h/2;
-        const dx=pb.x-cx, dy=pb.y-cy;
-        const overlapX=BALL_R+b.w/2-Math.abs(dx);
-        const overlapY=BALL_R+b.h/2-Math.abs(dy);
-        if(overlapX < overlapY){
-          pb.vx = Math.sign(dx)*Math.abs(pb.vx||spd);
-          pb.x += Math.sign(dx)*overlapX;
-        } else {
-          pb.vy = Math.sign(dy)*Math.abs(pb.vy||spd);
-          pb.y += Math.sign(dy)*overlapY;
-        }
-        // Corrupt the brick - blackout only, change to a random color (not its own)
-        if(gameMode==='blackout'&&!b.isSteel&&!b.isLock&&!b.isDiamond&&!b.isSkull&&!b.isBomb&&!b.isKey){
-          const otherColors=COLORS.filter(c=>c!==b.color);
-          const newColor=otherColors[Math.floor(Math.random()*otherColors.length)];
-          b.color=newColor;
-          // Spawn a few purple corruption particles
-          spawnParticles(cx,cy,'#aa00ff',4);
-        }
-        break;
-      }
-    }
-
-    // Ensure min/max speed
-    const normSpd=Math.sqrt(pb.vx*pb.vx+pb.vy*pb.vy)||1;
-    const clampedSpd=Math.max(1.5,Math.min(spd,normSpd));
-    pb.vx=pb.vx/normSpd*clampedSpd;
-    pb.vy=pb.vy/normSpd*clampedSpd;
-
-    // Kill player ball on contact
-    if(ballLaunched && !isRespawning && !gameOver){
-      const dx=pb.x-ball.x, dy=pb.y-ball.y;
-      if(Math.sqrt(dx*dx+dy*dy)<BALL_R*2){
-        screenFlash=12;
-        killBall();
-      }
-    }
-  }
 }
 
 function spawnDiamondBurst(x,y){
@@ -3214,6 +2933,7 @@ function loop(ts){
   const dt=Math.min((ts-lastTime)/16.67,2);
   lastTime=ts;
   if(gameRunning&&!paused) update(dt);
+  else if(_guardAlertFrame >= 0) updateGuardAlert(); // tick guard-caught animation even when gameRunning is false
   else if(fallingBricks.length>0) updateFinale(dt); // keep animating during blackout finale
   else if(deathFreeze){
     // Only tick particles so the explosion plays out
@@ -3228,6 +2948,7 @@ function loop(ts){
 function update(dt){
   const STEPS=6, subDt=dt/STEPS;
   for(let step=0;step<STEPS;step++){
+    const prevX=ball.x, prevY=ball.y;
     const effLeft  = controlsReversed ? moveRight : moveLeft;
     const effRight = controlsReversed ? moveLeft  : moveRight;
     const hMove=((effLeft?-BALL_MOVE:0)+(effRight?BALL_MOVE:0)+ball.vx)*subDt;
@@ -3252,6 +2973,45 @@ function update(dt){
     for(let b of bricks) if(b.cooldown>0) b.cooldown--;
     checkBrickCollisions();
     if(gameOver) return;
+
+    // Diagonal corner safety net - catch ball leaking through corner seams
+    // Probe 4 diagonal points on the ball's edge
+    const probeR=BALL_R*0.71; // ~cos(45°) offset to probe the diagonal edges
+    for(let pi=0;pi<4;pi++){
+      const px=ball.x+(pi<2?probeR:-probeR);
+      const py=ball.y+(pi%2===0?probeR:-probeR);
+      const pc=Math.floor(px/BRICK_W);
+      const pr=Math.floor(py/BRICK_H);
+      if(pc<0||pc>=BRICK_COLS||pr<0||pr>=BRICK_ROWS) continue;
+      // Check against live bricks (not the grid) to avoid false hits on just-destroyed bricks
+      const hit=bricks.some(b=>{
+        const bc=b.col!==undefined?b.col:Math.round(b.x/BRICK_W);
+        const br=b.row!==undefined?b.row:Math.round(b.y/BRICK_H);
+        return bc===pc&&br===pr;
+      });
+      if(!hit) continue;
+      // Ball edge is inside an occupied cell - check if normal collision missed it
+      // (this only fires for diagonal leak-throughs)
+      const prevC=Math.floor(prevX/BRICK_W), prevR=Math.floor(prevY/BRICK_H);
+      const curC=Math.floor(ball.x/BRICK_W), curR=Math.floor(ball.y/BRICK_H);
+      const crossedCol=curC!==prevC, crossedRow=curR!==prevR;
+      if(crossedCol&&crossedRow){
+        // True diagonal move - push back on the axis with less penetration
+        const bx=pc*BRICK_W, by=pr*BRICK_H;
+        const overlapX=Math.min(ball.x+BALL_R-bx, bx+BRICK_W-(ball.x-BALL_R));
+        const overlapY=Math.min(ball.y+BALL_R-by, by+BRICK_H-(ball.y-BALL_R));
+        if(overlapX<overlapY){
+          ball.x=prevX; ball.vx=-ball.vx;
+        } else {
+          ball.y=prevY; ball.vy=-ball.vy;
+        }
+        break;
+      } else if(crossedCol){
+        ball.x=prevX; ball.vx=-ball.vx; break;
+      } else if(crossedRow){
+        ball.y=prevY; ball.vy=-ball.vy; break;
+      }
+    }
   }
   ball.trail.push({x:ball.x,y:ball.y});
   const maxTrail = (()=>{ const bc=(ball.color||'#ffffff').toLowerCase(); return STORE_ITEMS.some(i=>i.category==='trails'&&isOwned(i.id)&&i.ballColor&&i.ballColor.toLowerCase()===bc) ? 30 : 8; })();
@@ -3280,7 +3040,7 @@ function update(dt){
     }
   }
 
-  // Update poison ball - freeze during respawn
+  // Update guards
   if((gameMode==='blackout' || guards.length > 0) && !isRespawning) guards.filter(Boolean).forEach(g => updateGuard(dt, g));
   if(gameMode==='blackout' || guards.length > 0) updateGuardAlert();
   if(gameMode==='escape' && alarmGuards.length > 0 && !isRespawning) updateAlarmGuards(dt);
@@ -3374,7 +3134,6 @@ function checkPerimeterEscape(side, pos) {
   return false;
 }
 
-
 function triggerBlackoutFinale(){
   if(finaleTriggered) return;
   finaleTriggered=true;
@@ -3461,7 +3220,6 @@ function draw(){
     ctx.fillStyle='rgba(10,10,30,0.8)'; ctx.fillRect(0,0,W,H);
   }
 
-  drawPortal(ctx, null, performance.now()); // portal removed - no-op kept for safety
   for(let b of bricks) drawBrick(ctx,b);
   // Draw placed bombs
   for(const bomb of activeBombs) drawPlacedBomb(ctx, bomb);
@@ -3595,13 +3353,13 @@ function startGame(levelData, forcedMode){
   const isHardcodedLevel = levelData && HARDCODED_SERIES.some(s=>s.levels.some(l=>l.name===levelData.name));
   const isCustomLevel = !!(levelData && levelData.name && levelData.bricks && !isHardcodedLevel && !testingLevel);
   editBtn.style.display = isCustomLevel ? 'block' : 'none';
-  score=0; particles=[]; gameOver=false; ballLaunched=false; paused=false;
-  gameStartTime=0; totalElapsed=0; portal=null; keysHeld=0; diamondsCollected=0; screenFlash=0;
-  lives=3; usedContinue=false; controlsReversed=false; fallingBricks=[]; finaleTriggered=false; finaleTimeout=null; bombsHeld=0; activeBombs=[]; bothSidesHeld=false; bothSidesTimestamp=0; isRespawning=false; poisonBall=null; guards=[]; alarmGuards=[]; _guardAlertFrame=-1; _escaping=false; blownUpKeys=[]; deathFreeze=false;
+  particles=[]; gameOver=false; ballLaunched=false; paused=false;
+  gameStartTime=0; totalElapsed=0; keysHeld=0; diamondsCollected=0; screenFlash=0;
+  lives=3; usedContinue=false; controlsReversed=false; fallingBricks=[]; finaleTriggered=false; finaleTimeout=null; bombsHeld=0; activeBombs=[]; bothSidesHeld=false; bothSidesTimestamp=0; isRespawning=false; guards=[]; alarmGuards=[]; _guardAlertFrame=-1; _escaping=false; blownUpKeys=[]; deathFreeze=false;
   if(bothSidesReleaseTimer){ clearTimeout(bothSidesReleaseTimer); bothSidesReleaseTimer=null; }
   bombHud.style.display='none';
   renderLives();
-  scoreDisplay.textContent=0; keyDisplay.textContent=0;
+  keyDisplay.textContent=0;
 
   if(levelData && levelData.bricks){
     // Use stored col/row if available (screen-independent), else derive from pixel coords
@@ -3665,7 +3423,6 @@ function startGame(levelData, forcedMode){
   gameMode = (forcedMode === 'blackout') ? 'blackout' : (forcedMode === 'escape') ? 'loot' : 'escape';
 
   // Spawn guard for blackout - never during builder testing
-  poisonBall = null;
   guards = [];
   _guardAlertFrame = -1;
   _alertX = 0; _alertY = 0;
@@ -3688,7 +3445,7 @@ function startGame(levelData, forcedMode){
     diamondHud.style.display='none';
   }
 
-  currentLevelBricks={ bricks:bricks.map(b=>({...b})), ballX:ball.x, ballY:ball.y, portal:null, name:(levelData&&levelData.name)||null };
+  currentLevelBricks={ bricks:bricks.map(b=>({...b})), ballX:ball.x, ballY:ball.y, name:(levelData&&levelData.name)||null };
   gameRunning=true; hideMessage();
   // Load Time to Beat for HUD display
   currentMapRecord = null;
@@ -3704,14 +3461,13 @@ function startGame(levelData, forcedMode){
           if(res.ok){ const rows=await res.json(); if(rows.length){ slug=rows[0].slug; levelData.slug=slug; } }
         }
         if(slug) currentMapRecord = await fetchRecord(slug);
-        console.log('Record fetch for', levelData.name, '- slug:', slug, '- record:', currentMapRecord);
       } catch(e){ console.warn('Record fetch failed:', e); }
     })();
   }
 }
 
 function restartGame(){
-  score=0; particles=[]; gameOver=false; ballLaunched=false; paused=false;
+  particles=[]; gameOver=false; ballLaunched=false; paused=false;
   gameStartTime=0; totalElapsed=0; keysHeld=0; diamondsCollected=0; screenFlash=0;
   bombsHeld=0; activeBombs=[]; bothSidesHeld=false; bombHud.style.display="none";
   blownUpKeys=[]; isRespawning=false; deathFreeze=false; finaleTriggered=false;
@@ -3719,7 +3475,7 @@ function restartGame(){
   _tipQueue=[]; _tipShowing=false;
   lives=3; controlsReversed=false;
   renderLives();
-  scoreDisplay.textContent=0; keyDisplay.textContent=0;
+  keyDisplay.textContent=0;
   gameMode = (currentForcedMode === 'blackout') ? 'blackout' : (currentForcedMode === 'escape') ? 'loot' : 'escape';
   if(gameMode === 'blackout'){
     const guardMap = buildGuardModeMap();
@@ -4641,7 +4397,6 @@ function renderLevelList(autoOpen){
   }
 }
 
-
 function openSaveDialog(brickData){
   pendingSaveBricks=brickData;
   document.getElementById('levelNameInput').value='';
@@ -4676,7 +4431,6 @@ function toggleAdminMode() {
   showModeSelect();
   showToast(adminMode ? '★ Admin mode ON' : 'Admin mode off', adminMode ? '#f5c842' : '#aaa');
 }
-
 
 let builderBricks=[];
 let builderBallPos={ col:Math.floor(BRICK_COLS/2), row:Math.floor(BRICK_ROWS/2) };
@@ -4901,21 +4655,6 @@ function showBgPicker(){
   overlay.appendChild(box);
   overlay.addEventListener('click',(e)=>{ if(e.target===overlay) document.body.removeChild(overlay); });
   document.body.appendChild(overlay);
-}
-
-function addPalItem(pal,type,label,extraClass,title,color){
-  const el=document.createElement('div');
-  el.className='pal-item '+(extraClass||'');
-  el.title=title||'';
-  if(label) el.textContent=label;
-  el.dataset.type=type;
-  if(color) el.dataset.color=color;
-  el.addEventListener('click',()=>{
-    selectedTool={ type, color:color||null };
-    refreshPalSelection();
-  });
-  pal.appendChild(el);
-  return el;
 }
 function addPalSep(pal){
   const s=document.createElement('div'); s.className='pal-sep'; pal.appendChild(s);
@@ -5351,7 +5090,6 @@ function openMapsPanel(defaultTab='maps') {
         + '<div style="flex:1;height:1px;background:linear-gradient(270deg,transparent,rgba(150,110,40,0.3));"></div>';
       return el;
     }
-
 
     function makeCard(lv) {
       const owned = isOwnedMap(lv) || lv._fromSeries;
@@ -6333,7 +6071,7 @@ document.getElementById('builderSaveBtn').addEventListener('click',()=>{
   if(!hasPerimeterExit(builderBricks)){ showNoExitWarning(); return; }
   const ballPixX=builderBallPos.col*BRICK_W+BRICK_W/2;
   const ballPixY=builderBallPos.row*BRICK_H+BRICK_H/2;
-  const saveable={ ballCol:builderBallPos.col, ballRow:builderBallPos.row, ballX:ballPixX, ballY:ballPixY, portal:null,
+  const saveable={ ballCol:builderBallPos.col, ballRow:builderBallPos.row, ballX:ballPixX, ballY:ballPixY,
     bricks:builderBricks.map(b=>({
       col:b.col, row:b.row, x:b.col*BRICK_W, y:b.row*BRICK_H, w:BRICK_W, h:BRICK_H,
       color:b.color, isPaint:b.isPaint, isSteel:b.isSteel,
@@ -6440,10 +6178,48 @@ document.getElementById('confirmSaveBtn').addEventListener('click', async ()=>{
       const clearBtnRestore = document.getElementById('builderClearBtn');
       if (clearBtnRestore) clearBtnRestore.style.display = '';
       // Update the auto-growing challenge series
+      // Update the auto-growing challenge series
       upsertChallengeSeriesLocally(chainId, baseName || autoName, slug, autoName).catch(() => {});
       closeBuilder();
-      showToast(updateExisting ? `✓ Challenge updated — they'll see the new version.` : `🔥 "${autoName}" fired back!`);
-      showModeSelect();
+      if (updateExisting) {
+        showToast('\u2713 Challenge updated \u2014 they\'ll see the new version.');
+        showModeSelect();
+      } else {
+        // Show share CTA so opponent knows there's a new round
+        const shareUrl = getChallengeUrl(chainId, round);
+        const msgs = [
+          `I fired back. Round ${round} is ready for you. \ud83d\udd25\n${shareUrl}`,
+          `Your turn. Round ${round} \u2014 good luck. \ud83d\ude0f\n${shareUrl}`,
+          `Round ${round}. I made it worse. \ud83d\udd25\n${shareUrl}`,
+        ];
+        const msg = msgs[Math.floor(Math.random() * msgs.length)];
+        const ov = document.createElement('div');
+        ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:700;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;';
+        const panel = document.createElement('div');
+        panel.style.cssText = "background:linear-gradient(160deg,#1a0a0a,#120808);border:1px solid rgba(220,60,60,0.5);border-radius:4px;padding:24px 20px;width:min(340px,100%);display:flex;flex-direction:column;gap:14px;font-family:'Lato',sans-serif;";
+        panel.innerHTML = `
+          <div style="font-family:'Cinzel',serif;font-size:15px;font-weight:600;color:#e63946;text-align:center;letter-spacing:1px;">\ud83d\udd25 FIRED BACK!</div>
+          <div style="color:rgba(220,150,150,0.7);font-size:12px;text-align:center;">Send them the link so they know it's their turn.</div>
+          <textarea id="fireBackCopyArea" readonly rows="3" style="width:100%;box-sizing:border-box;background:rgba(10,4,4,0.9);border:1px solid rgba(180,60,60,0.4);color:#e8d5a0;font-family:'Lato',sans-serif;font-size:12px;padding:10px;border-radius:3px;resize:none;line-height:1.6;cursor:text;" onclick="this.select()">${msg}</textarea>
+          <div id="fireBackCopyStatus" style="color:rgba(180,150,80,0.7);font-size:12px;text-align:center;">Message copied to clipboard!</div>
+          <button id="fireBackTextBtn" style="width:100%;background:linear-gradient(180deg,rgba(80,10,10,0.98),rgba(50,5,5,0.99));border:1px solid rgba(220,60,60,0.7);border-bottom:2px solid rgba(80,10,10,0.9);color:#e63946;font-family:'Cinzel',serif;font-weight:700;font-size:14px;letter-spacing:1px;padding:14px;cursor:pointer;border-radius:3px;">TEXT THEM</button>
+          <button id="fireBackDoneBtn" style="width:100%;background:none;border:none;color:rgba(220,220,220,0.7);font-family:'Cinzel',serif;font-size:12px;cursor:pointer;padding:4px;letter-spacing:1px;">DONE</button>
+        `;
+        ov.appendChild(panel);
+        document.body.appendChild(ov);
+        copyToClipboard(msg, () => {}, () => {
+          const status = document.getElementById('fireBackCopyStatus');
+          if (status) status.textContent = 'Tap the message to copy';
+        });
+        panel.querySelector('#fireBackTextBtn').addEventListener('click', () => {
+          window.location.href = `sms:?body=${encodeURIComponent(msg)}`;
+        });
+        panel.querySelector('#fireBackDoneBtn').addEventListener('click', () => {
+          ov.remove();
+          showModeSelect();
+        });
+        ov.addEventListener('click', e => { if (e.target === ov) { ov.remove(); showModeSelect(); } });
+      }
     } catch(e) {
       console.error('Challenge save failed:', e);
       showBuilderToast('Could not save - try again');
@@ -6471,7 +6247,7 @@ document.getElementById('builderTestBtn').addEventListener('click',()=>{
   closeBuilder();
   const ballPixX=builderBallPos.col*BRICK_W+BRICK_W/2;
   const ballPixY=builderBallPos.row*BRICK_H+BRICK_H/2;
-  startGame({ ballCol:builderBallPos.col, ballRow:builderBallPos.row, ballX:ballPixX, ballY:ballPixY, portal:null,
+  startGame({ ballCol:builderBallPos.col, ballRow:builderBallPos.row, ballX:ballPixX, ballY:ballPixY,
     background:builderBackground,
     bricks:builderBricksSnapshot.map(b=>({
       col:b.col, row:b.row, x:b.col*BRICK_W, y:b.row*BRICK_H, w:BRICK_W, h:BRICK_H,
@@ -6852,7 +6628,6 @@ function endGame(reason){
       });
     });
   }
-
 
   if(document.getElementById('endShareBtn')){
     document.getElementById('endShareBtn').addEventListener('click', async ()=>{
@@ -7450,27 +7225,6 @@ function showToast(msg,color='#ffd700'){
   setTimeout(()=>t.remove(),2200);
 }
 
-function getCurrentLevelData(){
-  if(!builderBricks.length) return null;
-  if(builderCurrentLevelName){
-    const saved=savedLevels().find(l=>l.name===builderCurrentLevelName);
-
-    if(saved) return saved;
-  }
-  return {
-    name: builderCurrentLevelName||'Untitled',
-    ballCol: builderBallPos.col,
-    ballRow: builderBallPos.row,
-    ballX: builderBallPos.col*BRICK_W+BRICK_W/2,
-    ballY: builderBallPos.row*BRICK_H+BRICK_H/2,
-    portal: null,
-    bricks: builderBricks.map(b=>({
-      col:b.col, row:b.row, x:b.col*BRICK_W,y:b.row*BRICK_H,w:BRICK_W,h:BRICK_H,
-      color:b.color,isPaint:b.isPaint,isSteel:b.isSteel,isKey:b.isKey,isLock:b.isLock,
-      isDiamond:b.isDiamond||false,isWhite:b.isWhite||false,isSkull:b.isSkull||false,isReverse:b.isReverse||false,isBomb:b.isBomb||false,hit:0,cooldown:0}))
-  };
-}
-
 // =====================================================================
 // HARDCODED SERIES - loaded on first run if not already present
 // =====================================================================
@@ -7510,10 +7264,8 @@ async function upsertCloudSeries(series, sortOrder) {
     body: JSON.stringify({ name: series.name, description: series.description || '', levels: series.levels, sort_order: sortOrder })
   });
   if (patch.ok) {
-    console.log('upsertCloudSeries: PATCH succeeded for slug:', slug);
     return { slug, name: series.name }; // PATCH worked - return immediately
   }
-  console.log('upsertCloudSeries: PATCH found nothing, trying INSERT for slug:', slug);
 
   // Row doesn't exist yet - INSERT
   const post = await fetch(`${SUPA_URL}/rest/v1/series`, {
@@ -7530,34 +7282,7 @@ async function upsertCloudSeries(series, sortOrder) {
   return await post.json();
 }
 
-async function appendLevelToCloudSeries(seriesSlug, levelData) {
-  // Fetch current levels
-  const res = await fetch(`${SUPA_URL}/rest/v1/series?slug=eq.${encodeURIComponent(seriesSlug)}&select=levels`, {
-    headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` }
-  });
-  if (!res.ok) throw new Error('Series not found');
-  const rows = await res.json();
-  if (!rows.length) throw new Error('Series not found');
-  const levels = [...(rows[0].levels || []), levelData];
-  const patch = await fetch(`${SUPA_URL}/rest/v1/series?slug=eq.${encodeURIComponent(seriesSlug)}`, {
-    method: 'PATCH',
-    headers: {
-      'Content-Type': 'application/json',
-      'apikey': SUPA_KEY,
-      'Authorization': `Bearer ${SUPA_KEY}`,
-      'Prefer': 'return=minimal'
-    },
-    body: JSON.stringify({ levels })
-  });
-  if (!patch.ok) { const e = await patch.text(); throw new Error(e); }
-}
-
 // Push hardcoded series to cloud on first run (safe to run repeatedly - upserts)
-async function seedQuestToCloud() {
-  for (let i = 0; i < HARDCODED_SERIES.length; i++) {
-    await upsertCloudSeries(HARDCODED_SERIES[i], i);
-  }
-}
 
 // Featured series name - persisted so it survives reloads
 function getFeaturedSeriesName(){
@@ -7601,11 +7326,6 @@ function addSeriesToQuest(seriesName) {
 function removeSeriesFromQuest(seriesName) {
   const order = getQuestOrder().filter(n => n !== seriesName);
   setQuestOrder(order);
-}
-function isQuestComplete() {
-  const order = getQuestOrder();
-  return order.length > 0 && getCurrentQuestIndex() >= order.length - 1 &&
-    getSeriesProgress(order[order.length - 1]) >= (savedSeries().find(s => s.name === order[order.length - 1])?.levels.length || 0);
 }
 function setFeaturedSeriesName(name){
   LS.set('pb_featured_series', name);
@@ -7706,7 +7426,6 @@ function showHowToPlay(){
 
 document.getElementById('howToPlayBtn').addEventListener('click', showHowToPlay);
 
-
 // =====================================================================
 // TIME TO BEAT - RECORDS
 // =====================================================================
@@ -7718,9 +7437,6 @@ function getStoredInitials(){
     return name.split(' ')[0];
   }
   return LS.get('pb_initials') || '';
-}
-function setStoredInitials(val){
-  LS.set('pb_initials', val.toUpperCase().slice(0,3));
 }
 
 async function fetchRecord(slug){
@@ -7741,18 +7457,22 @@ async function saveRecord(slug, initials, timeSeconds){
       return;
     }
 
+    const payload = { initials, time_seconds: timeSeconds };
+    if (_currentUser) payload.creator_id = CREATOR_ID;
+
     if(current){
       const patch = await fetch(`${SUPA_URL}/rest/v1/records?slug=eq.${encodeURIComponent(slug)}`, {
         method: 'PATCH',
         headers: { 'Content-Type':'application/json','apikey':SUPA_KEY,'Authorization':`Bearer ${SUPA_KEY}`,'Prefer':'return=minimal' },
-        body: JSON.stringify({ initials: initials, time_seconds: timeSeconds })
+        body: JSON.stringify(payload)
       });
       if(!patch.ok) { const e=await patch.text(); console.error('Record update failed:', e); showToast('⚠️ Record save failed: ' + e.slice(0,60)); }
     } else {
+      payload.slug = slug;
       const post = await fetch(`${SUPA_URL}/rest/v1/records`, {
         method: 'POST',
         headers: { 'Content-Type':'application/json','apikey':SUPA_KEY,'Authorization':`Bearer ${SUPA_KEY}`,'Prefer':'return=minimal' },
-        body: JSON.stringify({ slug, initials: initials, time_seconds: timeSeconds })
+        body: JSON.stringify(payload)
       });
       if(!post.ok) { const e=await post.text(); console.error('Record insert failed:', e); showToast('⚠️ Record save failed: ' + e.slice(0,60)); }
     }
@@ -7796,7 +7516,6 @@ async function promptInitialsAndSaveRecord(slug, elapsed, onDone){
     if (onDone) onDone();
   });
 }
-
 
 // =====================================================================
 // ADMIN MAP / SERIES IMPORTER
@@ -7882,7 +7601,6 @@ function showImportOverlay(){
 
 document.getElementById('builderImportBtn').addEventListener('click', showImportOverlay);
 
-
 // =====================================================================
 // PUBLIC MAPS + LEADERBOARD
 // =====================================================================
@@ -7922,10 +7640,8 @@ async function fetchPublicMaps() {
       `${SUPA_URL}/rest/v1/maps?is_public=eq.true&select=slug,name,data,creator_id`,
       { headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` } }
     );
-    console.log('[fetchPublicMaps] status:', res.status);
     if (!res.ok) { console.warn('[fetchPublicMaps] not ok:', await res.text()); return []; }
     const rows = await res.json();
-    console.log('[fetchPublicMaps] rows:', rows);
     const mapped = rows.map(r => ({
       ...(r.data || {}),
       name: r.name,
@@ -7933,7 +7649,6 @@ async function fetchPublicMaps() {
       creator_id: r.creator_id,
       is_public: true,
     }));
-    console.log('[fetchPublicMaps] mapped:', mapped);
     return mapped;
   } catch(e) { console.error('[fetchPublicMaps] error:', e); return []; }
 }
@@ -7961,7 +7676,7 @@ async function publishMap(mapSlug, isPublic) {
 async function fetchLeaderboard() {
   try {
     const [recordsRes, mapsRes] = await Promise.all([
-      fetch(`${SUPA_URL}/rest/v1/records?select=initials,slug`, {
+      fetch(`${SUPA_URL}/rest/v1/records?select=initials,slug,creator_id`, {
         headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` }
       }),
       fetch(`${SUPA_URL}/rest/v1/maps?is_public=eq.true&select=slug`, {
@@ -7974,21 +7689,22 @@ async function fetchLeaderboard() {
     const records = await recordsRes.json();
     const publicMaps = await mapsRes.json();
 
-    console.log('[leaderboard] records:', records.length, 'public maps:', publicMaps.length);
-
-    // If no public maps, just count all records
     const publicSlugs = new Set(publicMaps.map(m => m.slug));
     const usePublicFilter = publicSlugs.size > 0;
 
+    // Group by creator_id when available, fall back to initials for old records
     const counts = {};
     records.forEach(r => {
       if (!usePublicFilter || publicSlugs.has(r.slug)) {
-        counts[r.initials] = (counts[r.initials] || 0) + 1;
+        const key = r.creator_id || r.initials;
+        if (!counts[key]) counts[key] = { initials: r.initials, count: 0, creator_id: r.creator_id || null };
+        counts[key].count++;
+        // Use latest initials for this creator_id (handles name changes)
+        if (r.initials) counts[key].initials = r.initials;
       }
     });
 
-    return Object.entries(counts)
-      .map(([initials, count]) => ({ initials, count }))
+    return Object.values(counts)
       .sort((a, b) => b.count - a.count)
       .slice(0, 20);
   } catch(e) { console.warn('fetchLeaderboard failed:', e); return []; }
@@ -8383,7 +8099,6 @@ function showTradeScreen() {
   });
 }
 
-
 function showTradeConfirm(item, onComplete) {
   const ov = document.createElement('div');
   ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:600;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;';
@@ -8543,10 +8258,11 @@ function showLeaderboard() {
       rowsEl.innerHTML = '<div style="color:rgba(180,140,60,0.4);font-size:12px;font-family:Lato,sans-serif;text-align:center;padding:16px 0;">No records yet.<br>Be the first!</div>';
       return;
     }
+    const myCreatorId = _currentUser ? CREATOR_ID : null;
     const myName = _currentUser ? getDisplayName().split(' ')[0] : (LS.get('pb_initials') || '');
     rowsEl.innerHTML = '';
     entries.forEach((e, i) => {
-      const isMe = myName && e.initials === myName;
+      const isMe = (myCreatorId && e.creator_id === myCreatorId) || (!myCreatorId && myName && e.initials === myName);
       const medals = ['🥇','🥈','🥉'];
       const rank = i < 3 ? medals[i] : `#${i+1}`;
       const row = document.createElement('div');
@@ -8559,16 +8275,19 @@ function showLeaderboard() {
       `;
       row.addEventListener('mouseenter', () => row.style.borderColor = 'rgba(200,160,60,0.4)');
       row.addEventListener('mouseleave', () => row.style.borderColor = isMe ? 'rgba(245,200,66,0.3)' : 'rgba(200,160,60,0.1)');
-      row.addEventListener('click', () => showPlayerRecords(e.initials, isMe, ov));
+      row.addEventListener('click', () => showPlayerRecords(e.initials, e.creator_id, isMe, ov));
       rowsEl.appendChild(row);
     });
   });
 }
 
-async function showPlayerRecords(playerName, isMe, parentOv) {
-  // Fetch all records held by this player
+async function showPlayerRecords(playerName, creatorId, isMe, parentOv) {
+  // Fetch all records held by this player - prefer creator_id lookup
+  const query = creatorId
+    ? `creator_id=eq.${encodeURIComponent(creatorId)}`
+    : `initials=eq.${encodeURIComponent(playerName)}`;
   const res = await fetch(
-    `${SUPA_URL}/rest/v1/records?initials=eq.${encodeURIComponent(playerName)}&select=slug,time_seconds&order=time_seconds.asc`,
+    `${SUPA_URL}/rest/v1/records?${query}&select=slug,time_seconds&order=time_seconds.asc`,
     { headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` } }
   );
   if (!res.ok) { showToast('Could not load records'); return; }
@@ -8643,7 +8362,6 @@ async function showPlayerRecords(playerName, isMe, parentOv) {
   ov.addEventListener('click', e => { if(e.target===ov) ov.remove(); });
 }
 
-
 // =====================================================================
 // RATINGS SYSTEM
 // =====================================================================
@@ -8669,7 +8387,6 @@ async function submitRating(slug, type, rating) {
         body: JSON.stringify({ slug, type, rating, creator_id: CREATOR_ID })
       });
     }
-    console.log('Rating submitted:', slug, type, rating);
   } catch(e) { console.warn('Rating failed:', e); }
 }
 
@@ -8682,20 +8399,6 @@ async function fetchMyRating(slug, type) {
     if (!res.ok) return null;
     const rows = await res.json();
     return rows.length ? rows[0].rating : null;
-  } catch(e) { return null; }
-}
-
-async function fetchAvgRating(slug, type) {
-  try {
-    const res = await fetch(
-      `${SUPA_URL}/rest/v1/ratings?slug=eq.${encodeURIComponent(slug)}&type=eq.${encodeURIComponent(type)}&select=rating`,
-      { headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` } }
-    );
-    if (!res.ok) return null;
-    const rows = await res.json();
-    if (!rows.length) return null;
-    const avg = rows.reduce((s, r) => s + r.rating, 0) / rows.length;
-    return { avg: Math.round(avg * 10) / 10, count: rows.length };
   } catch(e) { return null; }
 }
 
@@ -8802,9 +8505,9 @@ async function createChallenge(mapSlug, recipientId) {
 
 async function createNextRound(chainId, round, mapSlug, senderId, recipientId) {
   // For Round 2+, always use the established chain players
-  if (round > 2) {
+  if (round >= 2) {
     const players = await getChainPlayers(chainId);
-    if (players) {
+    if (players && players.playerB) {
       // Swap sender/recipient each round
       recipientId = players.playerA === senderId ? players.playerB : players.playerA;
     }
@@ -8901,6 +8604,15 @@ async function getChainPlayers(chainId) {
     const levelData = await loadMapBySlug(challengeRow.map_slug);
     if (!levelData) { setTimeout(() => showToast('⚠️ Challenge map not found'), 800); return; }
     levelData.slug = challengeRow.map_slug;
+
+    // Claim this challenge round - set recipient_id if not already set
+    if (!challengeRow.recipient_id && challengeRow.sender_id !== CREATOR_ID) {
+      fetch(`${SUPA_URL}/rest/v1/challenges?id=eq.${challengeRow.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type':'application/json','apikey':SUPA_KEY,'Authorization':`Bearer ${SUPA_KEY}`,'Prefer':'return=minimal' },
+        body: JSON.stringify({ recipient_id: CREATOR_ID })
+      }).catch(() => {});
+    }
 
     // Store challenge context for win screen
     activeChallengeCtx = {
@@ -9031,47 +8743,6 @@ let pendingChallengeResponse = null; // { chainId, round, recipientId }
 // Hook into saveLevel to intercept challenge responses
 const _originalSaveLevel = saveLevel;
 // We'll patch the save flow via builderSaveBtn listener instead (see below)
-
-function showChallengeShareOverlay(chainId, round, url) {
-  // Round 2+ - opponent already knows the chain exists, just nudge them to check
-  const shareUrl = round > 1 ? GAME_URL : url;
-  const msgs = round > 1 ? [
-    `I fired back. Round ${round} is ready for you. 🔥\n${shareUrl}`,
-    `Your turn. I made Round ${round} harder. 😈\n${shareUrl}`,
-    `Round ${round} is waiting. Think you can handle it? 🔥\n${shareUrl}`,
-  ] : [
-    `Round ${round} is ready. Think you can beat it? 🔥\n${url}`,
-    `I made Round ${round} harder. Your turn. 😈\n${url}`,
-    `Round ${round} — good luck with this one. 🔥\n${url}`,
-    `Your turn. Round ${round} is waiting. Can you handle it?\n${url}`,
-  ];
-  const msg = msgs[Math.floor(Math.random() * msgs.length)];
-
-  const ov = document.createElement('div');
-  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:700;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;';
-  const panel = document.createElement('div');
-  panel.style.cssText = 'background:linear-gradient(160deg,#1a0a0a,#120808);border:1px solid rgba(220,60,60,0.5);box-shadow:0 0 0 1px rgba(120,20,20,0.3),0 8px 40px rgba(0,0,0,0.8);border-radius:4px;padding:24px 20px;width:min(340px,100%);display:flex;flex-direction:column;gap:14px;font-family:\'Lato\',sans-serif;';
-  panel.innerHTML = `
-    <div style="font-family:'Cinzel',serif;font-size:15px;font-weight:600;color:#e63946;text-align:center;letter-spacing:1px;">🔥 YOUR TURN IS READY</div>
-    <div style="color:rgba(220,150,150,0.7);font-size:12px;text-align:center;line-height:1.5;">Round ${round} saved. Send the challenge.</div>
-    <textarea id="challengeCopyArea" readonly rows="4" style="width:100%;box-sizing:border-box;background:rgba(10,4,4,0.9);border:1px solid rgba(180,60,60,0.4);color:#e8d5a0;font-family:'Lato',sans-serif;font-size:12px;padding:10px;border-radius:3px;resize:none;line-height:1.6;cursor:text;" onclick="this.select()">${msg}</textarea>
-    <div id="challengeCopyStatus" style="color:rgba(180,150,80,0.7);font-size:12px;text-align:center;line-height:1.5;">Message copied to clipboard!</div>
-    <button id="challengeTextBtn" style="width:100%;background:linear-gradient(180deg,rgba(80,10,10,0.98),rgba(50,5,5,0.99));border:1px solid rgba(220,60,60,0.7);border-bottom:2px solid rgba(80,10,10,0.9);color:#e63946;font-family:'Cinzel',serif;font-weight:700;font-size:14px;letter-spacing:1px;padding:14px;cursor:pointer;border-radius:3px;">TEXT THEM</button>
-    <button id="challengeDoneBtn" style="width:100%;background:none;border:none;color:rgba(220,220,220,0.7);font-family:'Cinzel',serif;font-size:12px;cursor:pointer;padding:4px;letter-spacing:1px;">DONE</button>
-  `;
-  ov.appendChild(panel);
-  document.body.appendChild(ov);
-
-  copyToClipboard(msg,
-    () => { panel.querySelector('#challengeCopyStatus').textContent = 'Copied! Just hit Text Them.'; panel.querySelector('#challengeCopyStatus').style.color = 'rgba(180,210,80,0.8)'; },
-    () => { panel.querySelector('#challengeCopyArea').select(); panel.querySelector('#challengeCopyStatus').textContent = 'Auto-copy failed — select and copy above'; panel.querySelector('#challengeCopyStatus').style.color = '#f4a261'; }
-  );
-  panel.querySelector('#challengeTextBtn').addEventListener('click', () => {
-    window.location.href = `sms:?body=${encodeURIComponent(msg)}`;
-  });
-  panel.querySelector('#challengeDoneBtn').addEventListener('click', () => { ov.remove(); showModeSelect(); });
-  ov.addEventListener('click', e => { if (e.target === ov) { ov.remove(); showModeSelect(); } });
-}
 
 function showChallengeWaitingPopup(c, onEditMap) {
   const ov = document.createElement('div');
@@ -9275,7 +8946,7 @@ async function showChallengesScreen() {
         } else if (r.fireBack) {
           requireSignIn(() => {
             const baseName = (levelData.name || 'Challenge').replace(/\s+\d+\.\d+$/, '');
-            pendingChallengeResponse = { chainId: r.c.chainId, round: r.c.round + 1, recipientId: null, baseName };
+            pendingChallengeResponse = { chainId: r.c.chainId, round: r.c.round + 1, recipientId: challengeRow.sender_id, baseName };
             openBuilder();
             loadLevelIntoBuilder(levelData);
             const saveBtn = document.getElementById('builderSaveBtn');
@@ -9486,8 +9157,8 @@ initAuth().then(() => {
 loadResetTokenFromCloud().catch(() => {});
 loadQuestOrderFromCloud().catch(() => {});
 loadActiveSeries().then(() => {
-  // Refresh home screen now that series are loaded
-  if (!gameRunning && !gameOver && document.getElementById('modeHardcoded0')) {
+  // Refresh home screen now that series are loaded - but only if still on home screen
+  if (!gameRunning && !gameOver && !builderOpen && document.getElementById('modeHardcoded0')) {
     showModeSelect();
   }
 }).catch(() => {});
