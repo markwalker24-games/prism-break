@@ -2134,7 +2134,7 @@ function drawPoisonBall(c, pb){
     for(let i=0;i<pb.trail.length;i++){
       const tr=pb.trail[i], alpha=(i/pb.trail.length)*0.3;
       c.globalAlpha=alpha;
-      c.fillStyle='#8800cc';
+      c.fillStyle='#1a4aaa';
       c.beginPath(); c.arc(tr.x,tr.y,R*0.7,0,Math.PI*2); c.fill();
     }
     c.globalAlpha=1;
@@ -2543,7 +2543,7 @@ function spawnGuard() {
   // Find open cells that are far enough from the ball spawn position
   const ballC = Math.floor(BRICK_COLS / 2);
   const ballR = 3; // ball spawns upper-center
-  const minDist = 8; // minimum cell distance from player
+  const minDist = 14; // minimum cell distance from player
 
   const openCells = [];
   for (let c = 1; c < BRICK_COLS-1; c++) {
@@ -2641,8 +2641,8 @@ function updateGuard(dt, g) {
           dist: Math.abs((g.col+dirs[d].dc) - ballCol) + Math.abs((g.row+dirs[d].dr) - ballRow)
         }));
         scored.sort((a,b) => a.dist - b.dist);
-        // 75% chance to pick best direction, 25% random (to avoid getting stuck)
-        const pick = Math.random() < 0.75 ? scored[0].d : scored[Math.floor(Math.random()*scored.length)].d;
+        // 85% chance to pick best direction - aggressive pursuit
+        const pick = Math.random() < 0.85 ? scored[0].d : scored[Math.floor(Math.random()*scored.length)].d;
         g.dir = pick;
         g.col += dirs[g.dir].dc;
         g.row += dirs[g.dir].dr;
@@ -2713,23 +2713,20 @@ let _guardAlertFrame = -1; // -1 = inactive, 0+ = frame count
 let _alertX = 0, _alertY = 0; // position for alert ❗ (camera or guard)
 
 function triggerCameraAlarm(cx, cy) {
-  // Flash the alert animation at camera position
+  // Store position for any future alert but don't start the catch animation yet
   _alertX = cx; _alertY = cy;
-  _guardAlertFrame = 0;
-  // Don't stop the game - just spawn a swarm of fast guards
-  const count = 2; // two guards on alarm
-  showToast(`🚨 ALARM! ${count} guards incoming!`, '#ff2222');
+  const count = 2;
+  showToast(`🚨 ALARM! Guards incoming!`, '#ff2222');
   screenFlash = 15;
 
-  // Stagger spawns - first one immediate, rest over 1.5s
+  // Stagger spawns
   spawnGuard();
   for (let i = 1; i < count; i++) {
     setTimeout(() => {
       if (gameRunning) {
         spawnGuard();
-        // These alarm guards move faster
         const g = guards[guards.length - 1];
-        if (g) g.moveInterval = 380; // faster than normal (494) but not frantic
+        if (g) g.moveInterval = 430;
       }
     }, i * 350);
   }
@@ -2855,68 +2852,57 @@ function drawGuard(c, g) {
   // Trail
   g.trail.forEach((tr, i) => {
     c.globalAlpha = (1 - i / g.trail.length) * 0.3;
-    c.fillStyle = '#7a4a1e';
+    c.fillStyle = '#1a4aaa';
     c.beginPath(); c.arc(tr.x, tr.y, R * 0.6, 0, Math.PI * 2); c.fill();
   });
   c.globalAlpha = 1;
 
-  // Flashlight cone in movement direction - wall aware raycast
-  const dirs = [[1,0],[0,1],[-1,0],[0,-1]];
-  const [dx, dy] = dirs[g.dir];
-  const angle = Math.atan2(dy, dx);
-  const coneAngle = Math.PI / 4;
-  const maxConeLen = BRICK_W * 3;
+  // Flashlight - only in Prism Guard mode
+  if (gameMode === 'blackout') {
+    const fDirs = [[1,0],[0,1],[-1,0],[0,-1]];
+    const [fdx, fdy] = fDirs[g.dir];
+    const fAngle = Math.atan2(fdy, fdx);
+    const coneAngle = Math.PI / 4;
+    const maxConeLen = BRICK_W * 3;
 
-  // Raycast: find how far the flashlight reaches before hitting a wall
-  // Cast the center ray and edge rays, take the shortest
-  function castRay(rayAngle) {
-    const rdx = Math.cos(rayAngle);
-    const rdy = Math.sin(rayAngle);
-    let dist = 0;
-    const step = Math.min(BRICK_W, BRICK_H) * 0.5;
-    while (dist < maxConeLen) {
-      dist += step;
-      const rx = x + rdx * dist;
-      const ry = y + rdy * dist;
-      const col = Math.floor(rx / BRICK_W);
-      const row = Math.floor(ry / BRICK_H);
-      if (col < 0 || col >= BRICK_COLS || row < 0 || row >= BRICK_ROWS) break;
-      if (bricks.some(b => (b.col ?? Math.round(b.x/BRICK_W)) === col && (b.row ?? Math.round(b.y/BRICK_H)) === row)) {
-        return dist - step;
+    function castRay(rayAngle) {
+      const rdx = Math.cos(rayAngle), rdy = Math.sin(rayAngle);
+      let dist = 0;
+      const step = Math.min(BRICK_W, BRICK_H) * 0.5;
+      while (dist < maxConeLen) {
+        dist += step;
+        const col = Math.floor((x + rdx * dist) / BRICK_W);
+        const row = Math.floor((y + rdy * dist) / BRICK_H);
+        if (col < 0 || col >= BRICK_COLS || row < 0 || row >= BRICK_ROWS) break;
+        if (bricks.some(b => (b.col ?? Math.round(b.x/BRICK_W)) === col && (b.row ?? Math.round(b.y/BRICK_H)) === row)) return dist - step;
       }
+      return dist;
     }
-    return dist;
-  }
 
-  // Build a clipped cone using multiple rays
-  const rayCount = 12;
-  c.save();
-  c.globalAlpha = 0.2;
-  c.fillStyle = '#ffffcc';
-  c.beginPath();
-  c.moveTo(x, y);
-  for (let i = 0; i <= rayCount; i++) {
-    const rayAngle = angle - coneAngle/2 + (coneAngle / rayCount) * i;
-    const rayLen = castRay(rayAngle);
-    c.lineTo(x + Math.cos(rayAngle) * rayLen, y + Math.sin(rayAngle) * rayLen);
-  }
-  c.closePath();
-  c.fill();
-  c.globalAlpha = 1;
-  c.restore();
+    // Draw cone
+    const rayCount = 12;
+    c.save();
+    c.globalAlpha = 0.2;
+    c.fillStyle = '#ffffcc';
+    c.beginPath();
+    c.moveTo(x, y);
+    for (let i = 0; i <= rayCount; i++) {
+      const ra = fAngle - coneAngle/2 + (coneAngle / rayCount) * i;
+      const rl = castRay(ra);
+      c.lineTo(x + Math.cos(ra) * rl, y + Math.sin(ra) * rl);
+    }
+    c.closePath(); c.fill();
+    c.globalAlpha = 1; c.restore();
 
-  // Detect player in flashlight - only in Prism Guard mode
-  // In escape mode, guard must physically reach the ball (contact only)
-  if (gameMode === 'blackout' && ballLaunched && ball) {
-    const pdx = ball.x - x, pdy = ball.y - y;
-    const pdist = Math.sqrt(pdx * pdx + pdy * pdy);
-    if (pdist < maxConeLen) {
-      const playerAngle = Math.atan2(pdy, pdx);
-      let angleDiff = Math.abs(playerAngle - angle);
-      if (angleDiff > Math.PI) angleDiff = Math.PI * 2 - angleDiff;
-      if (angleDiff < coneAngle / 2) {
-        const wallDist = castRay(playerAngle);
-        if (pdist <= wallDist) {
+    // Detect player in cone
+    if (ballLaunched && ball) {
+      const pdx = ball.x - x, pdy = ball.y - y;
+      const pdist = Math.sqrt(pdx*pdx + pdy*pdy);
+      if (pdist < maxConeLen) {
+        const pAngle = Math.atan2(pdy, pdx);
+        let diff = Math.abs(pAngle - fAngle);
+        if (diff > Math.PI) diff = Math.PI*2 - diff;
+        if (diff < coneAngle/2 && pdist <= castRay(pAngle)) {
           guardCaughtPlayer();
         }
       }
@@ -2925,17 +2911,17 @@ function drawGuard(c, g) {
 
   // Outer glow
   const glow = c.createRadialGradient(x, y, 0, x, y, R * 3);
-  glow.addColorStop(0, `rgba(180,100,30,${0.5 + 0.2 * Math.sin(t * 4)})`);
-  glow.addColorStop(0.5, 'rgba(120,60,10,0.2)');
+  glow.addColorStop(0, `rgba(40,80,220,${0.5 + 0.2 * Math.sin(t * 4)})`);
+  glow.addColorStop(0.5, 'rgba(20,50,180,0.2)');
   glow.addColorStop(1, 'rgba(0,0,0,0)');
   c.fillStyle = glow;
   c.beginPath(); c.arc(x, y, R * 3, 0, Math.PI * 2); c.fill();
 
   // Body - dark purple
   const body = c.createRadialGradient(x - R * 0.3, y - R * 0.3, 0, x, y, R);
-  body.addColorStop(0, '#c8843a');
-  body.addColorStop(0.4, '#7a4a1e');
-  body.addColorStop(1, '#3d2008');
+  body.addColorStop(0, '#6699ff');
+  body.addColorStop(0.4, '#1a3aaa');
+  body.addColorStop(1, '#0a1a55');
   c.fillStyle = body;
   c.beginPath(); c.arc(x, y, R, 0, Math.PI * 2); c.fill();
 
@@ -3186,6 +3172,7 @@ function update(dt){
 
   // Update poison ball - freeze during respawn
   if((gameMode==='blackout' || guards.length > 0) && !isRespawning) guards.filter(Boolean).forEach(g => updateGuard(dt, g));
+  if(gameMode==='blackout' || guards.length > 0) updateGuardAlert();
 
   // Bomb regeneration - if any color bricks exist without a matching paint brick, spawn a bomb
   if(gameMode==='blackout' && gameRunning && !testingLevel && Math.random()<0.002*dt){
@@ -3369,7 +3356,7 @@ function draw(){
   for(const bomb of activeBombs) drawPlacedBomb(ctx, bomb);
   if(gameMode==='blackout' || guards.length > 0) guards.filter(Boolean).forEach(g => drawGuard(ctx, g));
   if(gameMode==='escape' && !_escaping) drawExitArrow(ctx);
-  if(gameMode==='blackout' || guards.length > 0) { updateGuardAlert(); drawGuardAlert(); guards = guards.filter(Boolean); }
+  if(gameMode==='blackout' || guards.length > 0) { drawGuardAlert(); guards = guards.filter(Boolean); }
   // Draw falling bricks during blackout finale
   for(const fb of fallingBricks){
     if(!fb.exploded){
@@ -3468,15 +3455,15 @@ function startGame(levelData, forcedMode){
   selfDestructBtn.style.display='block';
   showTopBarBtns(true);
 
-  // Show controls orientation on very first game ever
-  if (!LS.get('pb_controls_shown')) {
+  // Show controls orientation on very first game ever (not in Prism Guard)
+  if (!LS.get('pb_controls_shown') && forcedMode !== 'blackout') {
     LS.set('pb_controls_shown', '1');
     setTimeout(() => showControlsTip(), 800);
   }
 
-  // Show how-to-play for first 2 plays
+  // Show how-to-play for first 2 plays (not in Prism Guard)
   const howtoCount = parseInt(LS.get('pb_howto_count') || '0', 10);
-  if (howtoCount < 2) {
+  if (howtoCount < 2 && forcedMode !== 'blackout') {
     LS.set('pb_howto_count', String(howtoCount + 1));
     setTimeout(() => showHowToPlay(), 1000);
   }
@@ -3557,12 +3544,17 @@ function startGame(levelData, forcedMode){
   // Mode: escape if any diamonds, blackout otherwise
   gameMode = (forcedMode === 'blackout') ? 'blackout' : (forcedMode === 'escape') ? 'loot' : 'escape';
 
-  // Spawn poison ball for blackout - never during builder testing
+  // Spawn guard for blackout - never during builder testing
   poisonBall = null;
-  guardBall = null;
-  guardBall2 = null;
+  guards = [];
+  _guardAlertFrame = -1;
+  _alertX = 0; _alertY = 0;
+  _escaping = false;
+  finaleTriggered = false;
+  isRespawning = false;
+  deathFreeze = false;
   if(gameMode==='blackout' && !testingLevel){
-    guardBall = null;
+    _tipQueue = []; _tipShowing = false; // clear any pending tips
     spawnGuard();
   }
 
@@ -7236,6 +7228,7 @@ let _tipShowing = false;
 
 function queueBrickTip(tipId, imgSrc, title, body) {
   if (hasTipShown(tipId)) return;
+  if (gameMode === 'blackout') return; // no tips in Prism Guard
   markTipShown(tipId);
   _tipQueue.push({ tipId, imgSrc, title, body });
   if (!_tipShowing) showNextTip();
