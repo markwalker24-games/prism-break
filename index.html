@@ -3706,27 +3706,25 @@ function restartGame(){
   score=0; particles=[]; gameOver=false; ballLaunched=false; paused=false;
   gameStartTime=0; totalElapsed=0; keysHeld=0; diamondsCollected=0; screenFlash=0;
   bombsHeld=0; activeBombs=[]; bothSidesHeld=false; bombHud.style.display="none";
-  blownUpKeys=[]; isRespawning=false; deathFreeze=false;
-  // Reset guard state
-  guardBall=null; guardBall2=null;
-  _guardAlertFrame=-1; _alertX=0; _alertY=0;
-  _escaping=false;
+  blownUpKeys=[]; isRespawning=false; deathFreeze=false; finaleTriggered=false;
+  guards=[]; alarmGuards=[]; _guardAlertFrame=-1; _alertX=0; _alertY=0; _escaping=false;
+  _tipQueue=[]; _tipShowing=false;
   lives=3; controlsReversed=false;
   renderLives();
   scoreDisplay.textContent=0; keyDisplay.textContent=0;
-  if(currentLevelBricks){
-    initBall(currentLevelBricks.ballX,currentLevelBricks.ballY);
-    bricks=bricksFromSaved(currentLevelBricks.bricks);
-  } else {
-    initBall(); bricks=buildRandomBricks();
-  }
   gameMode = (currentForcedMode === 'blackout') ? 'blackout' : (currentForcedMode === 'escape') ? 'loot' : 'escape';
-  // Blackout - regenerate the map and spawn guard fresh
   if(gameMode === 'blackout'){
     const guardMap = buildGuardModeMap();
     bricks = guardMap.bricks;
     initBall(guardMap.ballCol * BRICK_W + BRICK_W/2, guardMap.ballRow * BRICK_H + BRICK_H/2);
     spawnGuard();
+  } else {
+    if(currentLevelBricks){
+      initBall(currentLevelBricks.ballX, currentLevelBricks.ballY);
+      bricks=bricksFromSaved(currentLevelBricks.bricks);
+    } else {
+      initBall(); bricks=buildRandomBricks();
+    }
   }
   const totalDiamonds=bricks.filter(b=>b.isDiamond).length;
   if(totalDiamonds>0){
