@@ -853,6 +853,9 @@ async function syncQuestOrderToCloud(order) {
 
 async function loadQuestOrderFromCloud() {
   try {
+    // Only pull from cloud if no local quest order exists (new device restore)
+    const local = getQuestOrder();
+    if (local.length) return;
     const res = await fetch(
       `${SUPA_URL}/rest/v1/app_config?key=eq.quest_order&select=value&limit=1`,
       { headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` } }
@@ -950,13 +953,21 @@ async function syncMyDataFromCloud(userId) {
 
     if (seriesRes.ok) {
       const cloudSeries = await seriesRes.json();
+      const localSeries = savedSeries();
+      const localNames = new Set(localSeries.map(s => s.name));
+      let seriesAdded = false;
       cloudSeries.forEach(cs => {
         if (!cs.name) return;
+        // Only import series that don't exist locally (new device restore)
+        // Never overwrite local series - local is source of truth
+        if (localNames.has(cs.name)) return;
         let levels;
         try { levels = typeof cs.levels === 'string' ? JSON.parse(cs.levels) : cs.levels; } catch(e) { return; }
-        const seriesObj = { ...cs, levels, creator_id: userId };
-        saveSeries(seriesObj);
+        localSeries.push({ ...cs, levels, creator_id: userId });
+        localNames.add(cs.name);
+        seriesAdded = true;
       });
+      if (seriesAdded) LS.set('cc_series', JSON.stringify(localSeries));
     }
 
     // Stamp local series with current user ID and upload any that aren't in Supabase yet
