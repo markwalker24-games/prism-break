@@ -4176,7 +4176,7 @@ function renderLevelList(autoOpen){
   // ── Categorise series ──────────────────────────────────────────
   const featuredSeriesObj = allSeries.find(s => s.name === featuredName);
   const publicSeries   = allSeries.filter(s => s.name !== featuredName && s.is_public && !s._isChallengeSeries);
-  const mySeries       = allSeries.filter(s => s.name !== featuredName && (!s.creator_id || s.creator_id === CREATOR_ID || s.received || s._isChallengeSeries));
+  const mySeries       = allSeries.filter(s => (adminMode || s.name !== featuredName) && (!s.creator_id || s.creator_id === CREATOR_ID || s.received || s._isChallengeSeries));
 
   // Standalone maps owned by user that are NOT published, not in any series
   const additionalMaps = allLevels.filter(lv => !allSeriesLevelNames.has(lv.name) && isOwnedMap(lv) && !lv._adminImport);
