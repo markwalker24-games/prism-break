@@ -7129,29 +7129,14 @@ function showModeSelect(){
   });
   document.getElementById('modeStore').addEventListener('click', () => { hideMessage(); showTradeScreen(); });
 
-  // Admin toggle - tap to toggle, long-press for user management
+  // Admin toggle - simple tap
   const adminToggleBtn = document.getElementById('adminToggleBtn');
   if (adminToggleBtn) {
-    let adminPressTimer = null;
-    const startPress = () => {
-      adminPressTimer = setTimeout(() => {
-        adminPressTimer = null;
-        showUserManagement();
-      }, 700);
-    };
-    const cancelPress = (e) => {
-      if (adminPressTimer) {
-        clearTimeout(adminPressTimer);
-        adminPressTimer = null;
-        e.stopPropagation();
-        toggleAdminMode();
-      }
-    };
-    adminToggleBtn.addEventListener('touchstart', (e) => { e.stopPropagation(); startPress(); }, { passive: true });
-    adminToggleBtn.addEventListener('touchend', cancelPress);
-    adminToggleBtn.addEventListener('touchcancel', () => { clearTimeout(adminPressTimer); adminPressTimer = null; });
-    adminToggleBtn.addEventListener('mousedown', (e) => { e.stopPropagation(); startPress(); });
-    adminToggleBtn.addEventListener('mouseup', cancelPress);
+    adminToggleBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      toggleAdminMode();
+    });
   }
   document.getElementById('modeLeaderboard').addEventListener('click', () => showLeaderboard());
 
