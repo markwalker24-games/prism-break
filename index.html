@@ -2717,7 +2717,7 @@ function triggerCameraAlarm(cx, cy) {
   _alertX = cx; _alertY = cy;
   _guardAlertFrame = 0;
   // Don't stop the game - just spawn a swarm of fast guards
-  const count = 4 + Math.floor(Math.random() * 2); // 4 or 5 guards
+  const count = 2; // two guards on alarm
   showToast(`🚨 ALARM! ${count} guards incoming!`, '#ff2222');
   screenFlash = 15;
 
@@ -2729,7 +2729,7 @@ function triggerCameraAlarm(cx, cy) {
         spawnGuard();
         // These alarm guards move faster
         const g = guards[guards.length - 1];
-        if (g) g.moveInterval = 300;
+        if (g) g.moveInterval = 380; // faster than normal (494) but not frantic
       }
     }, i * 350);
   }
