@@ -3624,7 +3624,7 @@ function startGame(levelData, forcedMode){
   const editBtn = document.getElementById('editMapBtn');
   currentLevelData = levelData || null;
   // Show edit only for custom maps - not quest series levels, not random levels
-  const isHardcodedLevel = levelData && HARDCODED_SERIES.some(s=>s.levels.some(l=>l.name===levelData.name));
+  const isHardcodedLevel = false; // no hardcoded levels - all series from Supabase
   const isCustomLevel = !!(levelData && levelData.name && levelData.bricks && !isHardcodedLevel && !testingLevel);
   editBtn.style.display = isCustomLevel ? 'block' : 'none';
   particles=[]; frostTrail=[]; gameOver=false; ballLaunched=false; paused=false;
@@ -4250,9 +4250,9 @@ function renderLevelList(autoOpen){
 
   const featuredName = getFeaturedSeriesName();
   const localSeries = savedSeries();
-  // Merge in cloud quest series (HARDCODED_SERIES) that aren't already in local storage
+  // Merge in cloud quest series that aren't already in local storage
   const localNames = new Set(localSeries.map(s => s.name));
-  const allSeries = [...localSeries, ...HARDCODED_SERIES.filter(s => !localNames.has(s.name))];
+  const allSeries = [...localSeries];
   const allLevels = savedLevels();
   const allSeriesLevelNames = new Set(allSeries.filter(s => !s._isChallengeSeries).flatMap(s => s.levels.map(l => l.name)));
 
@@ -5715,11 +5715,11 @@ function openMapsPanel(defaultTab='maps') {
 
     body.innerHTML='';
 
-    const hardcodedNames = new Set(HARDCODED_SERIES.map(s=>s.name));
+    const hardcodedNames = new Set(); // no hardcoded series
     const featuredName = getFeaturedSeriesName();
     const localAll = savedSeries();
     const localNames = new Set(localAll.map(s => s.name));
-    const all = [...localAll, ...HARDCODED_SERIES.filter(s => !localNames.has(s.name))];
+    const all = [...localAll];
 
     function rebuildSeriesTab(){ renderSeriesTab(); }
 
@@ -5922,10 +5922,10 @@ function openMapsPanel(defaultTab='maps') {
         function rebuildLvList(){
           lvList.innerHTML='';
           const fresh=savedSeries().find(x=>x.name===s.name)
-                    || HARDCODED_SERIES.find(x=>x.name===s.name);
+                    || null;
           if(!fresh) return;
           s=fresh;
-          if(isFeatured){ const hc=HARDCODED_SERIES.find(x=>x.name===s.name); if(hc) hc.levels=s.levels; }
+          // levels live in savedSeries only
           fresh.levels.forEach((l,i)=>{
             const lrow=document.createElement('div');
             lrow.dataset.idx=i;
@@ -6053,7 +6053,7 @@ function openMapsPanel(defaultTab='maps') {
               const oldName = target.name;
               target.name = newName;
               LS.set('cc_series', JSON.stringify(allSeries.map(x=>x.name===oldName ? target : x)));
-              if(isFeatured){ const hc=HARDCODED_SERIES.find(x=>x.name===oldName); if(hc) hc.name=newName; }
+              // no hardcoded series to update
               renderSeriesTab();
               showBuilderToast(`Renamed to "${newName}"`);
             });
@@ -6983,9 +6983,7 @@ function showModeSelect(){
   const available = getAvailableDiamonds();
   const canAfford = (feature) => !isUnlocked(feature) && available >= UNLOCK_COSTS[feature];
   const featuredName = getFeaturedSeriesName();
-  const featuredSeries = savedSeries().find(s => s.name === featuredName)
-                      || HARDCODED_SERIES.find(s => s.name === featuredName)
-                      || HARDCODED_SERIES[0] || null;
+  const featuredSeries = savedSeries().find(s => s.name === featuredName) || null;
   const seriesButtons = featuredSeries ? (()=>{
     const s = featuredSeries;
     const id = 'modeHardcoded0';
@@ -7269,9 +7267,7 @@ function showModeSelect(){
   if(featuredBtn){
     featuredBtn.addEventListener('click', ()=>{
       const featuredName = getFeaturedSeriesName();
-      const live = savedSeries().find(x => x.name === featuredName)
-                || HARDCODED_SERIES.find(x => x.name === featuredName)
-                || HARDCODED_SERIES[0] || null;
+      const live = savedSeries().find(x => x.name === featuredName) || null;
       if(live){ hideMessage(); playSeries(live); }
     });
   }
@@ -7596,15 +7592,12 @@ function removeSeriesFromQuest(seriesName) {
 }
 function setFeaturedSeriesName(name){
   LS.set('pb_featured_series', name);
-  // Reorder HARDCODED_SERIES so featured is always index 0
-  const idx = HARDCODED_SERIES.findIndex(s=>s.name===name);
-  if(idx>0){
-    const [featured] = HARDCODED_SERIES.splice(idx,1);
-    HARDCODED_SERIES.unshift(featured);
-  }
-  // Sync the new order to cloud so all players get it
+  // Sync the new featured series to cloud so all players get it
   if(adminMode){
-    const newOrder = HARDCODED_SERIES.map(s=>s.name);
+    const order = getQuestOrder();
+    // Ensure featured is first in order
+    const filtered = order.filter(n => n !== name);
+    const newOrder = [name, ...filtered];
     setQuestOrder(newOrder);
     syncQuestOrderToCloud(newOrder)
       .then(()=>showToast('☁ Quest order saved to cloud', '#00eeff'))
@@ -7612,37 +7605,30 @@ function setFeaturedSeriesName(name){
   }
 }
 
-// Load series: try cloud first, fall back to hardcoded
-let ACTIVE_SERIES = [...HARDCODED_SERIES]; // starts as hardcoded
+// Load series from cloud into local savedSeries cache
+let ACTIVE_SERIES = [];
 
 async function loadActiveSeries() {
   try {
     const cloud = await fetchCloudSeries();
     if (cloud && cloud.length) {
       ACTIVE_SERIES = cloud;
-      // Keep hardcoded synced for local progress tracking
-      HARDCODED_SERIES.length = 0;
-      cloud.forEach(s => HARDCODED_SERIES.push(s));
-      // Re-init quest order if needed
-      if (!getQuestOrder().length && HARDCODED_SERIES[0]) {
-        setQuestOrder([HARDCODED_SERIES[0].name]);
+      // Cache into local storage so savedSeries() returns them
+      cloud.forEach(s => saveSeries(s));
+      // Init quest order from cloud series if not set yet
+      if (!getQuestOrder().length && cloud[0]) {
+        setQuestOrder(cloud.map(s => s.name));
       }
     }
   } catch(e) {
-    console.warn('Could not load cloud series, using hardcoded:', e);
+    console.warn('Could not load cloud series:', e);
   }
 }
 
-// Init: seed hardcoded series if nothing stored yet, restore local state
+// Init on load
 (function initSeries(){
-  // Only seed hardcoded if user has no series stored yet (first ever load)
-  const existing = savedSeries();
-  // Series seeded from cloud only (HARDCODED_SERIES is empty)
-  // Restore stored featured series order
   const storedFeatured = LS.get('pb_featured_series');
-  if(storedFeatured) setFeaturedSeriesName(storedFeatured);
-  // Initialize quest order with Getting Started if not set yet
-  // Quest order seeded from cloud only
+  if (storedFeatured) LS.set('pb_featured_series', storedFeatured);
 })();
 
 // How to Play overlay
@@ -8031,7 +8017,7 @@ async function resetProgress() {
   try {
     // Clear by known series names first
     savedSeries().forEach(s => clearSeriesProgress(s.name));
-    HARDCODED_SERIES.forEach(s => clearSeriesProgress(s.name));
+    savedSeries().forEach(s => clearSeriesProgress(s.name));
     // Also scan all keys as fallback
     const keys = [];
     for (let i = 0; i < localStorage.length; i++) {
