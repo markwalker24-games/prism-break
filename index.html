@@ -5921,7 +5921,8 @@ function openMapsPanel(defaultTab='maps') {
 
         function rebuildLvList(){
           lvList.innerHTML='';
-          const fresh=savedSeries().find(x=>x.name===s.name);
+          const fresh=savedSeries().find(x=>x.name===s.name)
+                    || HARDCODED_SERIES.find(x=>x.name===s.name);
           if(!fresh) return;
           s=fresh;
           if(isFeatured){ const hc=HARDCODED_SERIES.find(x=>x.name===s.name); if(hc) hc.levels=s.levels; }
