@@ -1873,7 +1873,7 @@ function drawBall(c,b){
   const x=b.x, y=b.y, R=BALL_R;
 
   // Trail - comet tail with per-color personality
-  const ownedTrails = STORE_ITEMS.filter(i => i.category === 'trails' && isOwned(i.id));
+  const ownedTrails = STORE_ITEMS.filter(i => i.category === 'trails' && isActive(i.id));
   const currentBallColor = (b.color || '#ffffff').toLowerCase();
   const matchingTrail = ownedTrails.find(i => i.ballColor && i.ballColor.toLowerCase() === currentBallColor);
 
@@ -3014,7 +3014,7 @@ function update(dt){
     }
   }
   ball.trail.push({x:ball.x,y:ball.y});
-  const maxTrail = (()=>{ const bc=(ball.color||'#ffffff').toLowerCase(); return STORE_ITEMS.some(i=>i.category==='trails'&&isOwned(i.id)&&i.ballColor&&i.ballColor.toLowerCase()===bc) ? 30 : 8; })();
+  const maxTrail = (()=>{ const bc=(ball.color||'#ffffff').toLowerCase(); return STORE_ITEMS.some(i=>i.category==='trails'&&isActive(i.id)&&i.ballColor&&i.ballColor.toLowerCase()===bc) ? 30 : 8; })();
   if(ball.trail.length>maxTrail) ball.trail.shift();
 
   // Tick active bombs - collect detonations first, then process
@@ -3410,7 +3410,7 @@ function startGame(levelData, forcedMode){
       const ownedBgKeys = allBgKeys.filter(k => {
         if (k === 'Forest Path') return true;
         const storeItem = bgItems.find(i => i.bg === k);
-        return storeItem ? isOwned(storeItem.id) : false;
+        return storeItem ? isActive(storeItem.id) : false;
       });
       const bgKeys = ownedBgKeys.length ? ownedBgKeys : allBgKeys;
       setBgKey(bgKeys[Math.floor(Math.random() * bgKeys.length)]);
@@ -3539,7 +3539,7 @@ function updateMoveFlags(){
         const stillLeft  = Object.values(activeTouches).some(s=>s==='left');
         const stillRight = Object.values(activeTouches).some(s=>s==='right');
         if(!stillLeft && !stillRight && heldDuration>=80 && bothSidesHeld){
-          const hasDetonator = isOwned('skin_dynamite');
+          const hasDetonator = isActive('skin_dynamite');
           if(bombsHeld>0 && gameRunning && ballLaunched){
             const col=Math.round((ball.x-BRICK_W/2)/BRICK_W);
             const row=Math.round((ball.y-BRICK_H/2)/BRICK_H);
@@ -3595,7 +3595,7 @@ gameArea.addEventListener('touchmove', e=>{
 
 gameArea.addEventListener('touchend', e=>{
   e.preventDefault();
-  if(isOwned('skin_dynamite') && activeBombs.length > 0 && gameRunning && ballLaunched){
+  if(isActive('skin_dynamite') && activeBombs.length > 0 && gameRunning && ballLaunched){
     const swipedDown = [];
     for(const t of e.changedTouches){
       const start = touchStartPos[t.identifier];
@@ -4610,7 +4610,7 @@ function showBgPicker(){
   const bgNames = Object.keys(BACKGROUNDS).filter(k => {
     if (k === 'Forest Path') return true;
     const storeItem = bgItems.find(i => i.bg === k);
-    return storeItem ? isOwned(storeItem.id) : false;
+    return storeItem ? isActive(storeItem.id) : false;
   });
   const overlay=document.createElement('div');
   overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:200;display:flex;flex-direction:column;align-items:center;justify-content:center;';
@@ -8010,11 +8010,26 @@ function ownItem(id) {
   const owned = getOwnedItems();
   owned.add(id);
   LS.set('pb_owned_items', JSON.stringify([...owned]));
+  // Enable by default on purchase
+  const disabled = getDisabledItems();
+  disabled.delete(id);
+  LS.set('pb_disabled_items', JSON.stringify([...disabled]));
   syncProgressToCloud().catch(() => {});
 }
 function isOwned(id) {
   if (adminMode) return true;
   return getOwnedItems().has(id);
+}
+function getDisabledItems() {
+  try { return new Set(JSON.parse(LS.get('pb_disabled_items') || '[]')); } catch(e) { return new Set(); }
+}
+function isActive(id) {
+  return isOwned(id) && !getDisabledItems().has(id);
+}
+function toggleItem(id) {
+  const disabled = getDisabledItems();
+  if (disabled.has(id)) disabled.delete(id); else disabled.add(id);
+  LS.set('pb_disabled_items', JSON.stringify([...disabled]));
 }
 function showTradeScreen() {
   const available = getAvailableDiamonds();
@@ -8034,13 +8049,18 @@ function showTradeScreen() {
       swatchHTML = `<div style="width:26px;height:26px;border-radius:3px;background:#333;flex-shrink:0;border:1px solid rgba(200,150,60,0.3);overflow:hidden;"><div style="width:100%;height:100%;background:url(images/bg_default.jpeg) center/cover;opacity:0.6;"></div></div>`;
     }
 
+    const active = isActive(item.id);
     const actionHTML = owned
-      ? `<span style="font-family:'Cinzel',serif;font-size:10px;color:rgba(200,150,60,0.6);">OWNED</span>`
+      ? `<div class="store-toggle" data-id="${item.id}" style="display:flex;align-items:center;gap:6px;cursor:pointer;-webkit-tap-highlight-color:transparent;">
+          <div style="width:36px;height:20px;border-radius:10px;background:${active ? 'rgba(46,196,182,0.7)' : 'rgba(80,60,30,0.5)'};position:relative;transition:background 0.2s;border:1px solid ${active ? 'rgba(46,196,182,0.4)' : 'rgba(100,70,20,0.3)'};">
+            <div style="width:16px;height:16px;border-radius:50%;background:${active ? '#fff' : 'rgba(180,140,60,0.4)'};position:absolute;top:1px;${active ? 'right:1px' : 'left:1px'};transition:all 0.2s;"></div>
+          </div>
+        </div>`
       : canAffordItem
         ? `<span style="font-family:'Cinzel',serif;font-size:10px;color:#c8963c;text-align:right;">trade<br><strong style="font-size:13px;">${item.cost} 💎</strong></span>`
         : `<span style="font-family:'Cinzel',serif;font-size:10px;color:rgba(150,100,30,0.4);text-align:right;">trade<br><strong style="font-size:13px;">${item.cost} 💎</strong></span>`;
 
-    return `<div class="store-item" data-id="${item.id}" style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:${owned ? 'rgba(30,22,8,0.6)' : 'rgba(10,8,4,0.8)'};border:1px solid ${owned ? 'rgba(200,150,60,0.35)' : 'rgba(80,60,20,0.3)'};border-radius:3px;margin-bottom:4px;cursor:${owned || !canAffordItem ? 'default' : 'pointer'};">
+    return `<div class="store-item" data-id="${item.id}" style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:${owned ? (active ? 'rgba(30,22,8,0.6)' : 'rgba(15,12,6,0.5)') : 'rgba(10,8,4,0.8)'};border:1px solid ${owned ? (active ? 'rgba(200,150,60,0.35)' : 'rgba(80,60,20,0.2)') : 'rgba(80,60,20,0.3)'};border-radius:3px;margin-bottom:4px;cursor:${owned || !canAffordItem ? 'default' : 'pointer'};${owned && !active ? 'opacity:0.55;' : ''}">
       ${swatchHTML}
       <div style="flex:1;min-width:0;">
         <div style="font-family:'Cinzel',serif;font-size:12px;font-weight:700;color:${owned ? '#c8963c' : '#e8d5a0'};">${item.name}</div>
@@ -8088,13 +8108,23 @@ function showTradeScreen() {
 
   ov.querySelector('#storeBackBtn').addEventListener('click', () => { ov.remove(); showModeSelect(); });
 
-  // Wire up item clicks
+  // Wire up purchase clicks for unowned items
   ov.querySelectorAll('.store-item').forEach(el => {
     const itemId = el.dataset.id;
     const item = STORE_ITEMS.find(i => i.id === itemId);
     if (!item || isOwned(itemId) || available < item.cost) return;
     el.addEventListener('click', () => {
       showTradeConfirm(item, () => { ov.remove(); showTradeScreen(); });
+    });
+  });
+
+  // Wire up toggle clicks for owned items
+  ov.querySelectorAll('.store-toggle').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleItem(el.dataset.id);
+      ov.remove();
+      showTradeScreen();
     });
   });
 }
