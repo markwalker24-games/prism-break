@@ -5656,7 +5656,7 @@ function openMapsPanel(defaultTab='maps') {
           <button id="resetTokenBtn" style="background:rgba(180,20,20,0.9);border:1px solid rgba(220,60,60,0.6);color:#fff;font-family:'Cinzel',serif;font-size:9px;padding:6px 10px;cursor:pointer;border-radius:2px;letter-spacing:1px;white-space:nowrap;">PUSH RESET</button>
         </div>
       `;
-      tabContent.appendChild(resetSection);
+      body.appendChild(resetSection);
 
       resetSection.querySelector('#resetTokenBtn').addEventListener('click', async () => {
         const input = resetSection.querySelector('#resetTokenInput');
