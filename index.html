@@ -2380,6 +2380,7 @@ function killBall(){
       ball.vx=0; ball.vy=0;
       ball.x=currentLevelBricks.ballX;
       ball.y=currentLevelBricks.ballY;
+      guards=[]; _guardAlertFrame=-1; // no guards on respawn
 
       // Restore only keys that were blown up by bombs (not collected/used)
       if(gameMode==='escape'){
@@ -2733,6 +2734,8 @@ function updateGuardAlert() {
       guards = [];
       endGame('guardCaught');
     } else {
+      guards = []; // clear alarm guards, no respawn with active guards
+      _guardAlertFrame = -1;
       killBall();
     }
   }
@@ -3162,7 +3165,7 @@ function update(dt){
   }
 
   // Update poison ball - freeze during respawn
-  if(gameMode==='blackout' && !isRespawning) guards.filter(Boolean).forEach(g => updateGuard(dt, g));
+  if((gameMode==='blackout' || guards.length > 0) && !isRespawning) guards.filter(Boolean).forEach(g => updateGuard(dt, g));
 
   // Bomb regeneration - if any color bricks exist without a matching paint brick, spawn a bomb
   if(gameMode==='blackout' && gameRunning && !testingLevel && Math.random()<0.002*dt){
@@ -3344,9 +3347,9 @@ function draw(){
   for(let b of bricks) drawBrick(ctx,b);
   // Draw placed bombs
   for(const bomb of activeBombs) drawPlacedBomb(ctx, bomb);
-  if(gameMode==='blackout') guards.filter(Boolean).forEach(g => drawGuard(ctx, g));
+  if(gameMode==='blackout' || guards.length > 0) guards.filter(Boolean).forEach(g => drawGuard(ctx, g));
   if(gameMode==='escape' && !_escaping) drawExitArrow(ctx);
-  if(gameMode==='blackout') { updateGuardAlert(); drawGuardAlert(); guards = guards.filter(Boolean); }
+  if(gameMode==='blackout' || guards.length > 0) { updateGuardAlert(); drawGuardAlert(); guards = guards.filter(Boolean); }
   // Draw falling bricks during blackout finale
   for(const fb of fallingBricks){
     if(!fb.exploded){
