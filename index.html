@@ -8124,7 +8124,7 @@ function ownItem(id) {
   syncProgressToCloud().catch(() => {});
 }
 function isOwned(id) {
-  if (adminMode) return true;
+  if (adminMode && isAdminUser()) return true;
   return getOwnedItems().has(id);
 }
 function getDisabledItems() {
