@@ -657,7 +657,7 @@ function getSpentDiamonds() {
   return parseInt(LS.get('pb_spent_diamonds') || '0', 10);
 }
 function getAvailableDiamonds() {
-  return getTotalDiamonds() - getSpentDiamonds();
+  return Math.max(0, getTotalDiamonds() - getSpentDiamonds());
 }
 function addDiamonds(count) {
   const newTotal = getTotalDiamonds() + count;
@@ -673,8 +673,15 @@ function isUnlocked(feature) {
   return getUnlockedFeatures().has(feature);
 }
 function spendDiamonds(count) {
+  // Never allow going negative
+  const available = getAvailableDiamonds();
+  if (count > available) {
+    console.warn(`[PB] Blocked overspend: tried to spend ${count}, only ${available} available`);
+    return false;
+  }
   LS.set('pb_spent_diamonds', String(getSpentDiamonds() + count));
   syncProgressToCloud().catch(() => {});
+  return true;
 }
 
 function spendToUnlock(feature) {
@@ -4518,7 +4525,7 @@ function renderLevelList(autoOpen){
       list.appendChild(el);
     }
 
-    // ── Completed quest series ────────────────────────────────────
+    // ── Completed quest series
     const completedQuestSeries = getQuestOrder()
       .slice(0, getCurrentQuestIndex())
       .map(name => allSeries.find(s => s.name === name))
@@ -4529,7 +4536,6 @@ function renderLevelList(autoOpen){
       completedLabel.textContent = 'COMPLETED';
       list.appendChild(completedLabel);
       completedQuestSeries.forEach((s, i) => {
-        // Count total diamonds across all maps in this series
         const totalDiamonds = s.levels.reduce((sum, lv) => {
           const bricks = lv.bricks || [];
           return sum + bricks.filter(b => b.isDiamond).length;
@@ -6928,7 +6934,7 @@ function endGame(reason){
     });
   }
 
-  // Play Next Series - shown when a quest series is completed and there's another one
+  // Play Next Series
   if(document.getElementById('endNextSeriesBtn')){
     document.getElementById('endNextSeriesBtn').addEventListener('click', () => {
       const nextSeries = savedSeries().find(s => s.name === nextQuestName);
@@ -6938,7 +6944,6 @@ function endGame(reason){
         hideMessage();
         startGame(nextSeries.levels[0]);
       } else {
-        // Series not loaded yet - go home and it'll show as featured
         hideMessage();
         showModeSelect();
       }
@@ -7125,7 +7130,6 @@ function showModeSelect(){
     <!-- Series buttons -->
     ${seriesButtons}
 
-    <!-- PRISON YARD divider -->
     <div style="display:flex;align-items:center;gap:8px;margin:2px 0;">
       <div style="flex:1;height:1px;background:linear-gradient(90deg,transparent,rgba(180,140,50,0.3));"></div>
       <span style="color:rgba(180,140,60,0.5);font-size:10px;font-family:'Cinzel',serif;letter-spacing:2px;white-space:nowrap;">PRISON YARD</span>
@@ -7135,18 +7139,18 @@ function showModeSelect(){
     <!-- Choose Map - same section as quest -->
     <button id="modeSelectLevel" style="
       width:100%;
-      background:linear-gradient(160deg,rgba(25,18,8,0.95),rgba(15,10,4,0.97));
-      border:1px solid rgba(180,140,50,0.3);
-      box-shadow:0 2px 12px rgba(0,0,0,0.4);
-      color:rgba(200,170,90,0.85);
+      background:${isUnlocked('choose_map') ? 'linear-gradient(160deg,rgba(25,18,8,0.95),rgba(15,10,4,0.97))' : canAfford('choose_map') ? 'rgba(0,30,40,0.97)' : 'rgba(10,10,15,0.97)'};
+      border:1px solid ${isUnlocked('choose_map') ? 'rgba(180,140,50,0.3)' : canAfford('choose_map') ? 'rgba(0,238,255,0.6)' : 'rgba(100,100,120,0.3)'};
+      box-shadow:${canAfford('choose_map') ? '0 0 12px rgba(0,238,255,0.25),0 2px 12px rgba(0,0,0,0.4)' : '0 2px 12px rgba(0,0,0,0.4)'};
+      color:${isUnlocked('choose_map') ? 'rgba(200,170,90,0.85)' : canAfford('choose_map') ? 'rgba(0,238,255,0.9)' : 'rgba(150,150,180,0.5)'};
       font-family:'Cinzel',serif;font-size:13px;font-weight:600;letter-spacing:1px;
       padding:12px 14px;cursor:pointer;border-radius:4px;
       display:flex;align-items:center;justify-content:center;gap:10px;
-      touch-action:manipulation;">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.7;flex-shrink:0;"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+      touch-action:manipulation;${isUnlocked('choose_map') || canAfford('choose_map') ? '' : 'opacity:0.5;'}">
+      <span style="font-size:16px;opacity:0.7">${isUnlocked('choose_map') ? '📜' : canAfford('choose_map') ? '💎' : '🔒'}</span>
       <span>THE MAP ROOM</span>
+      
     </button>
-
 
     <!-- The Trade -->
     <button id="modeStore" style="
@@ -7184,6 +7188,7 @@ function showModeSelect(){
       <span style="color:rgba(180,140,60,0.5);font-size:10px;font-family:'Cinzel',serif;letter-spacing:2px;white-space:nowrap;">ARCADE</span>
       <div style="flex:1;height:1px;background:linear-gradient(270deg,transparent,rgba(180,140,50,0.3));"></div>
     </div>
+
     <!-- Challenges -->
     <button id="modeChallenges" style="
       width:100%;
@@ -7213,22 +7218,21 @@ function showModeSelect(){
         display:flex;flex-direction:column;align-items:center;gap:6px;
         touch-action:manipulation;transition:box-shadow 0.2s;">
         <canvas id="breakoutIcon" width="40" height="26" style="width:40px;height:26px;border-radius:3px;filter:drop-shadow(0 0 8px rgba(60,180,255,0.4))"></canvas>
-        <span>LOCKPICK</span>
+        <span>PICK THE LOCKS</span>
         <span style="font-size:10px;color:rgba(120,180,255,0.6);font-family:'Lato',sans-serif;font-weight:400;letter-spacing:0">Random maps · no guard</span>
       </button>` : `
       <button id="modeBreakout" style="
-        flex:1;
-        background:rgba(8,12,18,0.97);
-        border:1px solid ${canAfford('breakout') ? 'rgba(60,140,220,0.5)' : 'rgba(60,80,100,0.35)'};
-        box-shadow:${canAfford('breakout') ? '0 0 10px rgba(60,140,220,0.3),0 2px 12px rgba(0,0,0,0.5)' : '0 2px 8px rgba(0,0,0,0.4)'};
-        color:${canAfford('breakout') ? 'rgba(120,170,220,0.9)' : 'rgba(100,120,140,0.7)'};
-        font-family:'Cinzel',serif;font-size:12px;font-weight:600;letter-spacing:0.5px;
+        flex:1;${canAfford('breakout') ? '' : 'opacity:0.5;'}
+        background:${canAfford('breakout') ? 'rgba(5,15,30,0.97)' : 'rgba(10,10,15,0.97)'};
+        border:1px solid ${canAfford('breakout') ? 'rgba(0,238,255,0.6)' : 'rgba(100,100,120,0.3)'};
+        box-shadow:${canAfford('breakout') ? '0 0 12px rgba(0,238,255,0.25)' : 'none'};
+        color:${canAfford('breakout') ? 'rgba(0,238,255,0.9)' : 'rgba(150,150,180,0.6)'};font-family:'Cinzel',serif;font-size:12px;font-weight:600;letter-spacing:0.5px;
         padding:14px 8px;cursor:pointer;border-radius:4px;
         display:flex;flex-direction:column;align-items:center;gap:6px;
         touch-action:manipulation;">
-        <span style="font-size:26px;filter:${canAfford('breakout') ? 'drop-shadow(0 0 6px rgba(60,140,220,0.5))' : 'none'}">🔒</span>
-        <span>LOCKPICK</span>
-        <span style="font-size:10px;color:${canAfford('breakout') ? 'rgba(100,180,255,0.8)' : 'rgba(100,120,140,0.5)'};font-family:'Lato',sans-serif;">${UNLOCK_COSTS.breakout} 💎</span>
+        <span style="font-size:28px;filter:${canAfford('breakout') ? 'drop-shadow(0 0 6px rgba(60,140,220,0.5))' : 'none'}">🔒</span>
+        <span>PICK THE LOCKS</span>
+        <span style="font-size:10px;color:${canAfford('breakout') ? 'rgba(0,238,255,0.8)' : 'rgba(0,238,255,0.5)'};font-family:'Lato',sans-serif;">${UNLOCK_COSTS.breakout} 💎</span>
       </button>`}
       ${isUnlocked('blackout') ? `
       <button id="modeBlackout" style="
@@ -7245,18 +7249,17 @@ function showModeSelect(){
         <span style="font-size:10px;color:rgba(255,140,80,0.6);font-family:'Lato',sans-serif;font-weight:400;letter-spacing:0">Escape the guard</span>
       </button>` : `
       <button id="modeBlackout" style="
-        flex:1;
-        background:rgba(12,8,8,0.97);
-        border:1px solid ${canAfford('blackout') ? 'rgba(200,80,40,0.5)' : 'rgba(100,60,50,0.35)'};
-        box-shadow:${canAfford('blackout') ? '0 0 10px rgba(200,80,40,0.3),0 2px 12px rgba(0,0,0,0.5)' : '0 2px 8px rgba(0,0,0,0.4)'};
-        color:${canAfford('blackout') ? 'rgba(220,120,80,0.9)' : 'rgba(140,100,80,0.7)'};
-        font-family:'Cinzel',serif;font-size:12px;font-weight:600;letter-spacing:0.5px;
+        flex:1;${canAfford('blackout') ? '' : 'opacity:0.5;'}
+        background:${canAfford('blackout') ? 'rgba(30,5,3,0.97)' : 'rgba(10,10,15,0.97)'};
+        border:1px solid ${canAfford('blackout') ? 'rgba(0,238,255,0.6)' : 'rgba(100,100,120,0.3)'};
+        box-shadow:${canAfford('blackout') ? '0 0 12px rgba(0,238,255,0.25)' : 'none'};
+        color:${canAfford('blackout') ? 'rgba(0,238,255,0.9)' : 'rgba(150,150,180,0.6)'};font-family:'Cinzel',serif;font-size:12px;font-weight:600;letter-spacing:0.5px;
         padding:14px 8px;cursor:pointer;border-radius:4px;
         display:flex;flex-direction:column;align-items:center;gap:6px;
         touch-action:manipulation;">
-        <span style="font-size:26px;filter:${canAfford('blackout') ? 'drop-shadow(0 0 6px rgba(200,80,40,0.5))' : 'none'}">${canAfford('blackout') ? '💎' : '🔒'}</span>
+        <span style="font-size:28px;filter:${canAfford('blackout') ? 'drop-shadow(0 0 6px rgba(200,80,40,0.5))' : 'none'}">${canAfford('blackout') ? '💎' : '🔒'}</span>
         <span>PRISM GUARD</span>
-        <span style="font-size:10px;color:${canAfford('blackout') ? 'rgba(220,140,100,0.8)' : 'rgba(140,100,80,0.5)'};font-family:'Lato',sans-serif;">${UNLOCK_COSTS.blackout} 💎</span>
+        <span style="font-size:10px;color:${canAfford('blackout') ? 'rgba(0,238,255,0.8)' : 'rgba(0,238,255,0.5)'};font-family:'Lato',sans-serif;">${UNLOCK_COSTS.blackout} 💎</span>
       </button>`}
     </div>
 
@@ -7287,18 +7290,16 @@ function showModeSelect(){
       <span>DESIGN</span>
     </button>` : `
     <button id="modeBuilder" style="
-      width:100%;
-      background:rgba(14,12,6,0.97);
-      border:1px solid ${canAfford('full_builder') ? 'rgba(180,140,50,0.5)' : 'rgba(100,90,50,0.3)'};
-      box-shadow:${canAfford('full_builder') ? '0 0 10px rgba(180,140,50,0.3),0 2px 12px rgba(0,0,0,0.5)' : '0 2px 8px rgba(0,0,0,0.4)'};
-      color:${canAfford('full_builder') ? 'rgba(200,170,90,0.9)' : 'rgba(140,120,70,0.7)'};
-      font-family:'Cinzel',serif;font-size:13px;font-weight:600;letter-spacing:1px;
+      width:100%;${canAfford('full_builder') ? '' : 'opacity:0.5;'}
+      background:${canAfford('full_builder') ? 'rgba(20,15,0,0.97)' : 'rgba(10,10,15,0.97)'};
+      border:1px solid ${canAfford('full_builder') ? 'rgba(0,238,255,0.6)' : 'rgba(100,100,120,0.3)'};
+      box-shadow:${canAfford('full_builder') ? '0 0 12px rgba(0,238,255,0.25)' : 'none'};
+      color:${canAfford('full_builder') ? 'rgba(0,238,255,0.9)' : 'rgba(150,150,180,0.6)'};font-family:'Cinzel',serif;font-size:13px;font-weight:600;letter-spacing:1px;
       padding:13px 12px;cursor:pointer;border-radius:4px;
       display:flex;align-items:center;justify-content:center;gap:10px;
       touch-action:manipulation;">
-      <span style="filter:${canAfford('full_builder') ? 'drop-shadow(0 0 5px rgba(180,140,50,0.4))' : 'none'}">${canAfford('full_builder') ? '💎' : '🔒'}</span>
-      <span>DESIGN</span>
-      <span style="font-size:11px;color:${canAfford('full_builder') ? 'rgba(200,170,90,0.8)' : 'rgba(140,120,70,0.5)'};font-family:'Lato',sans-serif;font-weight:400;">${UNLOCK_COSTS.full_builder} 💎</span>
+      <span>${canAfford('full_builder') ? '💎' : '🔒'} DESIGN</span>
+      <span style="font-size:11px;color:${canAfford('full_builder') ? 'rgba(0,238,255,0.8)' : 'rgba(0,238,255,0.5)'};font-family:'Lato',sans-serif;font-weight:400;">${UNLOCK_COSTS.full_builder} 💎</span>
     </button>`}
 
   </div>`;
@@ -7351,7 +7352,7 @@ function showModeSelect(){
     });
   }
   document.getElementById('modeBreakout').addEventListener('click',()=>{
-    if(!isUnlocked('breakout')){ showSpendConfirm('breakout', 'Lockpick', ()=>{ hideMessage(); startGame(null,'escape'); }); return; }
+    if(!isUnlocked('breakout')){ showSpendConfirm('breakout', 'Pick the Locks', ()=>{ hideMessage(); startGame(null,'escape'); }); return; }
     hideMessage(); startGame(null,'escape');
   });
   document.getElementById('modeBlackout').addEventListener('click',()=>{
@@ -8169,6 +8170,7 @@ function showSpendConfirm(feature, featureName, onUnlocked) {
 }
 
 function shatterUnlock(btnEl, feature, onComplete) {
+  if (!btnEl) { if (onComplete) onComplete(); return; }
   const rect = btnEl.getBoundingClientRect();
   const cx = rect.left + rect.width / 2;
   const cy = rect.top + rect.height / 2;
@@ -8476,11 +8478,14 @@ function showTradeConfirm(item, onComplete) {
   document.body.appendChild(ov);
 
   panel.querySelector('#tradeYesBtn').addEventListener('click', () => {
-    spendDiamonds(item.cost);
+    if (!spendDiamonds(item.cost)) {
+      showToast('⚠️ Not enough diamonds', '#ff2222');
+      ov.remove();
+      return;
+    }
     ownItem(item.id);
     updateTotalDiamondDisplay();
     ov.remove();
-    shatterUnlock(null, 'full_builder', () => {});
     if (onComplete) onComplete();
     showToast(`✓ ${item.name} acquired`, '#c8963c');
   });
@@ -9513,6 +9518,15 @@ initAuth().then(() => {
   updateTotalDiamondDisplay();
   showModeSelect();
 });
+// Repair any negative diamond balance from previous bugs
+(function repairDiamondBalance() {
+  const total = getTotalDiamonds();
+  const spent = getSpentDiamonds();
+  if (spent > total) {
+    console.warn(`[PB] Repairing negative balance: total=${total} spent=${spent}`);
+    LS.set('pb_spent_diamonds', String(total));
+  }
+})();
 // Load cloud data after UI is shown
 loadResetTokenFromCloud().catch(() => {});
 loadQuestOrderFromCloud().catch(() => {});
@@ -9524,18 +9538,12 @@ loadActiveSeries().then(() => {
 }).catch(() => {});
 
 </script>
-<script>
-if ("serviceWorker" in navigator) {
+<script>if ("serviceWorker" in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register("sw.js")
-      .then(reg => {
-        console.log('[PB] Service worker registered, scope:', reg.scope);
-        // Check for updates every time the page loads
-        reg.update();
-      })
+      .then(reg => { reg.update(); })
       .catch(err => console.warn('[PB] SW registration failed:', err));
   });
-}
-</script>
+}</script>
 </body>
 </html>
