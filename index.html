@@ -7218,16 +7218,17 @@ function showModeSelect(){
       </button>` : `
       <button id="modeBreakout" style="
         flex:1;
-        background:rgba(5,15,30,0.97);
-        border:1px solid rgba(60,140,220,0.45);
-        box-shadow:${canAfford('breakout') ? '0 0 12px rgba(0,238,255,0.25)' : 'none'};
-        color:#7bbfff;font-family:'Cinzel',serif;font-size:12px;font-weight:600;letter-spacing:0.5px;
+        background:rgba(8,12,18,0.97);
+        border:1px solid ${canAfford('breakout') ? 'rgba(60,140,220,0.5)' : 'rgba(60,80,100,0.35)'};
+        box-shadow:${canAfford('breakout') ? '0 0 10px rgba(60,140,220,0.3),0 2px 12px rgba(0,0,0,0.5)' : '0 2px 8px rgba(0,0,0,0.4)'};
+        color:${canAfford('breakout') ? 'rgba(120,170,220,0.9)' : 'rgba(100,120,140,0.7)'};
+        font-family:'Cinzel',serif;font-size:12px;font-weight:600;letter-spacing:0.5px;
         padding:14px 8px;cursor:pointer;border-radius:4px;
         display:flex;flex-direction:column;align-items:center;gap:6px;
         touch-action:manipulation;">
-        <span style="font-size:26px;">🔒</span>
+        <span style="font-size:26px;filter:${canAfford('breakout') ? 'drop-shadow(0 0 6px rgba(60,140,220,0.5))' : 'none'}">🔒</span>
         <span>LOCKPICK</span>
-        <span style="font-size:10px;color:${canAfford('breakout') ? 'rgba(0,238,255,0.8)' : 'rgba(0,238,255,0.5)'};font-family:'Lato',sans-serif;">${UNLOCK_COSTS.breakout} 💎</span>
+        <span style="font-size:10px;color:${canAfford('breakout') ? 'rgba(100,180,255,0.8)' : 'rgba(100,120,140,0.5)'};font-family:'Lato',sans-serif;">${UNLOCK_COSTS.breakout} 💎</span>
       </button>`}
       ${isUnlocked('blackout') ? `
       <button id="modeBlackout" style="
@@ -7245,16 +7246,17 @@ function showModeSelect(){
       </button>` : `
       <button id="modeBlackout" style="
         flex:1;
-        background:rgba(30,5,3,0.97);
-        border:1px solid rgba(200,80,40,0.45);
-        box-shadow:${canAfford('blackout') ? '0 0 12px rgba(0,238,255,0.25)' : 'none'};
-        color:#ff8855;font-family:'Cinzel',serif;font-size:12px;font-weight:600;letter-spacing:0.5px;
+        background:rgba(12,8,8,0.97);
+        border:1px solid ${canAfford('blackout') ? 'rgba(200,80,40,0.5)' : 'rgba(100,60,50,0.35)'};
+        box-shadow:${canAfford('blackout') ? '0 0 10px rgba(200,80,40,0.3),0 2px 12px rgba(0,0,0,0.5)' : '0 2px 8px rgba(0,0,0,0.4)'};
+        color:${canAfford('blackout') ? 'rgba(220,120,80,0.9)' : 'rgba(140,100,80,0.7)'};
+        font-family:'Cinzel',serif;font-size:12px;font-weight:600;letter-spacing:0.5px;
         padding:14px 8px;cursor:pointer;border-radius:4px;
         display:flex;flex-direction:column;align-items:center;gap:6px;
         touch-action:manipulation;">
-        <span style="font-size:26px;">${canAfford('blackout') ? '💎' : '🔒'}</span>
+        <span style="font-size:26px;filter:${canAfford('blackout') ? 'drop-shadow(0 0 6px rgba(200,80,40,0.5))' : 'none'}">${canAfford('blackout') ? '💎' : '🔒'}</span>
         <span>PRISM GUARD</span>
-        <span style="font-size:10px;color:${canAfford('blackout') ? 'rgba(0,238,255,0.8)' : 'rgba(0,238,255,0.5)'};font-family:'Lato',sans-serif;">${UNLOCK_COSTS.blackout} 💎</span>
+        <span style="font-size:10px;color:${canAfford('blackout') ? 'rgba(220,140,100,0.8)' : 'rgba(140,100,80,0.5)'};font-family:'Lato',sans-serif;">${UNLOCK_COSTS.blackout} 💎</span>
       </button>`}
     </div>
 
@@ -7286,15 +7288,17 @@ function showModeSelect(){
     </button>` : `
     <button id="modeBuilder" style="
       width:100%;
-      background:rgba(20,15,0,0.97);
-      border:1px solid rgba(180,140,50,0.3);
-      box-shadow:${canAfford('full_builder') ? '0 0 12px rgba(0,238,255,0.25)' : 'none'};
-      color:rgba(200,170,90,0.85);font-family:'Cinzel',serif;font-size:13px;font-weight:600;letter-spacing:1px;
+      background:rgba(14,12,6,0.97);
+      border:1px solid ${canAfford('full_builder') ? 'rgba(180,140,50,0.5)' : 'rgba(100,90,50,0.3)'};
+      box-shadow:${canAfford('full_builder') ? '0 0 10px rgba(180,140,50,0.3),0 2px 12px rgba(0,0,0,0.5)' : '0 2px 8px rgba(0,0,0,0.4)'};
+      color:${canAfford('full_builder') ? 'rgba(200,170,90,0.9)' : 'rgba(140,120,70,0.7)'};
+      font-family:'Cinzel',serif;font-size:13px;font-weight:600;letter-spacing:1px;
       padding:13px 12px;cursor:pointer;border-radius:4px;
       display:flex;align-items:center;justify-content:center;gap:10px;
       touch-action:manipulation;">
-      <span>${canAfford('full_builder') ? '💎' : '🔒'} BUILD A CELL</span>
-      <span style="font-size:11px;color:${canAfford('full_builder') ? 'rgba(0,238,255,0.8)' : 'rgba(0,238,255,0.5)'};font-family:'Lato',sans-serif;font-weight:400;">${UNLOCK_COSTS.full_builder} 💎</span>
+      <span style="filter:${canAfford('full_builder') ? 'drop-shadow(0 0 5px rgba(180,140,50,0.4))' : 'none'}">${canAfford('full_builder') ? '💎' : '🔒'}</span>
+      <span>DESIGN</span>
+      <span style="font-size:11px;color:${canAfford('full_builder') ? 'rgba(200,170,90,0.8)' : 'rgba(140,120,70,0.5)'};font-family:'Lato',sans-serif;font-weight:400;">${UNLOCK_COSTS.full_builder} 💎</span>
     </button>`}
 
   </div>`;
