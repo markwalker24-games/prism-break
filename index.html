@@ -6174,6 +6174,9 @@ function openMapsPanel(defaultTab='maps') {
 
   tabMaps.addEventListener('click', renderMapsTab);
   tabSeries.addEventListener('click', renderSeriesTab);
+
+  // Open straight to maps tab - no interim step
+  renderMapsTab();
 }
 
 function showAddMapsToSeriesOverlay(seriesName, onDone){
