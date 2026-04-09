@@ -9466,6 +9466,18 @@ loadActiveSeries().then(() => {
 }).catch(() => {});
 
 </script>
-<script>if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(()=>{});</script>
+<script>
+if ("serviceWorker" in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register("sw.js")
+      .then(reg => {
+        console.log('[PB] Service worker registered, scope:', reg.scope);
+        // Check for updates every time the page loads
+        reg.update();
+      })
+      .catch(err => console.warn('[PB] SW registration failed:', err));
+  });
+}
+</script>
 </body>
 </html>

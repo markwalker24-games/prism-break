@@ -1,7 +1,5 @@
-const CACHE_NAME = 'prismbreak-v2';
+const CACHE_NAME = 'prismbreak-v3';
 const PRECACHE = [
-  '/',
-  '/index.html',
   '/manifest.json',
   '/icon-192.png',
   '/icon-512.png'
@@ -27,9 +25,18 @@ self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
 
   // Always go to network for API calls (Supabase, Google auth, etc.)
-  // Only cache GET requests from our own origin
   if (url.origin !== location.origin || e.request.method !== 'GET') return;
 
+  // Never cache index.html - always fetch fresh so deploys are instant
+  // Since all game code lives in index.html, this means every deploy is live immediately
+  if (url.pathname === '/' || url.pathname === '/index.html') {
+    e.respondWith(
+      fetch(e.request).catch(() => caches.match('/index.html'))
+    );
+    return;
+  }
+
+  // For everything else (icons, manifest, images) - network first, cache fallback
   e.respondWith(
     fetch(e.request)
       .then(res => {
@@ -39,6 +46,6 @@ self.addEventListener('fetch', e => {
         }
         return res;
       })
-      .catch(() => caches.match(e.request)) // Offline fallback
+      .catch(() => caches.match(e.request))
   );
 });
