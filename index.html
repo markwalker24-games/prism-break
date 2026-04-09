@@ -4499,12 +4499,12 @@ function renderLevelList(autoOpen){
     list.innerHTML = '';
 
     // ── ZONE 1: CURRENT QUEST ────────────────────────────────────
-    list.appendChild(zoneHeader('CURRENT QUEST', '#f5c842', 'rgba(245,200,66,0.4)'));
+    list.appendChild(zoneHeader('PRISM BREAK SERIES', '#f5c842', 'rgba(245,200,66,0.4)'));
     if (featuredSeriesObj) {
       buildAccordion('quest', featuredSeriesObj.name, featuredSeriesObj.levels, {
         accent: 'rgba(245,200,66,0.55)',
         nameColor: '#f5c842',
-        badge: `<span style="background:rgba(245,200,66,0.15);border:1px solid rgba(245,200,66,0.4);color:#f5c842;font-family:'Cinzel',serif;font-size:9px;padding:1px 6px;border-radius:2px;">⭐ QUEST</span>`,
+        badge: `<span style="background:rgba(245,200,66,0.15);border:1px solid rgba(245,200,66,0.4);color:#f5c842;font-family:'Cinzel',serif;font-size:9px;padding:1px 6px;border-radius:2px;">⭐ CURRENT</span>`,
         progressLocked: true,
         isSeries: true,
         seriesObj: featuredSeriesObj,
@@ -4516,6 +4516,38 @@ function renderLevelList(autoOpen){
       el.style.cssText = "color:rgba(200,160,60,0.35);font-family:'Lato',sans-serif;font-size:12px;text-align:center;padding:14px 0 6px;letter-spacing:0.3px;";
       el.textContent = 'No active quest — check back soon.';
       list.appendChild(el);
+    }
+
+    // ── Completed quest series ────────────────────────────────────
+    const completedQuestSeries = getQuestOrder()
+      .slice(0, getCurrentQuestIndex())
+      .map(name => allSeries.find(s => s.name === name))
+      .filter(Boolean);
+    if (completedQuestSeries.length) {
+      const completedLabel = document.createElement('div');
+      completedLabel.style.cssText = "font-family:'Cinzel',serif;font-size:9px;letter-spacing:2px;color:rgba(245,200,66,0.35);margin:10px 0 4px;padding-left:2px;";
+      completedLabel.textContent = 'COMPLETED';
+      list.appendChild(completedLabel);
+      completedQuestSeries.forEach((s, i) => {
+        // Count total diamonds across all maps in this series
+        const totalDiamonds = s.levels.reduce((sum, lv) => {
+          const bricks = lv.bricks || [];
+          return sum + bricks.filter(b => b.isDiamond).length;
+        }, 0);
+        const diamondBadge = totalDiamonds > 0
+          ? `<span style="background:rgba(245,200,66,0.08);border:1px solid rgba(245,200,66,0.2);color:rgba(200,170,80,0.7);font-family:'Lato',sans-serif;font-size:9px;padding:2px 7px;border-radius:2px;">✓ ${totalDiamonds} 💎 collected</span>`
+          : `<span style="background:rgba(245,200,66,0.08);border:1px solid rgba(245,200,66,0.2);color:rgba(200,170,80,0.7);font-family:'Cinzel',serif;font-size:9px;padding:1px 6px;border-radius:2px;">✓ DONE</span>`;
+        buildAccordion('done_' + i, s.name, s.levels, {
+          accent: 'rgba(180,140,50,0.25)',
+          nameColor: 'rgba(200,170,80,0.6)',
+          badge: diamondBadge,
+          progressLocked: false,
+          isSeries: true,
+          seriesObj: s,
+          showShareBtn: false,
+          showPublishBtn: false,
+        });
+      });
     }
 
     // ── ZONE 2: COMMUNITY MAPS ───────────────────────────────────
@@ -6686,11 +6718,12 @@ function endGame(reason){
   if(inSeries && !hasNext && activeSeries) saveSeriesProgress(activeSeries.name, activeSeries.levels.length - 1);
 
   // Advance quest if player just completed a quest series
+  let nextQuestName = null;
   if(inSeries && !hasNext && activeSeries && isSeriesInQuest(activeSeries.name)) {
     const questOrder = getQuestOrder();
     const currentIdx = getCurrentQuestIndex();
     if(questOrder[currentIdx] === activeSeries.name) {
-      const nextQuestName = advanceQuest();
+      nextQuestName = advanceQuest();
       if(nextQuestName) {
         setTimeout(() => showToast(`🏆 Quest unlocked: ${nextQuestName}!`, '#00eeff'), 1500);
       }
@@ -6742,7 +6775,8 @@ function endGame(reason){
   } else {
     buttons=`
       ${hasNext ? `<button id="endNextBtn" style="${btnStyle('#2ec4b6','rgba(5,25,28,0.95)')}">▶ Next Level</button>` : ''}
-      ${middleBtn}
+      ${isSeriesComplete && nextQuestName ? `<button id="endNextSeriesBtn" style="${btnStyle('#f5c842','rgba(40,28,5,0.98)')}">▶ PLAY NEXT SERIES</button>` : ''}
+      ${isSeriesComplete && nextQuestName ? '' : middleBtn}
       <button id="endPlayAgainBtn" style="${btnStyle(titleColor,'rgba(10,15,30,0.95)')}">↺ Play It Again</button>
       <button id="endMenuBtn" style="${ghostBtn}">Home</button>
     `;
@@ -6894,6 +6928,23 @@ function endGame(reason){
     });
   }
 
+  // Play Next Series - shown when a quest series is completed and there's another one
+  if(document.getElementById('endNextSeriesBtn')){
+    document.getElementById('endNextSeriesBtn').addEventListener('click', () => {
+      const nextSeries = savedSeries().find(s => s.name === nextQuestName);
+      if(nextSeries && nextSeries.levels && nextSeries.levels.length) {
+        activeSeries = nextSeries;
+        activeSeriesIdx = 0;
+        hideMessage();
+        startGame(nextSeries.levels[0]);
+      } else {
+        // Series not loaded yet - go home and it'll show as featured
+        hideMessage();
+        showModeSelect();
+      }
+    });
+  }
+
   // Build Your Own (shown instead of share on received maps)
   if(document.getElementById('endBuildBtn')){
     document.getElementById('endBuildBtn').addEventListener('click',()=>{
@@ -7006,10 +7057,10 @@ function showModeSelect(){
     const s = featuredSeries;
     const id = 'modeHardcoded0';
     const progress = getSeriesProgress(s.name);
-    const hasProgress = progress > 0 && progress < s.levels.length;
-    const btnLabel = hasProgress ? 'KEEP GOING!' : 'BEGIN ESCAPE';
+    const hasProgress = progress > 0;
+    const btnLabel = hasProgress ? 'KEEP GOING!' : 'BEGIN YOUR ESCAPE';
     const btnSub = hasProgress
-      ? `Map ${progress+1} of ${s.levels.length} · keep moving`
+      ? `Map ${Math.min(progress+1, s.levels.length)} of ${s.levels.length} · keep moving`
       : `Begin your escape · ${s.levels.length} maps`;
     const btnGlow = hasProgress ? 'rgba(80,200,120,0.4)' : 'rgba(245,200,66,0.4)';
     const btnBorder = hasProgress ? 'rgba(80,200,100,0.55)' : 'rgba(210,170,60,0.55)';
@@ -7038,7 +7089,7 @@ function showModeSelect(){
       display:flex;flex-direction:column;align-items:center;gap:6px;
       touch-action:manipulation;">
       <span style="font-size:26px;">💎</span>
-      <span>BEGIN ESCAPE</span>
+      <span>BEGIN YOUR ESCAPE</span>
       <span style="font-size:11px;color:rgba(180,140,60,0.4);font-family:'Lato',sans-serif;font-weight:400;">Loading...</span>
     </button>`;
 
@@ -7074,37 +7125,28 @@ function showModeSelect(){
     <!-- Series buttons -->
     ${seriesButtons}
 
+    <!-- PRISON YARD divider -->
+    <div style="display:flex;align-items:center;gap:8px;margin:2px 0;">
+      <div style="flex:1;height:1px;background:linear-gradient(90deg,transparent,rgba(180,140,50,0.3));"></div>
+      <span style="color:rgba(180,140,60,0.5);font-size:10px;font-family:'Cinzel',serif;letter-spacing:2px;white-space:nowrap;">PRISON YARD</span>
+      <div style="flex:1;height:1px;background:linear-gradient(270deg,transparent,rgba(180,140,50,0.3));"></div>
+    </div>
+
     <!-- Choose Map - same section as quest -->
     <button id="modeSelectLevel" style="
       width:100%;
-      background:${isUnlocked('choose_map') ? 'linear-gradient(160deg,rgba(25,18,8,0.95),rgba(15,10,4,0.97))' : canAfford('choose_map') ? 'rgba(0,30,40,0.97)' : 'rgba(10,10,15,0.97)'};
-      border:1px solid ${isUnlocked('choose_map') ? 'rgba(180,140,50,0.3)' : canAfford('choose_map') ? 'rgba(0,238,255,0.6)' : 'rgba(100,100,120,0.3)'};
-      box-shadow:${canAfford('choose_map') ? '0 0 12px rgba(0,238,255,0.25),0 2px 12px rgba(0,0,0,0.4)' : '0 2px 12px rgba(0,0,0,0.4)'};
-      color:${isUnlocked('choose_map') ? 'rgba(200,170,90,0.85)' : canAfford('choose_map') ? 'rgba(0,238,255,0.9)' : 'rgba(150,150,180,0.5)'};
+      background:linear-gradient(160deg,rgba(25,18,8,0.95),rgba(15,10,4,0.97));
+      border:1px solid rgba(180,140,50,0.3);
+      box-shadow:0 2px 12px rgba(0,0,0,0.4);
+      color:rgba(200,170,90,0.85);
       font-family:'Cinzel',serif;font-size:13px;font-weight:600;letter-spacing:1px;
       padding:12px 14px;cursor:pointer;border-radius:4px;
       display:flex;align-items:center;justify-content:center;gap:10px;
-      touch-action:manipulation;${isUnlocked('choose_map') || canAfford('choose_map') ? '' : 'opacity:0.5;'}">
-      <span style="font-size:16px;opacity:0.7">${isUnlocked('choose_map') ? '📜' : canAfford('choose_map') ? '💎' : '🔒'}</span>
-      <span>MORE WAYS OUT</span>
-      ${!isUnlocked('choose_map') ? `<span style="font-size:11px;color:${canAfford('choose_map') ? 'rgba(0,238,255,0.8)' : 'rgba(0,238,255,0.5)'};font-family:'Lato',sans-serif;font-weight:400;">${UNLOCK_COSTS.choose_map} 💎</span>` : ''}
+      touch-action:manipulation;">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.7;flex-shrink:0;"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+      <span>THE MAP ROOM</span>
     </button>
 
-    <!-- Challenges -->
-    <button id="modeChallenges" style="
-      width:100%;
-      background:linear-gradient(160deg,rgba(30,5,5,0.97),rgba(18,3,3,0.98));
-      border:1px solid rgba(220,60,60,0.45);
-      box-shadow:0 2px 12px rgba(0,0,0,0.5),inset 0 1px 0 rgba(255,80,80,0.08);
-      color:#e63946;
-      font-family:'Cinzel',serif;font-size:13px;font-weight:700;letter-spacing:1px;
-      padding:12px 14px;cursor:pointer;border-radius:4px;
-      display:flex;align-items:center;justify-content:center;gap:10px;
-      touch-action:manipulation;">
-      <span style="font-size:16px;">🔥</span>
-      <span>CHALLENGES</span>
-      <span id="challengeBadge" style="display:none;background:#e63946;color:#fff;font-family:'Lato',sans-serif;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;letter-spacing:0;"></span>
-    </button>
 
     <!-- The Trade -->
     <button id="modeStore" style="
@@ -7142,6 +7184,21 @@ function showModeSelect(){
       <span style="color:rgba(180,140,60,0.5);font-size:10px;font-family:'Cinzel',serif;letter-spacing:2px;white-space:nowrap;">ARCADE</span>
       <div style="flex:1;height:1px;background:linear-gradient(270deg,transparent,rgba(180,140,50,0.3));"></div>
     </div>
+    <!-- Challenges -->
+    <button id="modeChallenges" style="
+      width:100%;
+      background:linear-gradient(160deg,rgba(30,5,5,0.97),rgba(18,3,3,0.98));
+      border:1px solid rgba(220,60,60,0.45);
+      box-shadow:0 2px 12px rgba(0,0,0,0.5),inset 0 1px 0 rgba(255,80,80,0.08);
+      color:#e63946;
+      font-family:'Cinzel',serif;font-size:13px;font-weight:700;letter-spacing:1px;
+      padding:12px 14px;cursor:pointer;border-radius:4px;
+      display:flex;align-items:center;justify-content:center;gap:10px;
+      touch-action:manipulation;">
+      <span style="font-size:16px;">🔥</span>
+      <span>CHALLENGES</span>
+      <span id="challengeBadge" style="display:none;background:#e63946;color:#fff;font-family:'Lato',sans-serif;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;letter-spacing:0;"></span>
+    </button>
 
     <!-- Loot / Prism Guard -->
     <div style="display:flex;gap:8px;">
@@ -7160,15 +7217,15 @@ function showModeSelect(){
         <span style="font-size:10px;color:rgba(120,180,255,0.6);font-family:'Lato',sans-serif;font-weight:400;letter-spacing:0">Random maps · no guard</span>
       </button>` : `
       <button id="modeBreakout" style="
-        flex:1;${canAfford('breakout') ? '' : 'opacity:0.5;'}
-        background:${canAfford('breakout') ? 'rgba(5,15,30,0.97)' : 'rgba(10,10,15,0.97)'};
-        border:1px solid ${canAfford('breakout') ? 'rgba(0,238,255,0.6)' : 'rgba(100,100,120,0.3)'};
+        flex:1;
+        background:rgba(5,15,30,0.97);
+        border:1px solid rgba(60,140,220,0.45);
         box-shadow:${canAfford('breakout') ? '0 0 12px rgba(0,238,255,0.25)' : 'none'};
-        color:${canAfford('breakout') ? 'rgba(0,238,255,0.9)' : 'rgba(150,150,180,0.6)'};font-family:'Cinzel',serif;font-size:12px;font-weight:600;letter-spacing:0.5px;
+        color:#7bbfff;font-family:'Cinzel',serif;font-size:12px;font-weight:600;letter-spacing:0.5px;
         padding:14px 8px;cursor:pointer;border-radius:4px;
         display:flex;flex-direction:column;align-items:center;gap:6px;
         touch-action:manipulation;">
-        <canvas id="breakoutIconLocked" width="40" height="26" style="width:40px;height:26px;border-radius:3px;opacity:0.5;"></canvas>
+        <span style="font-size:26px;">🔒</span>
         <span>LOCKPICK</span>
         <span style="font-size:10px;color:${canAfford('breakout') ? 'rgba(0,238,255,0.8)' : 'rgba(0,238,255,0.5)'};font-family:'Lato',sans-serif;">${UNLOCK_COSTS.breakout} 💎</span>
       </button>`}
@@ -7187,15 +7244,15 @@ function showModeSelect(){
         <span style="font-size:10px;color:rgba(255,140,80,0.6);font-family:'Lato',sans-serif;font-weight:400;letter-spacing:0">Escape the guard</span>
       </button>` : `
       <button id="modeBlackout" style="
-        flex:1;${canAfford('blackout') ? '' : 'opacity:0.5;'}
-        background:${canAfford('blackout') ? 'rgba(30,5,3,0.97)' : 'rgba(10,10,15,0.97)'};
-        border:1px solid ${canAfford('blackout') ? 'rgba(0,238,255,0.6)' : 'rgba(100,100,120,0.3)'};
+        flex:1;
+        background:rgba(30,5,3,0.97);
+        border:1px solid rgba(200,80,40,0.45);
         box-shadow:${canAfford('blackout') ? '0 0 12px rgba(0,238,255,0.25)' : 'none'};
-        color:${canAfford('blackout') ? 'rgba(0,238,255,0.9)' : 'rgba(150,150,180,0.6)'};font-family:'Cinzel',serif;font-size:12px;font-weight:600;letter-spacing:0.5px;
+        color:#ff8855;font-family:'Cinzel',serif;font-size:12px;font-weight:600;letter-spacing:0.5px;
         padding:14px 8px;cursor:pointer;border-radius:4px;
         display:flex;flex-direction:column;align-items:center;gap:6px;
         touch-action:manipulation;">
-        <span style="font-size:20px;">${canAfford('blackout') ? '💎' : '🔒'}</span>
+        <span style="font-size:26px;">${canAfford('blackout') ? '💎' : '🔒'}</span>
         <span>PRISM GUARD</span>
         <span style="font-size:10px;color:${canAfford('blackout') ? 'rgba(0,238,255,0.8)' : 'rgba(0,238,255,0.5)'};font-family:'Lato',sans-serif;">${UNLOCK_COSTS.blackout} 💎</span>
       </button>`}
@@ -7228,11 +7285,11 @@ function showModeSelect(){
       <span>DESIGN</span>
     </button>` : `
     <button id="modeBuilder" style="
-      width:100%;${canAfford('full_builder') ? '' : 'opacity:0.5;'}
-      background:${canAfford('full_builder') ? 'rgba(20,15,0,0.97)' : 'rgba(10,10,15,0.97)'};
-      border:1px solid ${canAfford('full_builder') ? 'rgba(0,238,255,0.6)' : 'rgba(100,100,120,0.3)'};
+      width:100%;
+      background:rgba(20,15,0,0.97);
+      border:1px solid rgba(180,140,50,0.3);
       box-shadow:${canAfford('full_builder') ? '0 0 12px rgba(0,238,255,0.25)' : 'none'};
-      color:${canAfford('full_builder') ? 'rgba(0,238,255,0.9)' : 'rgba(150,150,180,0.6)'};font-family:'Cinzel',serif;font-size:13px;font-weight:600;letter-spacing:1px;
+      color:rgba(200,170,90,0.85);font-family:'Cinzel',serif;font-size:13px;font-weight:600;letter-spacing:1px;
       padding:13px 12px;cursor:pointer;border-radius:4px;
       display:flex;align-items:center;justify-content:center;gap:10px;
       touch-action:manipulation;">
@@ -7315,25 +7372,22 @@ function showModeSelect(){
   document.getElementById('modeLeaderboard').addEventListener('click', () => showLeaderboard());
 
 document.getElementById('modeSelectLevel').addEventListener('click',()=>{
-  if(!isUnlocked('choose_map')){ showSpendConfirm('choose_map', 'More Ways Out', ()=>{ hideMessage(); openLevelSelect(); }); return; }
   hideMessage(); openLevelSelect();
 });
 
   // Draw lock image on breakout icon - wait for image if not yet loaded
   const drawBreakoutIcon = ()=>{
-    ['breakoutIcon','breakoutIconLocked'].forEach(id => {
-      const canvas = document.getElementById(id);
-      if(!canvas) return;
-      const img = BRICK_IMAGES['lock'];
-      if(img && img.complete && img.naturalWidth>0){
-        canvas.getContext('2d').drawImage(img, 0, 0, 40, 26);
-      } else if(img){
-        img.addEventListener('load', ()=>{
-          const c2 = document.getElementById(id);
-          if(c2) c2.getContext('2d').drawImage(img, 0, 0, 40, 26);
-        }, { once: true });
-      }
-    });
+    const canvas = document.getElementById('breakoutIcon');
+    if(!canvas) return;
+    const img = BRICK_IMAGES['lock'];
+    if(img && img.complete && img.naturalWidth>0){
+      canvas.getContext('2d').drawImage(img, 0, 0, 40, 26);
+    } else if(img){
+      img.addEventListener('load', ()=>{
+        const c2 = document.getElementById('breakoutIcon');
+        if(c2) c2.getContext('2d').drawImage(img, 0, 0, 40, 26);
+      }, { once: true });
+    }
   };
   requestAnimationFrame(()=>{
     drawBreakoutIcon();
