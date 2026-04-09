@@ -7139,17 +7139,16 @@ function showModeSelect(){
     <!-- Choose Map - same section as quest -->
     <button id="modeSelectLevel" style="
       width:100%;
-      background:${isUnlocked('choose_map') ? 'linear-gradient(160deg,rgba(25,18,8,0.95),rgba(15,10,4,0.97))' : canAfford('choose_map') ? 'rgba(0,30,40,0.97)' : 'rgba(10,10,15,0.97)'};
-      border:1px solid ${isUnlocked('choose_map') ? 'rgba(180,140,50,0.3)' : canAfford('choose_map') ? 'rgba(0,238,255,0.6)' : 'rgba(100,100,120,0.3)'};
-      box-shadow:${canAfford('choose_map') ? '0 0 12px rgba(0,238,255,0.25),0 2px 12px rgba(0,0,0,0.4)' : '0 2px 12px rgba(0,0,0,0.4)'};
-      color:${isUnlocked('choose_map') ? 'rgba(200,170,90,0.85)' : canAfford('choose_map') ? 'rgba(0,238,255,0.9)' : 'rgba(150,150,180,0.5)'};
+      background:linear-gradient(160deg,rgba(25,18,8,0.95),rgba(15,10,4,0.97));
+      border:1px solid rgba(180,140,50,0.3);
+      box-shadow:0 2px 12px rgba(0,0,0,0.4);
+      color:rgba(200,170,90,0.85);
       font-family:'Cinzel',serif;font-size:13px;font-weight:600;letter-spacing:1px;
       padding:12px 14px;cursor:pointer;border-radius:4px;
       display:flex;align-items:center;justify-content:center;gap:10px;
-      touch-action:manipulation;${isUnlocked('choose_map') || canAfford('choose_map') ? '' : 'opacity:0.5;'}">
-      <span style="font-size:16px;opacity:0.7">${isUnlocked('choose_map') ? '📜' : canAfford('choose_map') ? '💎' : '🔒'}</span>
+      touch-action:manipulation;">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.7;flex-shrink:0;"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
       <span>THE MAP ROOM</span>
-      
     </button>
 
     <!-- The Trade -->
