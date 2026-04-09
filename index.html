@@ -4287,6 +4287,12 @@ function renderLevelList(autoOpen){
   }
 
   const openState = _levelSelectOpenState;
+  // Auto-open key sections on first render
+  if (Object.keys(openState).length === 0) {
+    openState['quest'] = true;
+    openState['my_library_outer'] = true;
+    openState['my_series_group'] = true;
+  }
   if (autoOpen === 'my_library') {
     openState['my_library_outer'] = true;
     openState['additional'] = true;
@@ -5258,7 +5264,7 @@ function showRenamePopup(anchorEl, currentName, onSave) {
 }
 
 document.getElementById('builderMapsBtn').addEventListener('click',()=>{
-  openMapsPanel();
+  openMapsPanel('maps');
 });
 
 function openMapsPanel(defaultTab='maps') {
