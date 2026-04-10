@@ -5419,13 +5419,18 @@ function openMapsPanel(defaultTab='maps') {
     // ── SELECT TOOLBAR ──────────────────────────────────────────
     const selectBar = document.createElement('div');
     selectBar.style.cssText = 'display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:8px;';
-    const selectBtn = document.createElement('button');
-    selectBtn.style.cssText = `background:none;border:1px solid rgba(200,160,60,0.3);color:rgba(200,160,60,0.6);font-family:'Cinzel',serif;font-size:10px;font-weight:600;letter-spacing:1px;padding:5px 12px;cursor:pointer;border-radius:3px;`;
-    selectBtn.textContent = 'SELECT';
+    const selectHint = document.createElement('span');
+    selectHint.style.cssText = "font-family:'Lato',sans-serif;font-size:10px;color:rgba(180,140,60,0.4);letter-spacing:0.5px;";
+    selectHint.textContent = 'Hold a map to select';
     const selectCount = document.createElement('span');
-    selectCount.style.cssText = 'font-family:\'Lato\',sans-serif;font-size:11px;color:rgba(200,160,60,0.5);display:none;';
-    selectBar.appendChild(selectBtn);
+    selectCount.style.cssText = "font-family:'Lato',sans-serif;font-size:11px;color:rgba(200,160,60,0.5);display:none;";
+    const exitSelectBtn = document.createElement('button');
+    exitSelectBtn.style.cssText = "display:none;background:none;border:1px solid rgba(200,160,60,0.3);color:rgba(200,160,60,0.6);font-family:'Cinzel',serif;font-size:10px;font-weight:600;letter-spacing:1px;padding:4px 10px;cursor:pointer;border-radius:3px;";
+    exitSelectBtn.textContent = 'DONE';
+    exitSelectBtn.addEventListener('click', toggleSelectMode);
+    selectBar.appendChild(selectHint);
     selectBar.appendChild(selectCount);
+    selectBar.appendChild(exitSelectBtn);
     body.appendChild(selectBar);
 
     // ── BULK ACTION BAR (hidden until selection) ─────────────────
@@ -5446,28 +5451,28 @@ function openMapsPanel(defaultTab='maps') {
         selectCount.textContent = `${count} selected`;
       } else {
         bulkBar.style.display = 'none';
-        selectCount.style.display = 'none';
-        selectCount.textContent = '';
+        selectCount.style.display = selectMode ? 'block' : 'none';
+        selectCount.textContent = selectMode ? '0 selected' : '';
       }
     }
 
     function toggleSelectMode() {
       selectMode = !selectMode;
       selectedMaps.clear();
-      selectBtn.textContent = selectMode ? 'DONE' : 'SELECT';
-      selectBtn.style.color = selectMode ? '#f5c842' : 'rgba(200,160,60,0.6)';
-      selectBtn.style.borderColor = selectMode ? 'rgba(245,200,66,0.5)' : 'rgba(200,160,60,0.3)';
+      selectHint.style.display = selectMode ? 'none' : 'block';
+      exitSelectBtn.style.display = selectMode ? 'block' : 'none';
+      selectCount.style.display = 'none';
+      selectCount.textContent = '';
       // Toggle checkboxes visibility
       body.querySelectorAll('.map-checkbox').forEach(cb => {
         cb.style.display = selectMode ? 'flex' : 'none';
       });
       body.querySelectorAll('.map-card').forEach(card => {
         card.style.cursor = selectMode ? 'pointer' : '';
+        card.style.outline = '';
       });
       updateBulkBar();
     }
-
-    selectBtn.addEventListener('click', toggleSelectMode);
 
     // Bulk delete
     bulkBar.querySelector('#bulkDelete').addEventListener('click', () => {
@@ -5707,27 +5712,6 @@ function openMapsPanel(defaultTab='maps') {
       checkbox.style.cssText = `display:none;position:absolute;top:4px;left:4px;width:20px;height:20px;border-radius:50%;border:2px solid rgba(245,200,66,0.6);background:rgba(0,0,0,0.6);z-index:5;align-items:center;justify-content:center;font-size:12px;`;
       card.appendChild(checkbox);
 
-      // Card click in select mode = toggle selection
-      card.addEventListener('click', e => {
-        if (!selectMode) return;
-        e.stopPropagation();
-        if (selectedMaps.has(lv.name)) {
-          selectedMaps.delete(lv.name);
-          checkbox.textContent = '';
-          checkbox.style.background = 'rgba(0,0,0,0.6)';
-          checkbox.style.borderColor = 'rgba(245,200,66,0.6)';
-          card.style.outline = '';
-        } else {
-          selectedMaps.add(lv.name);
-          checkbox.textContent = '✓';
-          checkbox.style.background = 'rgba(245,200,66,0.9)';
-          checkbox.style.color = '#000';
-          checkbox.style.borderColor = '#f5c842';
-          card.style.outline = '2px solid rgba(245,200,66,0.6)';
-        }
-        updateBulkBar();
-      });
-
       // Thumbnail canvas - fills card width
       const cnv = document.createElement('canvas');
       cnv.width = 120; cnv.height = TH;
@@ -5899,7 +5883,7 @@ function openMapsPanel(defaultTab='maps') {
         });
       });
 
-      // TAP vs LONG-PRESS - distinguish by duration
+      // TAP vs LONG-PRESS
       let pressTimer = null;
       let pressStartTime = 0;
       let didLongPress = false;
@@ -5910,21 +5894,18 @@ function openMapsPanel(defaultTab='maps') {
         pressTimer = setTimeout(()=>{
           didLongPress = true;
           pressTimer = null;
-          // Visual feedback
-          cnvWrap.style.opacity = '0.6';
-          const isOwned = savedLevels().some(l=>l.name===lv.name);
-          const note = isOwned ? '' : '<div style="color:rgba(200,160,60,0.6);font-size:12px;margin-top:6px;">This map was shared with you — it will only be removed from your list.</div>';
-          showConfirmOverlay(
-            `Delete <strong style="color:#f5c842;">${lv.name}</strong>?${note}`,
-            ()=>{
-              deleteLevel(lv.name);
-              if(isOwned) deleteCloudMapByName(lv.name).catch(()=>{});
-              openMapsPanel('maps');
-              showBuilderToast(`"${lv.name}" deleted`);
-            }
-          );
-          setTimeout(()=>{ cnvWrap.style.opacity = '1'; }, 300);
-        }, 600);
+          // Long press = enter select mode and select this card
+          if (!selectMode) toggleSelectMode();
+          selectedMaps.add(lv.name);
+          checkbox.textContent = '✓';
+          checkbox.style.background = 'rgba(245,200,66,0.9)';
+          checkbox.style.color = '#000';
+          checkbox.style.borderColor = '#f5c842';
+          card.style.outline = '2px solid rgba(245,200,66,0.6)';
+          updateBulkBar();
+          // Haptic feedback if available
+          if (navigator.vibrate) navigator.vibrate(40);
+        }, 500);
       });
 
       cnvWrap.addEventListener('pointerup', ()=>{
@@ -5933,16 +5914,38 @@ function openMapsPanel(defaultTab='maps') {
       cnvWrap.addEventListener('pointerleave', ()=>{
         if(pressTimer){ clearTimeout(pressTimer); pressTimer=null; didLongPress=false; }
       });
+      cnvWrap.addEventListener('pointercancel', ()=>{
+        if(pressTimer){ clearTimeout(pressTimer); pressTimer=null; didLongPress=false; }
+      });
 
-      // TAP = short press, load into builder
+      // TAP = short press
       cnvWrap.addEventListener('click', ()=>{
         if(didLongPress){ didLongPress=false; return; } // swallow click after long press
+        if(selectMode){
+          // In select mode - toggle selection on the whole card
+          if(selectedMaps.has(lv.name)){
+            selectedMaps.delete(lv.name);
+            checkbox.textContent = '';
+            checkbox.style.background = 'rgba(0,0,0,0.6)';
+            checkbox.style.borderColor = 'rgba(245,200,66,0.6)';
+            card.style.outline = '';
+          } else {
+            selectedMaps.add(lv.name);
+            checkbox.textContent = '✓';
+            checkbox.style.background = 'rgba(245,200,66,0.9)';
+            checkbox.style.color = '#000';
+            checkbox.style.borderColor = '#f5c842';
+            card.style.outline = '2px solid rgba(245,200,66,0.6)';
+          }
+          updateBulkBar();
+          return;
+        }
         ov.remove();
         loadLevelIntoBuilder(lv);
       });
 
       cnvWrap.style.cursor = 'pointer';
-      cnvWrap.title = 'Tap to edit · Hold to delete';
+      cnvWrap.title = 'Tap to edit · Hold to select';
 
       // SHARE
       shareBtn.addEventListener('click', async ()=>{
@@ -7274,6 +7277,7 @@ function showDiamondsSeriesSelect() {
 }
 
 function showAdminSettings() {
+  if (!isAdminUser()) return;
   const ov = document.createElement('div');
   ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:500;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;';
 
