@@ -513,19 +513,20 @@ let activeBgKey = null; // track which bg is loaded to avoid re-assigning same s
 function setBgKey(key){
   if(key === activeBgKey) return; // already loaded, skip
   activeBgKey = key;
-  BG_IMAGE.src = BACKGROUNDS[key] || BACKGROUNDS['Stone Floor'];
+  BG_IMAGE.src = BACKGROUNDS[key] || BACKGROUNDS['Prison Chamber'];
 }
-BG_IMAGE.src = "images/bg_stone_floor.png";
+BG_IMAGE.src = "images/bg_prison_chamber.png";
 
 const BACKGROUNDS = {
-  'Stone Floor':    'images/bg_stone_floor.png',
-  'Tunnel':         'images/bg_tunnel_debris.png',
-  'Prison Yard':    'images/bg_prison_yard.png',
-  'Concrete Yard':  'images/bg_cracked_concrete.png',
-  'Meadow':         'images/bg_meadow_path.png',
-  'Frozen Dungeon': 'images/bg_frozen_dungeon.png',
-  'Lava Dungeon':   'images/bg_lava_dungeon.png',
-  'Purple Fog':     'images/bg_purple_fog.png'
+  'Prison Chamber':  'images/bg_prison_chamber.png',
+  'Stone Floor':     'images/bg_stone_floor.png',
+  'Tunnel':          'images/bg_tunnel_debris.png',
+  'Prison Yard':     'images/bg_prison_yard.png',
+  'Concrete Yard':   'images/bg_cracked_concrete.png',
+  'Meadow':          'images/bg_meadow_path.png',
+  'Frozen Dungeon':  'images/bg_frozen_dungeon.png',
+  'Lava Dungeon':    'images/bg_lava_dungeon.png',
+  'Purple Fog':      'images/bg_purple_fog.png'
 };
 
 // =====================================================================
@@ -570,7 +571,7 @@ const BALL_COLORS = {
   '#f4a261': '#d4a017',  // gold
   '#2ec4b6': '#1a8fe3',  // blue - hint of navy
   '#9b5de5': '#cc44ff',  // purple
-  '#a8e63d': '#4caf50',  // green - medium, not lime
+  '#a8e63d': '#5ecf2a',  // green - slightly lime
   '#ffffff': '#e8eeff',  // white - slight blue tint for glassiness
 };
 const COLOR_DARK = {'#e63946':'#7a1520','#f4a261':'#7a4a1f','#2ec4b6':'#0d5f5a','#9b5de5':'#4a1a7a','#a8e63d':'#4a6610'};
@@ -4896,7 +4897,7 @@ function setBuilderMapMode(mode) {
 }
 let builderBallPos={ col:Math.floor(BRICK_COLS/2), row:Math.floor(BRICK_ROWS/2) };
 let builderPortalPos=null; // {col,row} or null - optional
-let builderBackground='Stone Floor'; // currently selected background
+let builderBackground='Prison Chamber'; // currently selected background
 let builderBgImage=null; // cached image for current background
 let selectedTool={ type:'color', color:COLORS[0] };
 
@@ -8923,13 +8924,14 @@ const STORE_ITEMS = [
   // Gear reskins (permanent)
   { id:'skin_dynamite', name:'Detonator',    desc:'Plant charges, then double-press to detonate all at once',cost:20, type:'cosmetic', category:'gear',   emoji:'🔴' },
   // Backgrounds (permanent)
-  { id:'bg_tunnel',   name:'Tunnel',         desc:'Escape through the underground tunnel',   cost:10, type:'cosmetic', category:'backgrounds', bg:'Tunnel' },
-  { id:'bg_yard',     name:'Prison Yard',    desc:'Step into the prison yard',               cost:10, type:'cosmetic', category:'backgrounds', bg:'Prison Yard' },
-  { id:'bg_concrete', name:'Concrete Yard',  desc:'The cracked concrete exercise yard',      cost:10, type:'cosmetic', category:'backgrounds', bg:'Concrete Yard' },
-  { id:'bg_meadow',   name:'Meadow',         desc:'Freedom - a world beyond the walls',      cost:15, type:'cosmetic', category:'backgrounds', bg:'Meadow' },
-  { id:'bg_frozen',   name:'Frozen Dungeon', desc:'A frozen wing no one comes back from',    cost:20, type:'cosmetic', category:'backgrounds', bg:'Frozen Dungeon' },
-  { id:'bg_lava',     name:'Lava Dungeon',   desc:'The deepest, hottest cell in the prison', cost:20, type:'cosmetic', category:'backgrounds', bg:'Lava Dungeon' },
-  { id:'bg_fog',      name:'Purple Fog',     desc:'Something strange is in the air',         cost:25, type:'cosmetic', category:'backgrounds', bg:'Purple Fog' },
+  { id:'bg_stone',    name:'Stone Floor',    desc:'Deeper inside the prison walls',          cost:10, type:'cosmetic', category:'backgrounds', bg:'Stone Floor' },
+  { id:'bg_tunnel',   name:'Tunnel',         desc:'The escape route you dug yourself',        cost:10, type:'cosmetic', category:'backgrounds', bg:'Tunnel' },
+  { id:'bg_yard',     name:'Prison Yard',    desc:'One step closer to the outside',           cost:15, type:'cosmetic', category:'backgrounds', bg:'Prison Yard' },
+  { id:'bg_concrete', name:'Concrete Yard',  desc:'The exercise yard. Guards watching.',      cost:15, type:'cosmetic', category:'backgrounds', bg:'Concrete Yard' },
+  { id:'bg_meadow',   name:'Meadow',         desc:'Freedom. A world beyond the walls.',       cost:20, type:'cosmetic', category:'backgrounds', bg:'Meadow' },
+  { id:'bg_frozen',   name:'Frozen Dungeon', desc:'A frozen wing no one comes back from',     cost:25, type:'cosmetic', category:'backgrounds', bg:'Frozen Dungeon' },
+  { id:'bg_lava',     name:'Lava Dungeon',   desc:'The deepest, hottest cell in the prison',  cost:25, type:'cosmetic', category:'backgrounds', bg:'Lava Dungeon' },
+  { id:'bg_fog',      name:'Purple Fog',     desc:'Something strange is in the air',          cost:30, type:'cosmetic', category:'backgrounds', bg:'Purple Fog' },
 ];
 
 function getOwnedItems() {
