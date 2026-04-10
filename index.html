@@ -513,21 +513,20 @@ let activeBgKey = null; // track which bg is loaded to avoid re-assigning same s
 function setBgKey(key){
   if(key === activeBgKey) return; // already loaded, skip
   activeBgKey = key;
-  BG_IMAGE.src = BACKGROUNDS[key] || BACKGROUNDS['Forest Path'];
+  BG_IMAGE.src = BACKGROUNDS[key] || BACKGROUNDS['Stone Floor'];
 }
-BG_IMAGE.src = "images/bg_default.jpeg";
+BG_IMAGE.src = "images/bg_stone_floor.png";
 
 const BACKGROUNDS = {
-  'Forest Path': BG_IMAGE.src,
-  'Ancient Egypt Temple': 'images/bg_ancient_egypt_temple.jpeg',
-  'Shipwreck': 'images/bg_shipwreck.jpeg',
-  'Cave Exit': 'images/bg_cave_exit.jpeg',
-  'Metal Bunker': 'images/bg_metal_bunker.jpeg',
-  'Haunted House': 'images/bg_haunted_house.jpeg',
-  'Old Mine': 'images/bg_old_mine.jpeg',
-  'Ivory Temple': 'images/bg_ivory_temple.jpeg',
-  'Ancient Temple': 'images/bg_ancient_temple.jpeg',
-  'Treasure Trove': 'images/bg_treasure_trove.jpeg'};
+  'Stone Floor':    'images/bg_stone_floor.png',
+  'Tunnel':         'images/bg_tunnel_debris.png',
+  'Prison Yard':    'images/bg_prison_yard.png',
+  'Concrete Yard':  'images/bg_cracked_concrete.png',
+  'Meadow':         'images/bg_meadow_path.png',
+  'Frozen Dungeon': 'images/bg_frozen_dungeon.png',
+  'Lava Dungeon':   'images/bg_lava_dungeon.png',
+  'Purple Fog':     'images/bg_purple_fog.png'
+};
 
 // =====================================================================
 // CONSTANTS & SETUP
@@ -3738,7 +3737,7 @@ function startGame(levelData, forcedMode){
       const allBgKeys = Object.keys(BACKGROUNDS);
       const bgItems = STORE_ITEMS.filter(i => i.category === 'backgrounds');
       const ownedBgKeys = allBgKeys.filter(k => {
-        if (k === 'Forest Path') return true;
+        if (k === 'Stone Floor') return true;
         const storeItem = bgItems.find(i => i.bg === k);
         return storeItem ? isActive(storeItem.id) : false;
       });
@@ -3746,7 +3745,7 @@ function startGame(levelData, forcedMode){
       setBgKey(bgKeys[Math.floor(Math.random() * bgKeys.length)]);
     }
   } else {
-    setBgKey('Forest Path');
+    setBgKey('Stone Floor');
   }
 
   // Mode: escape if any diamonds, blackout otherwise
@@ -4843,7 +4842,7 @@ function setBuilderMapMode(mode) {
 }
 let builderBallPos={ col:Math.floor(BRICK_COLS/2), row:Math.floor(BRICK_ROWS/2) };
 let builderPortalPos=null; // {col,row} or null - optional
-let builderBackground='Forest Path'; // currently selected background
+let builderBackground='Stone Floor'; // currently selected background
 let builderBgImage=null; // cached image for current background
 let selectedTool={ type:'color', color:COLORS[0] };
 
@@ -5017,7 +5016,7 @@ function updateBgPickerLabel(){
 function showBgPicker(){
   const bgItems = STORE_ITEMS.filter(i => i.category === 'backgrounds');
   const bgNames = Object.keys(BACKGROUNDS).filter(k => {
-    if (k === 'Forest Path') return true;
+    if (k === 'Stone Floor') return true;
     const storeItem = bgItems.find(i => i.bg === k);
     return storeItem ? isActive(storeItem.id) : false;
   });
@@ -8778,12 +8777,13 @@ const STORE_ITEMS = [
   // Gear reskins (permanent)
   { id:'skin_dynamite', name:'Detonator',    desc:'Plant charges, then double-press to detonate all at once',cost:20, type:'cosmetic', category:'gear',   emoji:'🔴' },
   // Backgrounds (permanent)
-  { id:'bg_shipwreck',  name:'Shipwreck',   desc:'Unlock the Shipwreck background',       cost:15, type:'cosmetic', category:'backgrounds', bg:'Shipwreck' },
-  { id:'bg_mine',       name:'Old Mine',    desc:'Unlock the Old Mine background',        cost:15, type:'cosmetic', category:'backgrounds', bg:'Old Mine' },
-  { id:'bg_bunker',     name:'Metal Bunker',desc:'Unlock the Metal Bunker background',    cost:15, type:'cosmetic', category:'backgrounds', bg:'Metal Bunker' },
-  { id:'bg_haunted',    name:'Haunted House',desc:'Unlock the Haunted House background',  cost:15, type:'cosmetic', category:'backgrounds', bg:'Haunted House' },
-  { id:'bg_egypt',      name:'Egypt Temple',desc:'Unlock the Ancient Egypt background',   cost:20, type:'cosmetic', category:'backgrounds', bg:'Ancient Egypt Temple' },
-  { id:'bg_treasure',   name:'Treasure Trove',desc:'Unlock the Treasure Trove background',cost:20, type:'cosmetic', category:'backgrounds', bg:'Treasure Trove' },
+  { id:'bg_tunnel',   name:'Tunnel',         desc:'Escape through the underground tunnel',   cost:10, type:'cosmetic', category:'backgrounds', bg:'Tunnel' },
+  { id:'bg_yard',     name:'Prison Yard',    desc:'Step into the prison yard',               cost:10, type:'cosmetic', category:'backgrounds', bg:'Prison Yard' },
+  { id:'bg_concrete', name:'Concrete Yard',  desc:'The cracked concrete exercise yard',      cost:10, type:'cosmetic', category:'backgrounds', bg:'Concrete Yard' },
+  { id:'bg_meadow',   name:'Meadow',         desc:'Freedom - a world beyond the walls',      cost:15, type:'cosmetic', category:'backgrounds', bg:'Meadow' },
+  { id:'bg_frozen',   name:'Frozen Dungeon', desc:'A frozen wing no one comes back from',    cost:20, type:'cosmetic', category:'backgrounds', bg:'Frozen Dungeon' },
+  { id:'bg_lava',     name:'Lava Dungeon',   desc:'The deepest, hottest cell in the prison', cost:20, type:'cosmetic', category:'backgrounds', bg:'Lava Dungeon' },
+  { id:'bg_fog',      name:'Purple Fog',     desc:'Something strange is in the air',         cost:25, type:'cosmetic', category:'backgrounds', bg:'Purple Fog' },
 ];
 
 function getOwnedItems() {
@@ -8856,7 +8856,7 @@ function showTradeScreen() {
   const cats = [
     { key:'trails', label:'🎨 BALL TRAILS', desc:'One per color' },
     { key:'gear', label:'💣 GEAR', desc:'Upgrades your kit' },
-    { key:'backgrounds', label:'🖼 BACKGROUNDS', desc:'New cells to escape' },
+    { key:'backgrounds', label:'🏚 ENVIRONMENTS', desc:'New places to escape from' },
   ];
 
   let catHTML = '';
