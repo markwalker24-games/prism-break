@@ -835,7 +835,8 @@ function performProgressReset() {
   }).catch(() => {});
 }
 
-async function syncQuestOrderToCloud(order) {
+async function syncQuestOrderToCloud(order, type = 'escape') {
+  const configKey = type === 'diamonds' ? 'diamonds_order' : 'quest_order';
   try {
     const token = await getSupabaseToken();
     const res = await fetch(`${SUPA_URL}/rest/v1/app_config`, {
@@ -846,22 +847,21 @@ async function syncQuestOrderToCloud(order) {
         'Authorization': `Bearer ${token}`,
         'Prefer': 'resolution=merge-duplicates,return=minimal'
       },
-      body: JSON.stringify({ key: 'quest_order', value: order, updated_at: new Date().toISOString() })
+      body: JSON.stringify({ key: configKey, value: order, updated_at: new Date().toISOString() })
     });
     if (!res.ok) {
       const errText = await res.text();
-      console.error('Quest order sync failed:', res.status, errText);
+      console.error('Order sync failed:', res.status, errText);
       throw new Error(`${res.status}: ${errText}`);
     }
   } catch(e) {
-    console.error('Quest order sync error:', e);
+    console.error('Order sync error:', e);
     throw e;
   }
 }
 
 async function loadQuestOrderFromCloud() {
   try {
-    // Only pull from cloud if no local quest order exists (new device restore)
     const local = getQuestOrder();
     if (local.length) return;
     const res = await fetch(
@@ -874,6 +874,22 @@ async function loadQuestOrderFromCloud() {
       setQuestOrder(rows[0].value);
     }
   } catch(e) { console.warn('loadQuestOrderFromCloud error:', e); }
+}
+
+async function loadDiamondsOrderFromCloud() {
+  try {
+    const local = getDiamondsOrder();
+    if (local.length) return;
+    const res = await fetch(
+      `${SUPA_URL}/rest/v1/app_config?key=eq.diamonds_order&select=value&limit=1`,
+      { headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` } }
+    );
+    if (!res.ok) return;
+    const rows = await res.json();
+    if (rows.length && Array.isArray(rows[0].value)) {
+      setDiamondsOrder(rows[0].value);
+    }
+  } catch(e) { console.warn('loadDiamondsOrderFromCloud error:', e); }
 }
 function getShareUrl(slug) {
   return `${GAME_URL}?map=${slug}`;
@@ -5696,7 +5712,12 @@ function openMapsPanel(defaultTab='maps') {
         const mapsInSeries = s.levels
           .map(l => saved.find(x => x.name === l.name) || l)
           .sort((a,b) => a.name.localeCompare(b.name));
-        const sec = makeCollapsibleSection(s.name, '#c9a84c', mapsInSeries.length, 'series_' + s.name);
+        const sec = makeCollapsibleSection(
+          (s.mode === 'loot' ? '💎 ' : '🔓 ') + s.name,
+          s.mode === 'loot' ? '#00eeff' : '#c9a84c',
+          mapsInSeries.length,
+          'series_' + s.name
+        );
         body.appendChild(sec.hdr);
         if (sec.isOpen && sec.grid) {
           body.appendChild(sec.grid);
@@ -6021,106 +6042,136 @@ function openMapsPanel(defaultTab='maps') {
     // QUEST MANAGEMENT (admin only)
     if (adminMode) {
 
-      // Force Reset All Users section
-      const questSection = document.createElement('div');
-      questSection.style.cssText = 'background:#0a0f1a;border:1px solid rgba(0,238,255,0.3);border-radius:4px;padding:12px;margin-bottom:12px;';
+      // ── Helper: build a draggable order section ──────────────
+      function buildOrderSection(opts) {
+        const { label, icon, color, borderColor, getOrder, setOrder, isInOrder, addToOrder, removeFromOrder, filterSeries, syncLabel } = opts;
+        const order = getOrder();
+        const section = document.createElement('div');
+        section.style.cssText = `background:#0a0f1a;border:1px solid ${borderColor};border-radius:4px;padding:12px;margin-bottom:12px;`;
 
-      const questOrder = getQuestOrder();
+        const hdr = document.createElement('div');
+        hdr.style.cssText = `font-family:'Cinzel',serif;font-size:12px;font-weight:700;color:${color};letter-spacing:1px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;`;
+        hdr.innerHTML = `<span>${icon} ${label}</span><div style="display:flex;gap:6px;align-items:center;"><button class="orderSyncBtn" style="background:rgba(0,40,60,0.8);border:1px solid ${borderColor};color:${color};font-family:'Cinzel',serif;font-size:9px;padding:4px 8px;cursor:pointer;border-radius:2px;letter-spacing:1px;">☁ SYNC</button><span style="font-size:10px;color:rgba(0,200,220,0.4);font-family:'Lato',sans-serif;font-weight:400;">Drag to reorder</span></div>`;
+        section.appendChild(hdr);
 
-      const questHdr = document.createElement('div');
-      questHdr.style.cssText = "font-family:'Cinzel',serif;font-size:12px;font-weight:700;color:#00eeff;letter-spacing:1px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;";
-      questHdr.innerHTML = `<span>💎 QUEST ORDER</span><div style="display:flex;gap:6px;align-items:center;"><button id="questSyncBtn" style="background:rgba(0,60,80,0.8);border:1px solid rgba(0,238,255,0.4);color:#00eeff;font-family:'Cinzel',serif;font-size:9px;padding:4px 8px;cursor:pointer;border-radius:2px;letter-spacing:1px;">☁ SYNC</button><span style="font-size:10px;color:rgba(0,200,220,0.5);font-family:'Lato',sans-serif;font-weight:400;">Drag to reorder</span></div>`;
-      questSection.appendChild(questHdr);
-
-      // Wire up sync button
-      questHdr.querySelector('#questSyncBtn').addEventListener('click', async () => {
-        const btn = questHdr.querySelector('#questSyncBtn');
-        const orig = btn.innerHTML; btn.innerHTML = '⏳'; btn.disabled = true;
-        try {
-          const order = getQuestOrder();
-          await syncQuestOrderToCloud(order);
-          showBuilderToast('☁ Quest order synced to cloud!');
-        } catch(e) {
-          showBuilderToast('⚠️ Sync failed');
-        } finally {
-          btn.innerHTML = orig; btn.disabled = false;
-        }
-      });
-
-      if (!questOrder.length) {
-        const empty = document.createElement('div');
-        empty.style.cssText = "color:rgba(0,180,200,0.4);font-size:11px;font-family:'Lato',sans-serif;text-align:center;padding:8px 0;";
-        empty.textContent = 'No quest series yet. Add one below.';
-        questSection.appendChild(empty);
-      } else {
-        const questList = document.createElement('div');
-        questList.style.cssText = 'display:flex;flex-direction:column;gap:4px;margin-bottom:8px;';
-        let questDragSrc = null;
-
-        function rebuildQuestList() {
-          questList.innerHTML = '';
-          const order = getQuestOrder();
-          const currentIdx = getCurrentQuestIndex();
-          order.forEach((name, i) => {
-            const qrow = document.createElement('div');
-            qrow.dataset.idx = i;
-            const isCurrent = i === currentIdx;
-            qrow.style.cssText = `display:flex;align-items:center;gap:8px;background:${isCurrent ? 'rgba(0,60,80,0.5)' : 'rgba(0,0,0,0.3)'};border:1px solid ${isCurrent ? 'rgba(0,238,255,0.4)' : 'rgba(0,180,200,0.15)'};padding:7px 10px;border-radius:3px;cursor:grab;user-select:none;`;
-            qrow.draggable = true;
-            qrow.innerHTML = `
-              <span style="color:rgba(0,180,200,0.4);font-size:14px;">☰</span>
-              <span style="font-size:10px;color:${isCurrent ? '#00eeff' : 'rgba(0,180,200,0.4)'};font-family:'Cinzel',serif;min-width:16px;">${i+1}</span>
-              <span style="color:${isCurrent ? '#00eeff' : '#aaa'};font-size:12px;font-family:'Lato',sans-serif;flex:1;">${name}</span>
-              ${isCurrent ? '<span style="font-size:9px;color:#00eeff;font-family:\'Cinzel\',serif;letter-spacing:1px;">ACTIVE</span>' : ''}
-              <button class="questRemove" style="background:none;border:1px solid rgba(180,80,80,0.3);color:#e66;font-size:14px;line-height:1;padding:2px 7px;border-radius:3px;cursor:pointer;">−</button>
-            `;
-            qrow.addEventListener('dragstart', e => { questDragSrc = i; qrow.style.opacity = '0.4'; e.dataTransfer.effectAllowed = 'move'; });
-            qrow.addEventListener('dragend', () => { qrow.style.opacity = '1'; questDragSrc = null; });
-            qrow.addEventListener('dragover', e => { e.preventDefault(); qrow.style.borderColor = '#00eeff'; });
-            qrow.addEventListener('dragleave', () => { qrow.style.borderColor = isCurrent ? 'rgba(0,238,255,0.4)' : 'rgba(0,180,200,0.15)'; });
-            qrow.addEventListener('drop', e => {
-              e.preventDefault();
-              if (questDragSrc === null || questDragSrc === i) return;
-              const order = getQuestOrder();
-              const [moved] = order.splice(questDragSrc, 1);
-              order.splice(i, 0, moved);
-              setQuestOrder(order);
-              rebuildQuestList();
-            });
-            qrow.querySelector('.questRemove').addEventListener('click', e => {
-              e.stopPropagation();
-              removeSeriesFromQuest(name);
-              rebuildQuestList();
-            });
-            questList.appendChild(qrow);
-          });
-        }
-        rebuildQuestList();
-        questSection.appendChild(questList);
-      }
-
-      // + Add to Quest dropdown
-      const addableNames = all.filter(s => !isSeriesInQuest(s.name) && !s._isChallengeSeries).map(s => s.name);
-      if (addableNames.length) {
-        const addRow = document.createElement('div');
-        addRow.style.cssText = 'display:flex;gap:6px;align-items:center;';
-        const sel = document.createElement('select');
-        sel.style.cssText = "flex:1;background:#0a0f1a;border:1px solid rgba(0,238,255,0.3);color:#00eeff;font-family:'Lato',sans-serif;font-size:12px;padding:6px 8px;border-radius:3px;";
-        sel.innerHTML = `<option value="">Add series to quest...</option>` + addableNames.map(n => `<option value="${n}">${n}</option>`).join('');
-        const addBtn = document.createElement('button');
-        addBtn.style.cssText = "background:rgba(0,60,80,0.8);border:1px solid rgba(0,238,255,0.4);color:#00eeff;font-family:'Cinzel',serif;font-size:11px;padding:6px 12px;cursor:pointer;border-radius:3px;";
-        addBtn.textContent = '+ ADD';
-        addBtn.addEventListener('click', () => {
-          if (!sel.value) return;
-          addSeriesToQuest(sel.value);
-          renderSeriesTab();
+        hdr.querySelector('.orderSyncBtn').addEventListener('click', async () => {
+          const btn = hdr.querySelector('.orderSyncBtn');
+          const orig = btn.innerHTML; btn.innerHTML = '⏳'; btn.disabled = true;
+          try {
+            await syncLabel(getOrder());
+            showBuilderToast(`☁ ${label} synced!`);
+          } catch(e) { showBuilderToast('⚠️ Sync failed'); }
+          finally { btn.innerHTML = orig; btn.disabled = false; }
         });
-        addRow.appendChild(sel);
-        addRow.appendChild(addBtn);
-        questSection.appendChild(addRow);
+
+        if (!order.length) {
+          const empty = document.createElement('div');
+          empty.style.cssText = `color:rgba(0,180,200,0.4);font-size:11px;font-family:'Lato',sans-serif;text-align:center;padding:8px 0;`;
+          empty.textContent = `No ${label.toLowerCase()} yet. Add one below.`;
+          section.appendChild(empty);
+        } else {
+          const list = document.createElement('div');
+          list.style.cssText = 'display:flex;flex-direction:column;gap:4px;margin-bottom:8px;';
+          let dragSrc = null;
+
+          function rebuildList() {
+            list.innerHTML = '';
+            const cur = getOrder();
+            const currentIdx = opts.getCurrentIdx ? opts.getCurrentIdx() : 0;
+            cur.forEach((name, i) => {
+              const row = document.createElement('div');
+              row.dataset.idx = i;
+              const isCurrent = i === currentIdx;
+              row.style.cssText = `display:flex;align-items:center;gap:8px;background:${isCurrent ? 'rgba(0,60,80,0.5)' : 'rgba(0,0,0,0.3)'};border:1px solid ${isCurrent ? borderColor : 'rgba(0,180,200,0.15)'};padding:7px 10px;border-radius:3px;cursor:grab;user-select:none;`;
+              row.draggable = true;
+              row.innerHTML = `
+                <span style="color:rgba(0,180,200,0.4);font-size:14px;">☰</span>
+                <span style="font-size:10px;color:${isCurrent ? color : 'rgba(0,180,200,0.4)'};font-family:'Cinzel',serif;min-width:16px;">${i+1}</span>
+                <span style="color:${isCurrent ? color : '#aaa'};font-size:12px;font-family:'Lato',sans-serif;flex:1;">${name}</span>
+                ${isCurrent ? `<span style="font-size:9px;color:${color};font-family:'Cinzel',serif;letter-spacing:1px;">ACTIVE</span>` : ''}
+                <button class="orderRemove" style="background:none;border:1px solid rgba(180,80,80,0.3);color:#e66;font-size:14px;line-height:1;padding:2px 7px;border-radius:3px;cursor:pointer;">−</button>
+              `;
+              row.addEventListener('dragstart', e => { dragSrc = i; row.style.opacity = '0.4'; e.dataTransfer.effectAllowed = 'move'; });
+              row.addEventListener('dragend', () => { row.style.opacity = '1'; dragSrc = null; });
+              row.addEventListener('dragover', e => { e.preventDefault(); row.style.borderColor = color; });
+              row.addEventListener('dragleave', () => { row.style.borderColor = isCurrent ? borderColor : 'rgba(0,180,200,0.15)'; });
+              row.addEventListener('drop', e => {
+                e.preventDefault();
+                if (dragSrc === null || dragSrc === i) return;
+                const o = getOrder();
+                const [moved] = o.splice(dragSrc, 1);
+                o.splice(i, 0, moved);
+                setOrder(o);
+                rebuildList();
+              });
+              row.querySelector('.orderRemove').addEventListener('click', e => {
+                e.stopPropagation();
+                removeFromOrder(name);
+                rebuildList();
+              });
+              list.appendChild(row);
+            });
+          }
+          rebuildList();
+          section.appendChild(list);
+        }
+
+        // + Add dropdown
+        const addable = filterSeries(all).filter(s => !isInOrder(s.name)).map(s => s.name);
+        if (addable.length) {
+          const addRow = document.createElement('div');
+          addRow.style.cssText = 'display:flex;gap:6px;align-items:center;';
+          const sel = document.createElement('select');
+          sel.style.cssText = `flex:1;background:#0a0f1a;border:1px solid ${borderColor};color:${color};font-family:'Lato',sans-serif;font-size:12px;padding:6px 8px;border-radius:3px;`;
+          sel.innerHTML = `<option value="">Add series to order...</option>` + addable.map(n => `<option value="${n}">${n}</option>`).join('');
+          const addBtn = document.createElement('button');
+          addBtn.style.cssText = `background:rgba(0,40,60,0.8);border:1px solid ${borderColor};color:${color};font-family:'Cinzel',serif;font-size:11px;padding:6px 12px;cursor:pointer;border-radius:3px;`;
+          addBtn.textContent = '+ ADD';
+          addBtn.addEventListener('click', () => {
+            if (!sel.value) return;
+            addToOrder(sel.value);
+            renderSeriesTab();
+          });
+          addRow.appendChild(sel);
+          addRow.appendChild(addBtn);
+          section.appendChild(addRow);
+        }
+
+        return section;
       }
 
-      body.appendChild(questSection);
+      // ESCAPE ORDER
+      body.appendChild(buildOrderSection({
+        label: 'ESCAPE ORDER',
+        icon: '🔓',
+        color: '#00eeff',
+        borderColor: 'rgba(0,238,255,0.3)',
+        getOrder: getQuestOrder,
+        setOrder: setQuestOrder,
+        isInOrder: isSeriesInQuest,
+        addToOrder: addSeriesToQuest,
+        removeFromOrder: removeSeriesFromQuest,
+        filterSeries: s => s.filter(x => !x._isChallengeSeries && (x.mode || 'escape') !== 'loot'),
+        getCurrentIdx: getCurrentQuestIndex,
+        syncLabel: order => syncQuestOrderToCloud(order),
+      }));
+
+      // DIAMONDS ORDER
+      body.appendChild(buildOrderSection({
+        label: 'DIAMONDS ORDER',
+        icon: '💎',
+        color: '#f5c842',
+        borderColor: 'rgba(245,200,66,0.3)',
+        getOrder: getDiamondsOrder,
+        setOrder: setDiamondsOrder,
+        isInOrder: isSeriesInDiamondsOrder,
+        addToOrder: addSeriesToDiamondsOrder,
+        removeFromOrder: removeSeriesFromDiamondsOrder,
+        filterSeries: s => s.filter(x => !x._isChallengeSeries && x.mode === 'loot'),
+        getCurrentIdx: () => 0,
+        syncLabel: order => syncQuestOrderToCloud(order, 'diamonds'),
+      }));
+
     }
 
     if(!all.length){
@@ -7279,7 +7330,17 @@ canvas.addEventListener('click',()=>{
 // MODE SELECT SCREEN
 // =====================================================================
 function showDiamondsSeriesSelect() {
-  const diamondSeries = savedSeries().filter(s => s.mode === 'loot' && s.levels && s.levels.length);
+  const allDiamond = savedSeries().filter(s => s.mode === 'loot' && s.levels && s.levels.length);
+  // Sort by diamonds order if set
+  const order = getDiamondsOrder();
+  const diamondSeries = order.length
+    ? [...allDiamond].sort((a, b) => {
+        const ai = order.indexOf(a.name); const bi = order.indexOf(b.name);
+        if (ai === -1 && bi === -1) return 0;
+        if (ai === -1) return 1; if (bi === -1) return -1;
+        return ai - bi;
+      })
+    : allDiamond;
 
   // If no diamonds-mode series yet, just play a random map
   if (!diamondSeries.length) {
@@ -8025,6 +8086,24 @@ function removeSeriesFromQuest(seriesName) {
   const order = getQuestOrder().filter(n => n !== seriesName);
   setQuestOrder(order);
 }
+function getDiamondsOrder() {
+  try { return JSON.parse(LS.get('pb_diamonds_order') || '[]'); } catch(e) { return []; }
+}
+function setDiamondsOrder(order) {
+  LS.set('pb_diamonds_order', JSON.stringify(order));
+  if (adminMode) syncQuestOrderToCloud(order, 'diamonds').catch(() => {});
+}
+function isSeriesInDiamondsOrder(seriesName) {
+  return getDiamondsOrder().includes(seriesName);
+}
+function addSeriesToDiamondsOrder(seriesName) {
+  const order = getDiamondsOrder();
+  if (!order.includes(seriesName)) { order.push(seriesName); setDiamondsOrder(order); }
+}
+function removeSeriesFromDiamondsOrder(seriesName) {
+  setDiamondsOrder(getDiamondsOrder().filter(n => n !== seriesName));
+}
+
 function setFeaturedSeriesName(name){
   LS.set('pb_featured_series', name);
   // Sync the new featured series to cloud so all players get it
@@ -9885,6 +9964,7 @@ initAuth().then(() => {
 // Load cloud data after UI is shown
 loadResetTokenFromCloud().catch(() => {});
 loadQuestOrderFromCloud().catch(() => {});
+loadDiamondsOrderFromCloud().catch(() => {});
 loadActiveSeries().then(() => {
   // Refresh home screen now that series are loaded - but only if still on home screen
   if (!gameRunning && !gameOver && !builderOpen && document.getElementById('modeHardcoded0')) {
