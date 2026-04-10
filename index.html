@@ -2222,39 +2222,29 @@ function drawBall(c,b){
         }
 
       } else if (tid === 'trail_white') {
-        // Cold mist near the ball + ice crystal shards
-        const shimmer = 0.7 + 0.3 * Math.sin(tNow * 8 + i * 0.6);
-        // Icy mist puff
-        const grad = c.createRadialGradient(t.x, t.y, 0, t.x, t.y, blobR * 1.1);
-        grad.addColorStop(0,   `rgba(220,240,255,${alpha * 0.7 * shimmer})`);
-        grad.addColorStop(0.4, `rgba(160,210,245,${alpha * 0.35 * shimmer})`);
-        grad.addColorStop(1,   `rgba(80,140,200,0)`);
+        // Billowing grey smoke
+        const drift = Math.sin(tNow * 3 + i * 0.8) * blobR * 0.3;
+        const rise = frac * blobR * 0.4;
+        const smokeR = blobR * (0.9 + 0.4 * frac);
+        // Main smoke puff - layered for depth
+        const gray1 = Math.floor(160 + frac * 30);
+        const gray2 = Math.floor(100 + frac * 40);
+        const grad = c.createRadialGradient(t.x + drift, t.y - rise, 0, t.x + drift * 0.5, t.y - rise * 0.5, smokeR);
+        grad.addColorStop(0,   `rgba(${gray1},${gray1},${gray1},${alpha * 0.55})`);
+        grad.addColorStop(0.45,`rgba(${gray2},${gray2},${gray2},${alpha * 0.3})`);
+        grad.addColorStop(0.75,`rgba(80,80,80,${alpha * 0.1})`);
+        grad.addColorStop(1,   `rgba(50,50,50,0)`);
         c.fillStyle = grad;
-        c.beginPath(); c.arc(t.x, t.y, blobR * 1.1, 0, Math.PI*2); c.fill();
-        // Snowflake-like shards near the head
-        if (frac > 0.4) {
-          const shardCount = 3;
-          for (let s = 0; s < shardCount; s++) {
-            const sa = (Math.PI * 2 / shardCount) * s + tNow * 1.2 + i * 0.5;
-            const sLen = blobR * (0.5 + 0.3 * Math.sin(tNow * 5 + s * 2 + i));
-            c.strokeStyle = `rgba(220,240,255,${alpha * 0.5 * shimmer})`;
-            c.lineWidth = 0.8;
-            c.beginPath();
-            c.moveTo(t.x, t.y);
-            c.lineTo(t.x + Math.cos(sa) * sLen, t.y + Math.sin(sa) * sLen);
-            c.stroke();
-            // Small fork
-            if (sLen > blobR * 0.3) {
-              const fk = sa + 0.4;
-              const fl = sLen * 0.35;
-              const mx = t.x + Math.cos(sa) * sLen * 0.65;
-              const my = t.y + Math.sin(sa) * sLen * 0.65;
-              c.strokeStyle = `rgba(200,230,255,${alpha * 0.3 * shimmer})`;
-              c.lineWidth = 0.5;
-              c.beginPath(); c.moveTo(mx, my);
-              c.lineTo(mx + Math.cos(fk) * fl, my + Math.sin(fk) * fl); c.stroke();
-            }
-          }
+        c.beginPath(); c.arc(t.x + drift, t.y - rise, smokeR, 0, Math.PI*2); c.fill();
+        // Secondary wisp offset for billowing feel
+        if (frac > 0.3) {
+          const drift2 = Math.sin(tNow * 4 + i * 1.4 + 2) * blobR * 0.25;
+          const gray3 = Math.floor(130 + frac * 20);
+          const grad2 = c.createRadialGradient(t.x + drift2, t.y - rise * 0.6, 0, t.x + drift2, t.y - rise * 0.6, smokeR * 0.65);
+          grad2.addColorStop(0,   `rgba(${gray3},${gray3},${gray3},${alpha * 0.3})`);
+          grad2.addColorStop(1,   `rgba(80,80,80,0)`);
+          c.fillStyle = grad2;
+          c.beginPath(); c.arc(t.x + drift2, t.y - rise * 0.6, smokeR * 0.65, 0, Math.PI*2); c.fill();
         }
       }
     }
