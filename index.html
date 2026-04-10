@@ -5402,8 +5402,8 @@ function openMapsPanel(defaultTab='maps') {
 
     // Union of individually saved maps + maps embedded in series
     const saved = savedLevels();
-    // Maps categorised below in sections
-    const allMaps = [...standaloneOnly, ...fromSeries];
+    // Maps categorised below in sections - use saved as allMaps for empty check
+    const allMaps = saved.filter(l => isOwnedMap(l));
     const savedNames = new Set(allMaps.map(l=>l.name)); // keep for compat
     body.innerHTML = '';
     body.style.padding = '8px';
@@ -5558,10 +5558,6 @@ function openMapsPanel(defaultTab='maps') {
       showBuilderToast(`⇄ ${names.length} map${names.length > 1 ? 's' : ''} → ${label} mode`);
       openMapsPanel('maps');
     });
-
-    // Separate standalone maps from series maps
-    const standaloneMaps = allMaps.filter(l=>!l._fromSeries);
-    const seriesMaps = allMaps.filter(l=>l._fromSeries);
 
     function renderGrid(maps, container){
       const grid = document.createElement('div');
@@ -5981,62 +5977,6 @@ function openMapsPanel(defaultTab='maps') {
     if (adminMode) {
 
       // Force Reset All Users section
-      const resetSection = document.createElement('div');
-      resetSection.style.cssText = 'background:#1a0505;border:1px solid rgba(220,60,60,0.4);border-radius:4px;padding:12px;margin-bottom:12px;';
-      resetSection.innerHTML = `
-        <div style="font-family:'Cinzel',serif;font-size:11px;font-weight:700;color:#e63946;letter-spacing:1px;margin-bottom:8px;">⚠️ FORCE RESET ALL USERS</div>
-        <div style="font-size:10px;color:rgba(220,100,100,0.6);font-family:'Lato',sans-serif;margin-bottom:10px;line-height:1.6;">
-          Sets a new reset token in Supabase. Every player will have their progress wiped on next load.
-        </div>
-        <div style="display:flex;gap:8px;align-items:center;">
-          <input id="resetTokenInput" type="text" placeholder="e.g. reset_v2" style="flex:1;background:rgba(40,10,10,0.8);border:1px solid rgba(200,60,60,0.4);color:#ffaaaa;font-family:'Lato',sans-serif;font-size:11px;padding:6px 8px;border-radius:2px;outline:none;">
-          <button id="resetTokenBtn" style="background:rgba(180,20,20,0.9);border:1px solid rgba(220,60,60,0.6);color:#fff;font-family:'Cinzel',serif;font-size:9px;padding:6px 10px;cursor:pointer;border-radius:2px;letter-spacing:1px;white-space:nowrap;">PUSH RESET</button>
-        </div>
-      `;
-      body.appendChild(resetSection);
-
-      resetSection.querySelector('#resetTokenBtn').addEventListener('click', async () => {
-        const input = resetSection.querySelector('#resetTokenInput');
-        const token = input.value.trim();
-        if (!token) { showBuilderToast('Enter a token first'); return; }
-
-        // Confirmation overlay
-        const conf = document.createElement('div');
-        conf.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:600;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;';
-        conf.innerHTML = `
-          <div style="background:#1a0505;border:2px solid rgba(220,60,60,0.7);border-radius:4px;padding:28px 22px;width:min(300px,88vw);text-align:center;box-shadow:0 8px 40px rgba(0,0,0,0.9);">
-            <div style="font-size:32px;margin-bottom:12px;">⚠️</div>
-            <div style="font-family:'Cinzel',serif;font-size:14px;font-weight:700;color:#e63946;letter-spacing:1px;margin-bottom:10px;">RESET ALL USERS?</div>
-            <div style="font-size:11px;color:rgba(220,140,140,0.7);font-family:'Lato',sans-serif;line-height:1.8;margin-bottom:6px;">
-              Token: <strong style="color:#ffaaaa;">${token}</strong>
-            </div>
-            <div style="font-size:11px;color:rgba(220,140,140,0.6);font-family:'Lato',sans-serif;line-height:1.8;margin-bottom:20px;">
-              Every player's progress, diamonds, and unlocks will be wiped on their next load. This cannot be undone.
-            </div>
-            <div style="display:flex;gap:10px;">
-              <button id="confCancel" style="flex:1;background:none;border:1px solid rgba(200,200,200,0.3);color:rgba(220,220,220,0.7);font-family:'Cinzel',serif;font-size:11px;padding:11px;cursor:pointer;border-radius:3px;">CANCEL</button>
-              <button id="confConfirm" style="flex:1;background:rgba(180,20,20,0.9);border:1px solid rgba(220,60,60,0.6);color:#fff;font-family:'Cinzel',serif;font-size:11px;font-weight:700;padding:11px;cursor:pointer;border-radius:3px;">RESET ALL</button>
-            </div>
-          </div>
-        `;
-        document.body.appendChild(conf);
-        conf.querySelector('#confCancel').addEventListener('click', () => conf.remove());
-        conf.querySelector('#confConfirm').addEventListener('click', async () => {
-          conf.remove();
-          const btn = resetSection.querySelector('#resetTokenBtn');
-          const orig = btn.textContent; btn.textContent = '⏳'; btn.disabled = true;
-          try {
-            await pushResetTokenToCloud(token);
-            input.value = '';
-            showBuilderToast(`✓ Reset token "${token}" pushed - all users wiped on next load`);
-          } catch(e) {
-            showBuilderToast('⚠️ Push failed: ' + e.message);
-          } finally {
-            btn.textContent = orig; btn.disabled = false;
-          }
-        });
-      });
-
       const questSection = document.createElement('div');
       questSection.style.cssText = 'background:#0a0f1a;border:1px solid rgba(0,238,255,0.3);border-radius:4px;padding:12px;margin-bottom:12px;';
 
@@ -7333,6 +7273,73 @@ function showDiamondsSeriesSelect() {
   ov.addEventListener('click', e => { if(e.target === ov) { ov.remove(); showModeSelect(); } });
 }
 
+function showAdminSettings() {
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:500;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;';
+
+  const panel = document.createElement('div');
+  panel.style.cssText = "background:linear-gradient(160deg,#120808,#0a0505);border:1px solid rgba(220,60,60,0.4);border-radius:4px;padding:24px 20px;width:min(320px,92vw);display:flex;flex-direction:column;gap:16px;font-family:'Lato',sans-serif;";
+
+  panel.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;">
+      <div style="font-family:'Cinzel',serif;font-size:15px;font-weight:700;color:#e63946;letter-spacing:1px;">⚙️ ADMIN SETTINGS</div>
+      <button id="adminSettingsClose" style="background:none;border:none;color:rgba(220,220,220,0.5);font-family:'Cinzel',serif;font-size:11px;cursor:pointer;letter-spacing:1px;padding:4px 8px;">CLOSE</button>
+    </div>
+
+    <div style="background:rgba(40,5,5,0.8);border:1px solid rgba(220,60,60,0.3);border-radius:3px;padding:14px;display:flex;flex-direction:column;gap:10px;">
+      <div style="font-family:'Cinzel',serif;font-size:10px;font-weight:700;color:#e63946;letter-spacing:2px;">⚠️ FORCE RESET ALL USERS</div>
+      <div style="font-size:11px;color:rgba(220,120,120,0.6);line-height:1.6;">Sets a new reset token in Supabase. Every player will have their progress wiped on next load.</div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <input id="adminResetTokenInput" type="text" placeholder="e.g. reset_v2" style="flex:1;background:rgba(40,10,10,0.8);border:1px solid rgba(200,60,60,0.4);color:#ffaaaa;font-family:'Lato',sans-serif;font-size:11px;padding:7px 8px;border-radius:2px;outline:none;">
+        <button id="adminResetTokenBtn" style="background:rgba(180,20,20,0.9);border:1px solid rgba(220,60,60,0.6);color:#fff;font-family:'Cinzel',serif;font-size:9px;padding:7px 10px;cursor:pointer;border-radius:2px;letter-spacing:1px;white-space:nowrap;">PUSH RESET</button>
+      </div>
+    </div>
+  `;
+
+  ov.appendChild(panel);
+  document.body.appendChild(ov);
+
+  panel.querySelector('#adminSettingsClose').addEventListener('click', () => ov.remove());
+  ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+
+  panel.querySelector('#adminResetTokenBtn').addEventListener('click', async () => {
+    const input = panel.querySelector('#adminResetTokenInput');
+    const token = input.value.trim();
+    if (!token) { showToast('Enter a token first', '#e63946'); return; }
+
+    const conf = document.createElement('div');
+    conf.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:600;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;';
+    conf.innerHTML = `
+      <div style="background:#1a0505;border:2px solid rgba(220,60,60,0.7);border-radius:4px;padding:28px 22px;width:min(300px,88vw);text-align:center;box-shadow:0 8px 40px rgba(0,0,0,0.9);">
+        <div style="font-size:32px;margin-bottom:12px;">⚠️</div>
+        <div style="font-family:'Cinzel',serif;font-size:14px;font-weight:700;color:#e63946;letter-spacing:1px;margin-bottom:10px;">RESET ALL USERS?</div>
+        <div style="font-size:11px;color:rgba(220,140,140,0.7);font-family:'Lato',sans-serif;line-height:1.8;margin-bottom:6px;">Token: <strong style="color:#ffaaaa;">${token}</strong></div>
+        <div style="font-size:11px;color:rgba(220,140,140,0.6);font-family:'Lato',sans-serif;line-height:1.8;margin-bottom:20px;">Every player's progress, diamonds, and unlocks will be wiped on their next load. This cannot be undone.</div>
+        <div style="display:flex;gap:10px;">
+          <button id="confCancel" style="flex:1;background:none;border:1px solid rgba(200,200,200,0.3);color:rgba(220,220,220,0.7);font-family:'Cinzel',serif;font-size:11px;padding:11px;cursor:pointer;border-radius:3px;">CANCEL</button>
+          <button id="confConfirm" style="flex:1;background:rgba(180,20,20,0.9);border:1px solid rgba(220,60,60,0.6);color:#fff;font-family:'Cinzel',serif;font-size:11px;font-weight:700;padding:11px;cursor:pointer;border-radius:3px;">RESET ALL</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(conf);
+    conf.querySelector('#confCancel').addEventListener('click', () => conf.remove());
+    conf.querySelector('#confConfirm').addEventListener('click', async () => {
+      conf.remove();
+      const btn = panel.querySelector('#adminResetTokenBtn');
+      const orig = btn.textContent; btn.textContent = '⏳'; btn.disabled = true;
+      try {
+        await pushResetTokenToCloud(token);
+        input.value = '';
+        showToast(`✓ Reset token "${token}" pushed`, '#e63946');
+      } catch(e) {
+        showToast('⚠️ Push failed: ' + e.message, '#e63946');
+      } finally {
+        btn.textContent = orig; btn.disabled = false;
+      }
+    });
+  });
+}
+
 function showModeSelect(){
   // Clear any stuck overlays from previous game
   document.querySelectorAll('body > div[style*="position:fixed"]').forEach(el => {
@@ -7402,7 +7409,8 @@ function showModeSelect(){
       }
       </div>
     </div>
-    <div style="text-align:center;margin-bottom:2px;">
+    <div style="text-align:center;margin-bottom:2px;position:relative;">
+      ${isAdminUser() ? `<button id="adminCogBtn" style="position:absolute;top:0;left:0;background:none;border:none;color:rgba(200,160,60,0.4);font-size:20px;cursor:pointer;padding:4px;line-height:1;-webkit-tap-highlight-color:transparent;" title="Admin Settings">⚙️</button>` : ''}
       <div style="
         font-family:'Cinzel Decorative',serif;font-size:22px;font-weight:700;
         color:#f5c842;letter-spacing:3px;
@@ -7663,6 +7671,10 @@ function showModeSelect(){
     });
   }
   document.getElementById('modeLeaderboard').addEventListener('click', () => showLeaderboard());
+
+  // Admin cog
+  const adminCog = document.getElementById('adminCogBtn');
+  if (adminCog) adminCog.addEventListener('click', () => showAdminSettings());
 
 document.getElementById('modeSelectLevel').addEventListener('click',()=>{
   hideMessage(); openLevelSelect();
