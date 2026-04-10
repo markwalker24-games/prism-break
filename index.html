@@ -4283,6 +4283,8 @@ function drawLevelThumbnail(canvas, levelData){
 }
 
 let _levelSelectOpenState = {};
+let _levelSelectScrollKey = null;
+let _levelSelectScrollDir = null;
 
 function renderLevelList(autoOpen){
   let list = document.getElementById('levelList');
@@ -4404,10 +4406,13 @@ function renderLevelList(autoOpen){
 
     header.appendChild(nameWrap);
     header.appendChild(right);
+    header.dataset.scrollKey = key;
     header.addEventListener('click', () => {
+      const wasOpen = !!openState[key];
       openState[key] = !openState[key];
+      _levelSelectScrollKey = key;
+      _levelSelectScrollDir = wasOpen ? 'close' : 'open';
       renderAccordions();
-
     });
     list.appendChild(header);
 
@@ -4742,12 +4747,28 @@ function renderLevelList(autoOpen){
 
   renderAccordions();
 
-  if (openState['my_library_outer']) {
+  // Scroll to the header that was just toggled
+  if (_levelSelectScrollKey) {
+    requestAnimationFrame(() => {
+      const panel = document.querySelector('#levelSelectOverlay .panel') || list.closest('[style*="overflow-y"]');
+      const target = list.querySelector(`[data-scroll-key="${CSS.escape(_levelSelectScrollKey)}"]`);
+      if (target && panel) {
+        const targetTop = target.offsetTop - panel.offsetTop;
+        if (_levelSelectScrollDir === 'open') {
+          // Opening: scroll header to near top so content is visible below
+          panel.scrollTo({ top: targetTop - 12, behavior: 'smooth' });
+        } else {
+          // Closing: scroll header into view
+          panel.scrollTo({ top: targetTop - 12, behavior: 'smooth' });
+        }
+      }
+      _levelSelectScrollKey = null;
+      _levelSelectScrollDir = null;
+    });
+  } else if (openState['my_library_outer']) {
     const zone = document.getElementById('myLibraryZone');
     const panel = document.querySelector('#levelSelectOverlay .panel');
-    if (zone && panel) {
-      panel.scrollTop = zone.offsetTop;
-    }
+    if (zone && panel) panel.scrollTop = zone.offsetTop;
   }
 }
 
@@ -5626,8 +5647,12 @@ function openMapsPanel(defaultTab='maps') {
         grid = document.createElement('div');
         grid.style.cssText = 'display:grid;grid-template-columns:repeat(3,1fr);gap:8px;width:100%;border:1px solid rgba(140,100,30,0.2);border-top:none;border-radius:0 0 3px 3px;padding:8px;box-sizing:border-box;background:rgba(10,8,4,0.97);margin-bottom:8px;';
       }
+      hdr.dataset.scrollKey = key;
       hdr.addEventListener('click', () => {
+        const wasOpen = !!window._mapsTabOpen[key];
         window._mapsTabOpen[key] = !window._mapsTabOpen[key];
+        window._mapsTabScrollKey = key;
+        window._mapsTabScrollDir = wasOpen ? 'close' : 'open';
         renderMapsTab();
       });
       return { hdr, grid, isOpen };
@@ -5691,6 +5716,19 @@ function openMapsPanel(defaultTab='maps') {
     }
     if (diaSec.isOpen && diaSec.grid) {
       diamondStandalone.forEach(lv => renderCard(lv, diaSec.grid, true, false, challengeMapNames.has(lv.name)));
+    }
+
+    // Scroll to toggled section header
+    if (window._mapsTabScrollKey) {
+      const key = window._mapsTabScrollKey;
+      window._mapsTabScrollKey = null;
+      requestAnimationFrame(() => {
+        const target = body.querySelector(`[data-scroll-key="${CSS.escape(key)}"]`);
+        const scrollParent = body.closest('[style*="overflow-y"]') || body.parentElement;
+        if (target && scrollParent) {
+          scrollParent.scrollTo({ top: target.offsetTop - scrollParent.offsetTop - 8, behavior: 'smooth' });
+        }
+      });
     }
 
     // Append bulk bar and done
@@ -5965,6 +6003,10 @@ function openMapsPanel(defaultTab='maps') {
   function renderSeriesTab(){
     tabSeries.style.cssText = tabSeries.style.cssText.replace(/background[^;]+;|color[^;]+;|border-bottom[^;]+;/g,'') + tabActiveStyle;
     tabMaps.style.cssText   = tabMaps.style.cssText.replace(/background[^;]+;|color[^;]+;|border-bottom[^;]+;/g,'') + tabIdleStyle;
+
+    // Save scroll position before re-render
+    const scrollParent = body.closest('[style*="overflow-y"]') || body.parentElement;
+    const savedScroll = scrollParent ? scrollParent.scrollTop : 0;
 
     body.innerHTML='';
 
@@ -6339,6 +6381,11 @@ function openMapsPanel(defaultTab='maps') {
       showBuilderToast(`Series "${nameIn.trim()}" created! (${mode === 'loot' ? 'Diamonds mode' : 'Escape mode'})`);
     });
     body.appendChild(newBtn);
+
+    // Restore scroll position after re-render
+    if (savedScroll > 0 && scrollParent) {
+      requestAnimationFrame(() => { scrollParent.scrollTop = savedScroll; });
+    }
   }
 
   tabMaps.addEventListener('click', renderMapsTab);
