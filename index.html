@@ -455,7 +455,7 @@
       <div id="builderActions">
         <button class="builder-btn" id="builderMapsBtn">📁 MAPS</button>
         <button class="builder-btn" id="builderImportBtn" style="display:none;border-color:rgba(220,60,60,0.6);color:#e66;">⬆ IMPORT</button>
-        <button class="builder-btn" id="builderClearBtn">CLEAR</button>
+        <button class="builder-btn" id="builderClearBtn">+ NEW</button>
         <span id="builderModeBadge" style="font-family:'Cinzel',serif;font-size:9px;padding:3px 7px;border-radius:2px;background:rgba(245,200,66,0.12);border:1px solid rgba(245,200,66,0.3);color:rgba(245,200,66,0.7);white-space:nowrap;">🔓 ESCAPE</span>
         <button class="builder-btn green" id="builderTestBtn">▶ TEST</button>
         <button class="builder-btn gold" id="builderSaveBtn">💾 SAVE</button>
@@ -567,10 +567,10 @@ const COLORS     = ['#e63946','#f4a261','#2ec4b6','#9b5de5','#a8e63d'];
 // Ball colors - slightly more saturated/vivid to match brick art
 const BALL_COLORS = {
   '#e63946': '#ff3333',  // red
-  '#f4a261': '#ffaa00',  // yellow/orange
-  '#2ec4b6': '#00aaff',  // teal/blue
+  '#f4a261': '#d4a017',  // gold
+  '#2ec4b6': '#1a8fe3',  // blue - hint of navy
   '#9b5de5': '#cc44ff',  // purple
-  '#a8e63d': '#66ff00',  // green
+  '#a8e63d': '#4caf50',  // green - medium, not lime
   '#ffffff': '#e8eeff',  // white - slight blue tint for glassiness
 };
 const COLOR_DARK = {'#e63946':'#7a1520','#f4a261':'#7a4a1f','#2ec4b6':'#0d5f5a','#9b5de5':'#4a1a7a','#a8e63d':'#4a6610'};
@@ -1076,7 +1076,7 @@ async function initAuth() {
     CREATOR_ID = session.user.id;
     upsertMyProfile(session.user).catch(() => {});
     syncMyDataFromCloud(session.user.id);
-    syncProgressFromCloud().then(() => { updateTotalDiamondDisplay(); showModeSelect(); }).catch(() => {});
+    syncProgressFromCloud().then(() => { updateTotalDiamondDisplay(); showIntroCutscene(() => showModeSelect()); }).catch(() => {});
   }
   _supaClient.auth.onAuthStateChange((event, session) => {
     if (session) {
@@ -1088,7 +1088,7 @@ async function initAuth() {
       if (event === 'SIGNED_IN') {
         upsertMyProfile(session.user).catch(() => {});
         setTimeout(() => syncMyDataFromCloud(session.user.id), 1000);
-        syncProgressFromCloud().then(() => { updateTotalDiamondDisplay(); showModeSelect(); }).catch(() => {});
+        syncProgressFromCloud().then(() => { updateTotalDiamondDisplay(); showIntroCutscene(() => showModeSelect()); }).catch(() => {});
         migrateAnonymousChallenges(session.user.id);
       }
     } else {
@@ -2272,59 +2272,113 @@ function drawBall(c,b){
   }
   const trailColor = matchingTrail ? matchingTrail.color : ballColor;
 
-  // Ground glow halo
-  const groundGlow=c.createRadialGradient(x,y,0,x,y,R*2.2);
-  groundGlow.addColorStop(0,`rgba(${r},${g},${bl},0.22)`);
-  groundGlow.addColorStop(0.5,`rgba(${r},${g},${bl},0.08)`);
-  groundGlow.addColorStop(1,'rgba(0,0,0,0)');
-  c.fillStyle=groundGlow;
-  c.beginPath(); c.arc(x,y,R*2.2,0,Math.PI*2); c.fill();
+  // Ground shadow - tight and close
+  const shadowColor = (b.color && b.color !== '#ffffff') ? `rgba(${Math.max(0,r-60)},${Math.max(0,g-60)},${Math.max(0,bl-60)},0.35)` : 'rgba(0,0,0,0.35)';
+  c.fillStyle = shadowColor;
+  c.beginPath(); c.ellipse(x+1,y+R*0.95,R*0.55,R*0.14,0,0,Math.PI*2); c.fill();
 
-  // Dark shadow underneath
-  c.fillStyle='rgba(0,0,0,0.35)';
-  c.beginPath(); c.ellipse(x+1,y+R*0.7,R*0.7,R*0.22,0,0,Math.PI*2); c.fill();
+  // Outer glow for colored balls
+  if (b.color && b.color !== '#ffffff') {
+    const glow = c.createRadialGradient(x,y,R*0.5,x,y,R*2);
+    glow.addColorStop(0,`rgba(${r},${g},${bl},0.15)`);
+    glow.addColorStop(1,'rgba(0,0,0,0)');
+    c.fillStyle=glow;
+    c.beginPath(); c.arc(x,y,R*2,0,Math.PI*2); c.fill();
+  }
 
-  // Base sphere - rich color from lower-center light source
-  const base=c.createRadialGradient(x,y+R*0.3,0,x,y,R);
-  base.addColorStop(0,`rgba(${Math.min(255,r+70)},${Math.min(255,g+70)},${Math.min(255,bl+70)},1)`);
-  base.addColorStop(0.45,`rgba(${r},${g},${bl},1)`);
-  base.addColorStop(1,`rgba(${Math.max(0,r-90)},${Math.max(0,g-90)},${Math.max(0,bl-90)},1)`);
-  c.fillStyle=base;
+  const isWhite = !b.color || b.color === '#ffffff';
+  const c1r = isWhite ? 215 : Math.min(255, r + 85);
+  const c1g = isWhite ? 210 : Math.min(255, g + 85);
+  const c1b = isWhite ? 205 : Math.min(255, bl + 85);
+  const c2r = isWhite ? 168 : r;
+  const c2g = isWhite ? 162 : g;
+  const c2b = isWhite ? 155 : bl;
+  const c3r = isWhite ? 82  : Math.max(0, r - 85);
+  const c3g = isWhite ? 76  : Math.max(0, g - 85);
+  const c3b = isWhite ? 70  : Math.max(0, bl - 85);
+
+  // Base sphere
+  const base = c.createRadialGradient(x-R*0.3, y-R*0.35, R*0.05, x, y, R);
+  base.addColorStop(0,   `rgba(${Math.min(255,c1r-15)},${Math.min(255,c1g-15)},${Math.min(255,c1b-15)},1)`);
+  base.addColorStop(0.4, `rgba(${c2r},${c2g},${c2b},1)`);
+  base.addColorStop(0.75,`rgba(${Math.max(0,c3r+25)},${Math.max(0,c3g+25)},${Math.max(0,c3b+25)},1)`);
+  base.addColorStop(1,   `rgba(${Math.max(0,c3r+12)},${Math.max(0,c3g+12)},${Math.max(0,c3b+12)},1)`);
+  c.fillStyle = base;
   c.beginPath(); c.arc(x,y,R,0,Math.PI*2); c.fill();
 
-  // Top dark zone for depth
-  const dark=c.createRadialGradient(x+R*0.3,y-R*0.2,0,x,y,R);
-  dark.addColorStop(0,'rgba(0,0,0,0.4)');
-  dark.addColorStop(0.5,'rgba(0,0,0,0.1)');
-  dark.addColorStop(1,'rgba(0,0,0,0)');
-  c.fillStyle=dark;
-  c.beginPath(); c.arc(x,y,R,0,Math.PI*2); c.fill();
+  // Heavy gritty texture - clipped to sphere
+  c.save();
+  c.beginPath(); c.arc(x,y,R,0,Math.PI*2); c.clip();
 
-  // Bright bottom rim light (the key glassy effect)
-  const rim=c.createRadialGradient(x,y+R*0.8,0,x,y+R*0.5,R*0.85);
-  rim.addColorStop(0,`rgba(${Math.min(255,r+140)},${Math.min(255,g+140)},${Math.min(255,bl+140)},0.7)`);
-  rim.addColorStop(0.5,`rgba(${Math.min(255,r+60)},${Math.min(255,g+60)},${Math.min(255,bl+60)},0.3)`);
-  rim.addColorStop(1,'rgba(0,0,0,0)');
-  c.fillStyle=rim;
-  c.beginPath(); c.arc(x,y,R,0,Math.PI*2); c.fill();
+  const seed = (Math.floor(x*0.3) * 7 + Math.floor(y*0.3) * 13) % 100;
 
-  // Large soft specular top-left
-  const spec1=c.createRadialGradient(x-R*0.32,y-R*0.38,0,x-R*0.32,y-R*0.38,R*0.55);
-  spec1.addColorStop(0,'rgba(255,255,255,1)');
-  spec1.addColorStop(0.3,'rgba(255,255,255,0.6)');
-  spec1.addColorStop(1,'rgba(255,255,255,0)');
-  c.fillStyle=spec1;
-  c.beginPath(); c.arc(x,y,R,0,Math.PI*2); c.fill();
+  // Large mottled blotches - the key gritty look
+  const numBlotches = 8;
+  for(let i=0; i<numBlotches; i++){
+    const ang = (seed * 0.17 + i * 0.78) % (Math.PI*2);
+    const dist = R * ((seed*i*3+11)%60)/100;
+    const bx2 = x + Math.cos(ang)*dist;
+    const by2 = y + Math.sin(ang)*dist;
+    const bSize = R*(0.18 + ((seed*(i+1)*5)%28)/100);
+    const dark = (i % 3 === 0);
+    const alpha = 0.08 + ((seed*(i+2))%12)/100;
+    const blotchColor = dark
+      ? `rgba(${Math.max(0,c3r-20)},${Math.max(0,c3g-20)},${Math.max(0,c3b-20)},${alpha})`
+      : `rgba(${Math.min(255,c1r+15)},${Math.min(255,c1g+15)},${Math.min(255,c1b+15)},${alpha*0.7})`;
+    const grad = c.createRadialGradient(bx2,by2,0,bx2,by2,bSize);
+    grad.addColorStop(0, blotchColor);
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    c.fillStyle = grad;
+    c.beginPath(); c.arc(bx2,by2,bSize,0,Math.PI*2); c.fill();
+  }
 
-  // Tiny bright pinpoint specular
-  c.fillStyle='rgba(255,255,255,0.9)';
-  c.beginPath(); c.arc(x-R*0.22,y-R*0.28,R*0.12,0,Math.PI*2); c.fill();
+  // Cracks - fine lines in darker color
+  c.strokeStyle = isWhite ? 'rgba(90,85,80,0.35)' : `rgba(${Math.max(0,r-110)},${Math.max(0,g-110)},${Math.max(0,bl-110)},0.45)`;
+  c.lineWidth = 0.6;
+  for(let i=0; i<6; i++){
+    const ang = (seed*0.13 + i*1.07) % (Math.PI*2);
+    const len = R*(0.2 + ((seed*i*4)%32)/100);
+    const sx = x + Math.cos(ang)*R*0.1;
+    const sy = y + Math.sin(ang)*R*0.1;
+    // Slightly jagged cracks
+    const midX = sx + Math.cos(ang+0.6)*len*0.5 + Math.cos(ang+Math.PI/2)*R*0.04;
+    const midY = sy + Math.sin(ang+0.6)*len*0.5 + Math.sin(ang+Math.PI/2)*R*0.04;
+    c.beginPath();
+    c.moveTo(sx, sy);
+    c.quadraticCurveTo(midX, midY, sx+Math.cos(ang+0.6)*len, sy+Math.sin(ang+0.6)*len);
+    c.stroke();
+  }
 
-  // Edge rim - colored glow
-  c.strokeStyle=`rgba(${Math.min(255,r+100)},${Math.min(255,g+100)},${Math.min(255,bl+100)},0.6)`;
-  c.lineWidth=1.5;
+  // Small pits and chips
+  const pitColor = isWhite ? 'rgba(70,65,60,0.28)' : `rgba(${Math.max(0,r-100)},${Math.max(0,g-100)},${Math.max(0,bl-100)},0.4)`;
+  c.fillStyle = pitColor;
+  for(let i=0; i<8; i++){
+    const a = (seed*0.19 + i*1.82) % (Math.PI*2);
+    const d = R*((seed*i*9%50)/100 + 0.05);
+    c.beginPath();
+    c.arc(x+Math.cos(a)*d, y+Math.sin(a)*d, R*0.04+((seed*(i+1))%4)*0.02, 0, Math.PI*2);
+    c.fill();
+  }
+
+  c.restore();
+
+  // Dark rim
+  c.strokeStyle = isWhite ? 'rgba(40,35,30,0.75)' : `rgba(${Math.max(0,r-120)},${Math.max(0,g-120)},${Math.max(0,bl-120)},0.85)`;
+  c.lineWidth = 1.2;
   c.beginPath(); c.arc(x,y,R,0,Math.PI*2); c.stroke();
-  c.lineWidth=1;
+  c.lineWidth = 1;
+
+  // Broad specular - wide soft area top-left
+  const spec1 = c.createRadialGradient(x-R*0.2, y-R*0.25, 0, x-R*0.1, y-R*0.1, R*0.75);
+  spec1.addColorStop(0,  'rgba(255,255,255,0.32)');
+  spec1.addColorStop(0.4,'rgba(255,255,255,0.1)');
+  spec1.addColorStop(1,  'rgba(255,255,255,0)');
+  c.fillStyle = spec1;
+  c.beginPath(); c.arc(x,y,R,0,Math.PI*2); c.fill();
+
+  // Sharp pinpoint specular
+  c.fillStyle = 'rgba(255,255,255,0.55)';
+  c.beginPath(); c.arc(x-R*0.26, y-R*0.32, R*0.1, 0, Math.PI*2); c.fill();
 }
 
 // =====================================================================
@@ -7400,6 +7454,66 @@ function showDiamondsSeriesSelect() {
   ov.addEventListener('click', e => { if(e.target === ov) { ov.remove(); showModeSelect(); } });
 }
 
+function showIntroCutscene(onDone) {
+  // Only show once ever
+  if (LS.get('pb_intro_shown')) { onDone(); return; }
+
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:#000;z-index:900;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;overflow:hidden;';
+
+  // Character image - fills screen top portion
+  const img = document.createElement('img');
+  img.src = 'images/prisoner.webp';
+  img.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center top;opacity:0;transition:opacity 1.2s ease;';
+  ov.appendChild(img);
+
+  // Dark gradient over bottom so text is readable
+  const fade = document.createElement('div');
+  fade.style.cssText = 'position:absolute;bottom:0;left:0;right:0;height:55%;background:linear-gradient(0deg,rgba(0,0,0,0.97) 0%,rgba(0,0,0,0.7) 50%,rgba(0,0,0,0) 100%);pointer-events:none;';
+  ov.appendChild(fade);
+
+  // Content
+  const content = document.createElement('div');
+  content.style.cssText = 'position:relative;z-index:2;width:100%;max-width:400px;padding:0 28px 48px;box-sizing:border-box;display:flex;flex-direction:column;align-items:center;gap:20px;opacity:0;transition:opacity 1s ease;';
+
+  content.innerHTML = `
+    <div style="text-align:center;display:flex;flex-direction:column;gap:10px;">
+      <div style="font-family:'Cinzel',serif;font-size:13px;font-weight:400;color:rgba(200,170,80,0.6);letter-spacing:4px;text-transform:uppercase;">Prism Break</div>
+      <div style="height:1px;background:linear-gradient(90deg,transparent,rgba(200,160,60,0.4),transparent);"></div>
+      <p style="font-family:'Lato',sans-serif;font-size:16px;line-height:1.85;color:rgba(220,200,160,0.9);margin:0;">
+        7 years as a prisoner in the mining camp.<br>
+        It's time to make your escape.<br>
+        <span style="color:#f5c842;font-weight:700;">Clean the place out. Leave nothing behind.</span>
+      </p>
+    </div>
+    <button id="introBtn" style="
+      width:100%;
+      background:linear-gradient(180deg,rgba(60,45,15,0.98),rgba(35,25,8,0.99));
+      border:1px solid rgba(245,200,66,0.7);
+      border-bottom:2px solid rgba(80,55,10,0.95);
+      color:#f5c842;
+      font-family:'Cinzel',serif;font-weight:700;font-size:15px;letter-spacing:2px;
+      padding:16px;cursor:pointer;border-radius:4px;
+      box-shadow:0 0 20px rgba(245,200,66,0.15);
+    ">BEGIN YOUR ESCAPE</button>
+  `;
+  ov.appendChild(content);
+  document.body.appendChild(ov);
+
+  // Fade in image then text
+  requestAnimationFrame(() => {
+    setTimeout(() => { img.style.opacity = '1'; }, 100);
+    setTimeout(() => { content.style.opacity = '1'; }, 800);
+  });
+
+  content.querySelector('#introBtn').addEventListener('click', () => {
+    LS.set('pb_intro_shown', '1');
+    ov.style.transition = 'opacity 0.6s ease';
+    ov.style.opacity = '0';
+    setTimeout(() => { ov.remove(); onDone(); }, 600);
+  });
+}
+
 function showAdminSettings() {
   if (!isAdminUser()) return;
   const ov = document.createElement('div');
@@ -7829,27 +7943,26 @@ document.getElementById('modeSelectLevel').addEventListener('click',()=>{
     if(bc){
       const bctx = bc.getContext('2d');
       bctx.clearRect(0,0,40,26);
-      // Motion trail
-      const trailColors=['rgba(255,100,0,0.15)','rgba(255,140,0,0.25)','rgba(255,180,0,0.35)'];
+      // Motion trail - stone dust
       for(let i=0;i<3;i++){
-        bctx.fillStyle=trailColors[i];
+        bctx.fillStyle=`rgba(150,140,130,${0.1+i*0.08})`;
         bctx.beginPath();
-        bctx.arc(12+i*5, 13, 5-i*0.8, 0, Math.PI*2);
+        bctx.arc(12+i*5, 13, 4.5-i*0.7, 0, Math.PI*2);
         bctx.fill();
       }
-      // Ball
+      // Ball - concrete
       const bx=30, by=13, br=6;
-      const grad=bctx.createRadialGradient(bx-br*0.3,by-br*0.35,0,bx,by,br);
-      grad.addColorStop(0,'rgba(255,255,255,0.95)');
-      grad.addColorStop(0.4,'rgba(220,220,255,0.8)');
-      grad.addColorStop(1,'rgba(140,160,220,0.3)');
+      const grad=bctx.createRadialGradient(bx-br*0.3,by-br*0.35,br*0.1,bx,by,br);
+      grad.addColorStop(0,'rgba(210,205,200,1)');
+      grad.addColorStop(0.4,'rgba(165,158,150,1)');
+      grad.addColorStop(1,'rgba(80,74,68,1)');
       bctx.fillStyle=grad;
       bctx.beginPath(); bctx.arc(bx,by,br,0,Math.PI*2); bctx.fill();
-      bctx.strokeStyle='rgba(180,200,255,0.5)'; bctx.lineWidth=1;
+      bctx.strokeStyle='rgba(50,45,40,0.8)'; bctx.lineWidth=1;
       bctx.beginPath(); bctx.arc(bx,by,br,0,Math.PI*2); bctx.stroke();
       // Specular
-      bctx.fillStyle='rgba(255,255,255,0.9)';
-      bctx.beginPath(); bctx.arc(bx-br*0.3,by-br*0.3,br*0.25,0,Math.PI*2); bctx.fill();
+      bctx.fillStyle='rgba(255,252,248,0.8)';
+      bctx.beginPath(); bctx.arc(bx-br*0.28,by-br*0.3,br*0.18,0,Math.PI*2); bctx.fill();
     }
   });
 }
@@ -8166,10 +8279,12 @@ function showHowToPlay(){
   const ov = document.createElement('div');
   ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:500;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;';
 
-  const panel = document.createElement('div');
-  panel.style.cssText = "background:linear-gradient(160deg,#2a1f10,#1c160d);border:1px solid rgba(200,160,60,0.5);box-shadow:0 0 0 1px rgba(120,80,20,0.3),0 8px 40px rgba(0,0,0,0.8);border-radius:4px;padding:28px 22px;width:min(360px,100%);display:flex;flex-direction:column;gap:18px;font-family:'Lato',sans-serif;";
+  const isDiamonds = gameMode === 'loot';
 
-  panel.innerHTML = `
+  const panel = document.createElement('div');
+  panel.style.cssText = `background:linear-gradient(160deg,${isDiamonds ? '#0a1a2a,#061018' : '#2a1f10,#1c160d'});border:1px solid ${isDiamonds ? 'rgba(0,200,240,0.4)' : 'rgba(200,160,60,0.5)'};box-shadow:0 0 0 1px rgba(0,0,0,0.3),0 8px 40px rgba(0,0,0,0.8);border-radius:4px;padding:28px 22px;width:min(360px,100%);display:flex;flex-direction:column;gap:18px;font-family:'Lato',sans-serif;`;
+
+  const escapeContent = `
     <div style="text-align:center;">
       <div style="font-family:'Cinzel',serif;font-size:18px;font-weight:700;color:#f5c842;letter-spacing:1px;text-shadow:0 0 12px rgba(245,200,66,0.4);">HOW TO ESCAPE</div>
       <div style="height:1px;background:linear-gradient(90deg,transparent,rgba(200,160,60,0.4),transparent);margin-top:10px;"></div>
@@ -8195,8 +8310,39 @@ function showHowToPlay(){
         <span style="font-size:24px;flex-shrink:0;">📷</span>
         <span style="color:#c9a84c;font-size:15px;line-height:1.7;"><strong style="color:#f5c842;">Don't trip the alarm.</strong> Guards will flood in.</span>
       </div>
+    </div>`;
+
+  const diamondsContent = `
+    <div style="text-align:center;">
+      <div style="font-family:'Cinzel',serif;font-size:18px;font-weight:700;color:#00eeff;letter-spacing:1px;text-shadow:0 0 12px rgba(0,220,255,0.4);">HOW TO COLLECT</div>
+      <div style="height:1px;background:linear-gradient(90deg,transparent,rgba(0,200,240,0.4),transparent);margin-top:10px;"></div>
     </div>
-    <button id="howToPlayClose" style="width:100%;background:linear-gradient(180deg,rgba(60,45,20,0.95),rgba(35,25,10,0.98));border:1px solid rgba(245,200,66,0.6);border-bottom:2px solid rgba(80,50,10,0.9);color:#f5c842;font-family:'Cinzel',serif;font-weight:600;font-size:14px;letter-spacing:1px;padding:13px;cursor:pointer;border-radius:3px;margin-top:4px;">GOT IT</button>
+    <div style="display:flex;flex-direction:column;gap:10px;">
+      <div style="display:flex;align-items:flex-start;gap:10px;">
+        <span style="font-size:24px;flex-shrink:0;">💎</span>
+        <span style="color:#7ad8e8;font-size:15px;line-height:1.7;"><strong style="color:#00eeff;">Collect every diamond</strong> on the map. No exit needed — just clean it out.</span>
+      </div>
+      <div style="display:flex;align-items:flex-start;gap:10px;">
+        <span style="font-size:24px;flex-shrink:0;">👆</span>
+        <span style="color:#7ad8e8;font-size:15px;line-height:1.7;">Hold left or right to move. <strong style="color:#00eeff;">Hold, don't swipe.</strong></span>
+      </div>
+      <div style="display:flex;align-items:flex-start;gap:10px;">
+        <span style="font-size:24px;flex-shrink:0;">💣</span>
+        <span style="color:#7ad8e8;font-size:15px;line-height:1.7;">Plant a bomb by pressing <strong style="color:#00eeff;">both sides at once</strong> then releasing. Clears a path to the diamonds.</span>
+      </div>
+      <div style="display:flex;align-items:flex-start;gap:10px;">
+        <span style="font-size:24px;flex-shrink:0;">📷</span>
+        <span style="color:#7ad8e8;font-size:15px;line-height:1.7;"><strong style="color:#00eeff;">Don't trip the alarm.</strong> Guards will come for you.</span>
+      </div>
+      <div style="display:flex;align-items:flex-start;gap:10px;">
+        <span style="font-size:24px;flex-shrink:0;">❤️</span>
+        <span style="color:#7ad8e8;font-size:15px;line-height:1.7;">You have <strong style="color:#00eeff;">3 lives.</strong> Lose them all and you start over.</span>
+      </div>
+    </div>`;
+
+  panel.innerHTML = `
+    ${isDiamonds ? diamondsContent : escapeContent}
+    <button id="howToPlayClose" style="width:100%;background:linear-gradient(180deg,${isDiamonds ? 'rgba(0,50,80,0.95),rgba(0,30,50,0.98));border:1px solid rgba(0,200,240,0.6);border-bottom:2px solid rgba(0,60,90,0.9);color:#00eeff' : 'rgba(60,45,20,0.95),rgba(35,25,10,0.98));border:1px solid rgba(245,200,66,0.6);border-bottom:2px solid rgba(80,50,10,0.9);color:#f5c842'};font-family:'Cinzel',serif;font-weight:600;font-size:14px;letter-spacing:1px;padding:13px;cursor:pointer;border-radius:3px;margin-top:4px;">GOT IT</button>
   `;
 
   ov.appendChild(panel);
@@ -8829,7 +8975,8 @@ function showTradeScreen() {
     } else if (item.emoji) {
       swatchHTML = `<div style="width:26px;height:26px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;">${item.emoji}</div>`;
     } else if (item.bg) {
-      swatchHTML = `<div style="width:26px;height:26px;border-radius:3px;background:#333;flex-shrink:0;border:1px solid rgba(200,150,60,0.3);overflow:hidden;"><div style="width:100%;height:100%;background:url(images/bg_default.jpeg) center/cover;opacity:0.6;"></div></div>`;
+      const bgSrc = BACKGROUNDS[item.bg] || 'images/bg_stone_floor.png';
+      swatchHTML = `<div style="width:26px;height:26px;border-radius:3px;flex-shrink:0;border:1px solid rgba(200,150,60,0.3);overflow:hidden;"><div style="width:100%;height:100%;background:url(${bgSrc}) center/cover;"></div></div>`;
     }
 
     const active = isActive(item.id);
