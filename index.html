@@ -6219,9 +6219,10 @@ function openMapsPanel(defaultTab='maps') {
           <div style="flex:1;min-width:0;display:flex;align-items:center;gap:7px;flex-wrap:wrap;">
             <div class="usName" style="color:${isFeatured?'#f5c842':isChallenge?'#e63946':'#ffd700'};font-size:14px;font-family:'Lato',sans-serif;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${locked?'':'cursor:pointer;'}" ${locked?'':' title="Tap to rename"'}>${s.name}</div>
             ${isFeatured?`<span style="background:rgba(245,200,66,0.15);border:1px solid rgba(245,200,66,0.4);color:#f5c842;font-family:'Cinzel',serif;font-size:9px;padding:1px 6px;border-radius:2px;white-space:nowrap;flex-shrink:0;">⭐ FEATURED</span>`:''}
-            ${s.mode === 'loot' ? `<span style="background:rgba(0,238,255,0.1);border:1px solid rgba(0,238,255,0.3);color:#00eeff;font-family:'Cinzel',serif;font-size:9px;padding:1px 6px;border-radius:2px;white-space:nowrap;flex-shrink:0;">💎 DIAMONDS</span>` : ''}
+            ${s.mode === 'loot' ? `<span style="background:rgba(0,238,255,0.1);border:1px solid rgba(0,238,255,0.3);color:#00eeff;font-family:'Cinzel',serif;font-size:9px;padding:1px 6px;border-radius:2px;white-space:nowrap;flex-shrink:0;">💎 DIAMONDS</span>` : `<span style="background:rgba(245,200,66,0.08);border:1px solid rgba(245,200,66,0.2);color:rgba(245,200,66,0.5);font-family:'Cinzel',serif;font-size:9px;padding:1px 6px;border-radius:2px;white-space:nowrap;flex-shrink:0;">🔓 ESCAPE</span>`}
             <div class="seriesCount" style="color:#666;font-size:12px;font-family:'Lato',sans-serif;">${s.levels.length} map${s.levels.length!==1?'s':''}</div>
           </div>
+          ${!isChallenge && !locked ? `<button class="usMode" style="background:none;border:1px solid rgba(180,140,255,0.3);color:rgba(200,170,240,0.7);font-family:'Cinzel',serif;font-size:9px;padding:5px 8px;cursor:pointer;border-radius:3px;white-space:nowrap;" title="Switch mode">⇄ MODE</button>` : ''}
           ${adminMode ? `<button class="usPush" style="${btnTeal}font-size:11px;padding:5px 10px;" title="Push to cloud">☁ Push</button>` : ''}
           ${!isFeatured ? `<button class="usPublish" style="background:none;border:1px solid ${s.is_public?'rgba(245,200,66,0.6)':'rgba(140,140,140,0.3)'};color:${s.is_public?'#f5c842':'rgba(160,160,160,0.5)'};font-family:'Lato',sans-serif;font-size:11px;padding:5px 10px;cursor:pointer;border-radius:3px;" title="${s.is_public?'Published - tap to unpublish':'Publish this series'}">${s.is_public?'🌐 Public':'○ Private'}</button>` : ''}
           <button class="usShare" style="font-family:'Lato',sans-serif;font-weight:700;font-size:11px;cursor:pointer;border-radius:3px;flex-shrink:0;padding:6px 10px;background:rgba(40,28,5,0.95);border:1px solid rgba(245,200,66,0.55);color:#f5c842;letter-spacing:0.5px;">SHARE</button>
@@ -6298,6 +6299,22 @@ function openMapsPanel(defaultTab='maps') {
           addMapsBtn.textContent = '+ Add Maps';
           addMapsBtn.addEventListener('click', ()=>{ showAddMapsToSeriesOverlay(s.name, rebuildLvList); });
           row.appendChild(addMapsBtn);
+        }
+
+        // Mode toggle (non-challenge, non-locked series)
+        const modeBtn = hdr2.querySelector('.usMode');
+        if (modeBtn) {
+          modeBtn.addEventListener('click', e => {
+            e.stopPropagation();
+            const newMode = (s.mode || 'escape') === 'loot' ? 'escape' : 'loot';
+            s.mode = newMode;
+            const all2 = savedSeries();
+            const idx = all2.findIndex(x => x.name === s.name);
+            if (idx >= 0) { all2[idx].mode = newMode; LS.set('cc_series', JSON.stringify(all2)); }
+            upsertCloudSeries(s, getQuestOrder().indexOf(s.name)).catch(() => {});
+            showBuilderToast(`⇄ "${s.name}" → ${newMode === 'loot' ? 'Diamonds' : 'Escape'} mode`);
+            renderSeriesTab();
+          });
         }
 
         // Publish/unpublish series (any user, non-featured)
