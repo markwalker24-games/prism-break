@@ -3509,8 +3509,8 @@ function draw(){
     const drawX = (W - drawW) / 2;
     const drawY = (H - drawH) / 2;
     ctx.drawImage(BG_IMAGE, drawX, drawY, drawW, drawH);
-    // Darken slightly so bricks pop
-    ctx.fillStyle='rgba(0,0,0,0.45)'; ctx.fillRect(0,0,W,H);
+    // Subtle darkening so bricks remain readable
+    ctx.fillStyle='rgba(0,0,0,0.15)'; ctx.fillRect(0,0,W,H);
   } else {
     // BG still loading - use dark gradient so game is still playable
     ctx.fillStyle='#0a0a0f'; ctx.fillRect(0,0,W,H);
@@ -5103,7 +5103,7 @@ function drawBuilder(){
     const drawX = (bW - drawW) / 2;
     const drawY = (bH - drawH) / 2;
     bCtx.drawImage(builderBgImage, drawX, drawY, drawW, drawH);
-    bCtx.fillStyle='rgba(0,0,0,0.45)'; bCtx.fillRect(0,0,bW,bH);
+    bCtx.fillStyle='rgba(0,0,0,0.15)'; bCtx.fillRect(0,0,bW,bH);
   } else {
     bCtx.fillStyle='#0a0804'; bCtx.fillRect(0,0,bW,bH);
   }
