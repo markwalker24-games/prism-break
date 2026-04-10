@@ -3786,13 +3786,16 @@ function startGame(levelData, forcedMode){
   // Apply level background if set, or pick random for Break Out / Blackout
   if(levelData && levelData.background && BACKGROUNDS[levelData.background]){
     setBgKey(levelData.background);
+  } else if(levelData && levelData.background && !BACKGROUNDS[levelData.background]){
+    // Old background name no longer exists - use default
+    setBgKey('Prison Chamber');
   } else if(!levelData || !levelData.bricks){
-    // Random mode - pick from owned backgrounds (not for blackout - that's always black)
+    // Random mode - pick from owned backgrounds
     if (forcedMode !== 'blackout') {
       const allBgKeys = Object.keys(BACKGROUNDS);
       const bgItems = STORE_ITEMS.filter(i => i.category === 'backgrounds');
       const ownedBgKeys = allBgKeys.filter(k => {
-        if (k === 'Stone Floor') return true;
+        if (k === 'Prison Chamber') return true; // always free
         const storeItem = bgItems.find(i => i.bg === k);
         return storeItem ? isActive(storeItem.id) : false;
       });
@@ -3800,7 +3803,7 @@ function startGame(levelData, forcedMode){
       setBgKey(bgKeys[Math.floor(Math.random() * bgKeys.length)]);
     }
   } else {
-    setBgKey('Stone Floor');
+    setBgKey('Prison Chamber');
   }
 
   // Mode: escape if any diamonds, blackout otherwise
