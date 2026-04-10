@@ -456,6 +456,7 @@
         <button class="builder-btn" id="builderMapsBtn">📁 MAPS</button>
         <button class="builder-btn" id="builderImportBtn" style="display:none;border-color:rgba(220,60,60,0.6);color:#e66;">⬆ IMPORT</button>
         <button class="builder-btn" id="builderClearBtn">CLEAR</button>
+        <span id="builderModeBadge" style="font-family:'Cinzel',serif;font-size:9px;padding:3px 7px;border-radius:2px;background:rgba(245,200,66,0.12);border:1px solid rgba(245,200,66,0.3);color:rgba(245,200,66,0.7);white-space:nowrap;">🔓 ESCAPE</span>
         <button class="builder-btn green" id="builderTestBtn">▶ TEST</button>
         <button class="builder-btn gold" id="builderSaveBtn">💾 SAVE</button>
         <button class="builder-btn" id="builderExitBtn" style="border-color:rgba(180,140,50,0.45);line-height:0;padding:6px 7px;">
@@ -922,7 +923,7 @@ async function syncMyDataFromCloud(userId) {
 
     // Fetch all my maps from Supabase
     const mapsRes = await fetch(
-      `${SUPA_URL}/rest/v1/maps?creator_id=eq.${encodeURIComponent(userId)}&select=slug,name,data,is_public&order=created_at.desc&limit=200`,
+      `${SUPA_URL}/rest/v1/maps?creator_id=eq.${encodeURIComponent(userId)}&select=slug,name,data,is_public,mode&order=created_at.desc&limit=200`,
       { headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` } }
     );
 
@@ -1151,26 +1152,29 @@ function slugify(name) {
 }
 
 async function upsertMapToCloud(levelData) {
-  // Check if this map already exists in cloud - reuse its slug if so
-  const existing = await fetch(`${SUPA_URL}/rest/v1/maps?creator_id=eq.${encodeURIComponent(CREATOR_ID)}&name=eq.${encodeURIComponent(levelData.name)}&select=slug&limit=1`, {
-    headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` }
-  });
+  const creatorId = levelData.creator_id || CREATOR_ID;
+  const mode = levelData.mode || 'escape';
+
+  // Check if this map already exists - reuse its slug
+  const existing = await fetch(
+    `${SUPA_URL}/rest/v1/maps?creator_id=eq.${encodeURIComponent(creatorId)}&name=eq.${encodeURIComponent(levelData.name)}&select=slug&limit=1`,
+    { headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` } }
+  );
   if(existing.ok) {
     const rows = await existing.json();
     if(rows.length) {
-      // Update existing row, reuse its slug
       const existingSlug = rows[0].slug;
       await fetch(`${SUPA_URL}/rest/v1/maps?slug=eq.${encodeURIComponent(existingSlug)}`, {
         method: 'PATCH',
         headers: { 'Content-Type':'application/json','apikey':SUPA_KEY,'Authorization':`Bearer ${SUPA_KEY}`,'Prefer':'return=minimal' },
-        body: JSON.stringify({ data: levelData, name: levelData.name })
+        body: JSON.stringify({ data: levelData, name: levelData.name, mode, creator_id: creatorId })
       });
-      return existingSlug; // always return the stable slug
+      return existingSlug;
     }
   }
-  // New map - generate slug once and insert
-  const slug = slugify(levelData.name || 'map');
-  const payload = { slug, name: levelData.name || 'Unnamed', data: levelData, creator_id: CREATOR_ID };
+  // New map - generate slug and insert
+  const slug = slugify(levelData.name || 'map') + '-' + Math.random().toString(36).slice(2,6);
+  const payload = { slug, name: levelData.name || 'Unnamed', data: levelData, creator_id: creatorId, mode };
   const res = await fetch(`${SUPA_URL}/rest/v1/maps`, {
     method: 'POST',
     headers: { 'Content-Type':'application/json','apikey':SUPA_KEY,'Authorization':`Bearer ${SUPA_KEY}`,'Prefer':'return=representation' },
@@ -1386,22 +1390,39 @@ function isReceivedSeries(s) {
 function saveLevel(name, levelData) {
   const levels = savedLevels();
   const existing = levels.findIndex(l=>l.name===name);
-  // Always stamp our creator_id when we save a level ourselves
-  const entry = { name, ...levelData, creator_id: CREATOR_ID, created:Date.now() };
+  const entry = { name, ...levelData, creator_id: CREATOR_ID, mode: builderMapMode || 'escape', created:Date.now() };
   if(existing>=0) levels[existing]=entry; else levels.push(entry);
   try {
     const serialized = JSON.stringify(levels);
-    // Safety check - make sure it parses back correctly before writing
-    JSON.parse(serialized);
+    JSON.parse(serialized); // safety check
     LS.set('cc_levels', serialized);
   } catch(e) {
-    console.error('saveLevel: JSON serialization failed, not writing', e);
+    console.error('saveLevel: JSON serialization failed', e);
+    return;
   }
-  // Background cloud sync - stamp slug back onto entry when done
-  upsertMapToCloud(entry).then(slug=>{ entry.slug = slug; }).catch(()=>{});
+  // Sync to cloud immediately - maps are first-class cloud citizens
+  upsertMapToCloud(entry)
+    .then(slug => {
+      entry.slug = slug;
+      // Stamp slug back into localStorage
+      const updated = savedLevels();
+      const idx = updated.findIndex(l => l.name === name);
+      if(idx >= 0) { updated[idx].slug = slug; LS.set('cc_levels', JSON.stringify(updated)); }
+      showBuilderToast(`✓ "${name}" saved to cloud`);
+    })
+    .catch(e => {
+      console.warn('Map cloud sync failed:', e);
+      showBuilderToast(`✓ "${name}" saved locally`);
+    });
 }
 function deleteLevel(name) {
+  const level = savedLevels().find(l => l.name === name);
   LS.set('cc_levels', JSON.stringify(savedLevels().filter(l=>l.name!==name)));
+  if (level && level.slug) {
+    deleteCloudMap(level.slug).catch(e => console.warn('Cloud map delete failed:', e));
+  } else {
+    console.warn(`[PB] deleteLevel: no slug for "${name}" - removed locally only`);
+  }
 }
 
 // --- Series storage ---
@@ -3304,7 +3325,7 @@ function update(dt){
   // Update guards
   if((gameMode==='blackout' || guards.length > 0) && !isRespawning) guards.filter(Boolean).forEach(g => updateGuard(dt, g));
   if(gameMode==='blackout' || guards.length > 0) updateGuardAlert();
-  if(gameMode==='escape' && alarmGuards.length > 0 && !isRespawning) updateAlarmGuards(dt);
+  if((gameMode==='escape' || gameMode==='loot') && alarmGuards.length > 0 && !isRespawning) updateAlarmGuards(dt);
 
   // Bomb regeneration - if any color bricks exist without a matching paint brick, spawn a bomb
   if(gameMode==='blackout' && gameRunning && !testingLevel && Math.random()<0.002*dt){
@@ -3517,7 +3538,7 @@ function draw(){
   // Draw placed bombs
   for(const bomb of activeBombs) drawPlacedBomb(ctx, bomb);
   if(gameMode==='blackout' || guards.length > 0) guards.filter(Boolean).forEach(g => drawGuard(ctx, g));
-  if(gameMode==='escape' && alarmGuards.length > 0) drawAlarmGuards(ctx);
+  if((gameMode==='escape' || gameMode==='loot') && alarmGuards.length > 0) drawAlarmGuards(ctx);
   if(gameMode==='escape' && !_escaping) drawExitArrow(ctx);
   if(gameMode==='blackout' || guards.length > 0) { drawGuardAlert(); guards = guards.filter(Boolean); }
   // Draw falling bricks during blackout finale
@@ -4051,7 +4072,7 @@ function openLevelSelect(autoOpen){
       const isOwn = cm.creator_id === CREATOR_ID;
       const found = existingLevels.find(l => l.slug === cm.slug || l.name === cm.name);
       if (!found) {
-        existingLevels.push({ ...cm, is_public: true, received: !isOwn });
+        existingLevels.push({ ...cm, is_public: true, received: !isOwn, mode: cm.mode || 'escape' });
         changed = true;
       } else {
         if (!found.is_public) { found.is_public = true; changed = true; }
@@ -4276,16 +4297,16 @@ function renderLevelList(autoOpen){
   const allSeriesLevelNames = new Set(allSeries.filter(s => !s._isChallengeSeries).flatMap(s => s.levels.map(l => l.name)));
 
   // ── Categorise series ──────────────────────────────────────────
-  const featuredSeriesObj = allSeries.find(s => s.name === featuredName);
-  const publicSeries   = allSeries.filter(s => s.name !== featuredName && s.is_public && !s._isChallengeSeries);
-  const mySeries       = allSeries.filter(s => (adminMode || s.name !== featuredName) && (!s.creator_id || s.creator_id === CREATOR_ID || s.received || s._isChallengeSeries));
+  const featuredSeriesObj = allSeries.find(s => s.name === featuredName && (s.mode || 'escape') !== 'loot');
+  const publicSeries   = allSeries.filter(s => s.name !== featuredName && s.is_public && !s._isChallengeSeries && (s.mode || 'escape') !== 'loot');
+  const mySeries       = allSeries.filter(s => (adminMode || s.name !== featuredName) && (!s.creator_id || s.creator_id === CREATOR_ID || s.received || s._isChallengeSeries) && (s.mode || 'escape') !== 'loot');
 
   // Standalone maps owned by user that are NOT published, not in any series
-  const additionalMaps = allLevels.filter(lv => !allSeriesLevelNames.has(lv.name) && isOwnedMap(lv) && !lv._adminImport);
-  // Public standalone maps (owned or not) - anyone's published maps
-  const publicStandaloneMaps = allLevels.filter(lv => !allSeriesLevelNames.has(lv.name) && lv.is_public && !lv._adminImport);
-  // Standalone maps received via share link only (not public, just privately shared)
-  const receivedMaps = allLevels.filter(lv => !allSeriesLevelNames.has(lv.name) && lv.received && !lv.is_public && !isOwnedMap(lv) && !lv._adminImport);
+  const additionalMaps = allLevels.filter(lv => !allSeriesLevelNames.has(lv.name) && isOwnedMap(lv) && !lv._adminImport && (lv.mode || 'escape') === 'escape');
+  // Public standalone maps - escape mode only
+  const publicStandaloneMaps = allLevels.filter(lv => !allSeriesLevelNames.has(lv.name) && lv.is_public && !lv._adminImport && (lv.mode || 'escape') === 'escape');
+  // Standalone maps received via share link only
+  const receivedMaps = allLevels.filter(lv => !allSeriesLevelNames.has(lv.name) && lv.received && !lv.is_public && !isOwnedMap(lv) && !lv._adminImport && (lv.mode || 'escape') === 'escape');
 
   const hasAnything = true; // always render all three zones
   if (!hasAnything) {
@@ -4766,6 +4787,23 @@ function toggleAdminMode() {
 }
 
 let builderBricks=[];
+let builderMapMode='escape'; // 'escape' or 'loot' - set when creating/loading a map
+function setBuilderMapMode(mode) {
+  builderMapMode = mode;
+  const badge = document.getElementById('builderModeBadge');
+  if (!badge) return;
+  if (mode === 'loot') {
+    badge.textContent = '💎 DIAMONDS';
+    badge.style.background = 'rgba(0,238,255,0.1)';
+    badge.style.border = '1px solid rgba(0,238,255,0.3)';
+    badge.style.color = 'rgba(0,238,255,0.7)';
+  } else {
+    badge.textContent = '🔓 ESCAPE';
+    badge.style.background = 'rgba(245,200,66,0.12)';
+    badge.style.border = '1px solid rgba(245,200,66,0.3)';
+    badge.style.color = 'rgba(245,200,66,0.7)';
+  }
+}
 let builderBallPos={ col:Math.floor(BRICK_COLS/2), row:Math.floor(BRICK_ROWS/2) };
 let builderPortalPos=null; // {col,row} or null - optional
 let builderBackground='Forest Path'; // currently selected background
@@ -4799,8 +4837,9 @@ function openBuilder(){
   paused=true;
   builderCurrentLevelName=null;
   updateAdminStar();
-  // Start with steel perimeter
+  // If no bricks, prompt for mode before starting
   if (builderBricks.length === 0) {
+    setBuilderMapMode('escape'); // default
     builderBricks = buildSteelPerimeter();
   }
 
@@ -5168,6 +5207,7 @@ function loadLevelIntoBuilder(lv){
   }
   builderPortalPos=null;
   builderCurrentLevelName=lv.name;
+  setBuilderMapMode(lv.mode || 'escape'); // restore map mode
 
   drawBuilder();
 }
@@ -5357,27 +5397,12 @@ function openMapsPanel(defaultTab='maps') {
     tabMaps.style.cssText   = tabMaps.style.cssText.replace(/background[^;]+;|color[^;]+;|border-bottom[^;]+;/g,'') + tabActiveStyle;
     tabSeries.style.cssText = tabSeries.style.cssText.replace(/background[^;]+;|color[^;]+;|border-bottom[^;]+;/g,'') + tabIdleStyle;
 
+    let selectMode = false;
+    let selectedMaps = new Set(); // map names
+
     // Union of individually saved maps + maps embedded in series
     const saved = savedLevels();
-    // Build a set of all map names that appear in any series
-    const inSeriesNames = new Set();
-    savedSeries().forEach(s=>{ s.levels.forEach(l=>{ inSeriesNames.add(l.name); }); });
-
-    // Standalone = saved maps NOT in any series
-    // Series maps = all maps that appear in a series (whether also saved or not)
-    const standaloneOnly = saved.filter(l=>!inSeriesNames.has(l.name));
-    const seenSeriesNames = new Set();
-    const fromSeries = [];
-    savedSeries().forEach(s=>{
-      s.levels.forEach(l=>{
-        if(!seenSeriesNames.has(l.name)){
-          seenSeriesNames.add(l.name);
-          // Get full data from savedLevels if available, else use series data
-          const full = saved.find(x=>x.name===l.name) || l;
-          fromSeries.push({...full, _fromSeries:true});
-        }
-      });
-    });
+    // Maps categorised below in sections
     const allMaps = [...standaloneOnly, ...fromSeries];
     const savedNames = new Set(allMaps.map(l=>l.name)); // keep for compat
     body.innerHTML = '';
@@ -5390,6 +5415,149 @@ function openMapsPanel(defaultTab='maps') {
       body.appendChild(empty);
       return;
     }
+
+    // ── SELECT TOOLBAR ──────────────────────────────────────────
+    const selectBar = document.createElement('div');
+    selectBar.style.cssText = 'display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:8px;';
+    const selectBtn = document.createElement('button');
+    selectBtn.style.cssText = `background:none;border:1px solid rgba(200,160,60,0.3);color:rgba(200,160,60,0.6);font-family:'Cinzel',serif;font-size:10px;font-weight:600;letter-spacing:1px;padding:5px 12px;cursor:pointer;border-radius:3px;`;
+    selectBtn.textContent = 'SELECT';
+    const selectCount = document.createElement('span');
+    selectCount.style.cssText = 'font-family:\'Lato\',sans-serif;font-size:11px;color:rgba(200,160,60,0.5);display:none;';
+    selectBar.appendChild(selectBtn);
+    selectBar.appendChild(selectCount);
+    body.appendChild(selectBar);
+
+    // ── BULK ACTION BAR (hidden until selection) ─────────────────
+    const bulkBar = document.createElement('div');
+    bulkBar.style.cssText = 'display:none;position:sticky;bottom:0;background:rgba(15,12,4,0.98);border-top:1px solid rgba(200,160,60,0.3);padding:10px 8px;gap:8px;flex-wrap:wrap;z-index:10;margin:0 -8px;padding-left:16px;padding-right:16px;';
+    bulkBar.innerHTML = `
+      <button id="bulkDelete" style="flex:1;background:rgba(180,30,30,0.2);border:1px solid rgba(220,60,60,0.5);color:#e66;font-family:'Cinzel',serif;font-size:11px;font-weight:700;letter-spacing:1px;padding:10px;cursor:pointer;border-radius:3px;">🗑 DELETE</button>
+      <button id="bulkAddToSeries" style="flex:1;background:rgba(0,30,40,0.3);border:1px solid rgba(0,200,180,0.4);color:#2ec4b6;font-family:'Cinzel',serif;font-size:11px;font-weight:700;letter-spacing:1px;padding:10px;cursor:pointer;border-radius:3px;">＋ ADD TO SERIES</button>
+      <button id="bulkSwitchMode" style="flex:1;background:rgba(20,15,40,0.3);border:1px solid rgba(180,140,255,0.35);color:rgba(200,170,240,0.8);font-family:'Cinzel',serif;font-size:11px;font-weight:700;letter-spacing:1px;padding:10px;cursor:pointer;border-radius:3px;">⇄ SWITCH MODE</button>
+      <button id="bulkCancel" style="width:100%;background:none;border:none;color:rgba(200,200,200,0.4);font-family:'Cinzel',serif;font-size:10px;cursor:pointer;padding:4px;letter-spacing:1px;">CANCEL</button>
+    `;
+
+    function updateBulkBar() {
+      const count = selectedMaps.size;
+      if (count > 0) {
+        bulkBar.style.display = 'flex';
+        selectCount.style.display = 'block';
+        selectCount.textContent = `${count} selected`;
+      } else {
+        bulkBar.style.display = 'none';
+        selectCount.style.display = 'none';
+        selectCount.textContent = '';
+      }
+    }
+
+    function toggleSelectMode() {
+      selectMode = !selectMode;
+      selectedMaps.clear();
+      selectBtn.textContent = selectMode ? 'DONE' : 'SELECT';
+      selectBtn.style.color = selectMode ? '#f5c842' : 'rgba(200,160,60,0.6)';
+      selectBtn.style.borderColor = selectMode ? 'rgba(245,200,66,0.5)' : 'rgba(200,160,60,0.3)';
+      // Toggle checkboxes visibility
+      body.querySelectorAll('.map-checkbox').forEach(cb => {
+        cb.style.display = selectMode ? 'flex' : 'none';
+      });
+      body.querySelectorAll('.map-card').forEach(card => {
+        card.style.cursor = selectMode ? 'pointer' : '';
+      });
+      updateBulkBar();
+    }
+
+    selectBtn.addEventListener('click', toggleSelectMode);
+
+    // Bulk delete
+    bulkBar.querySelector('#bulkDelete').addEventListener('click', () => {
+      if (!selectedMaps.size) return;
+      const names = [...selectedMaps];
+      showConfirmOverlay(
+        `Delete ${names.length} map${names.length > 1 ? 's' : ''}?`,
+        () => {
+          names.forEach(name => deleteLevel(name));
+          showBuilderToast(`🗑 ${names.length} map${names.length > 1 ? 's' : ''} deleted`);
+          openMapsPanel('maps');
+        },
+        'DELETE', 'CANCEL'
+      );
+    });
+
+    // Bulk add to series
+    bulkBar.querySelector('#bulkAddToSeries').addEventListener('click', () => {
+      if (!selectedMaps.size) return;
+      const mySeries = savedSeries().filter(s => !s._isChallengeSeries && (!s.creator_id || s.creator_id === CREATOR_ID));
+      if (!mySeries.length) { showBuilderToast('Create a series first'); return; }
+      // Show series picker
+      const pickerOv = document.createElement('div');
+      pickerOv.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:600;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;';
+      const pickerPanel = document.createElement('div');
+      pickerPanel.style.cssText = "background:#0f0f1a;border:1px solid rgba(200,160,60,0.4);border-radius:4px;padding:20px;width:min(300px,92vw);display:flex;flex-direction:column;gap:8px;max-height:80vh;overflow-y:auto;";
+      pickerPanel.innerHTML = `<div style="font-family:'Cinzel',serif;font-size:13px;font-weight:700;color:#f5c842;margin-bottom:4px;">Add ${selectedMaps.size} map${selectedMaps.size>1?'s':''} to series:</div>`;
+      mySeries.forEach(s => {
+        const btn = document.createElement('button');
+        btn.style.cssText = "width:100%;background:rgba(20,15,4,0.98);border:1px solid rgba(180,140,50,0.3);color:#c9a84c;font-family:'Lato',sans-serif;font-size:13px;font-weight:600;padding:12px;cursor:pointer;border-radius:3px;text-align:left;";
+        btn.textContent = `${s.name}  (${s.levels.length} maps)`;
+        btn.addEventListener('click', () => {
+          const updated = {...s};
+          const existing = new Set(s.levels.map(l => l.name));
+          let added = 0;
+          [...selectedMaps].forEach(name => {
+            if (!existing.has(name)) {
+              const lv = saved.find(l => l.name === name) || { name };
+              updated.levels = [...updated.levels, lv];
+              added++;
+            }
+          });
+          saveSeries(updated);
+          pickerOv.remove();
+          showBuilderToast(`✓ Added ${added} map${added!==1?'s':''} to "${s.name}"`);
+          openMapsPanel('maps');
+        });
+        pickerPanel.appendChild(btn);
+      });
+      const cancelBtn = document.createElement('button');
+      cancelBtn.style.cssText = "background:none;border:none;color:rgba(200,200,200,0.4);font-family:'Cinzel',serif;font-size:11px;cursor:pointer;padding:6px;letter-spacing:1px;";
+      cancelBtn.textContent = 'CANCEL';
+      cancelBtn.addEventListener('click', () => pickerOv.remove());
+      pickerPanel.appendChild(cancelBtn);
+      pickerOv.appendChild(pickerPanel);
+      document.body.appendChild(pickerOv);
+    });
+
+    bulkBar.querySelector('#bulkCancel').addEventListener('click', () => {
+      if (selectMode) toggleSelectMode();
+    });
+
+    // Bulk switch mode
+    bulkBar.querySelector('#bulkSwitchMode').addEventListener('click', () => {
+      if (!selectedMaps.size) return;
+      const names = [...selectedMaps];
+      const levels = savedLevels();
+      // Block if any selected map is part of a challenge series
+      const challengeMapNames2 = new Set(
+        savedSeries().filter(s => s._isChallengeSeries).flatMap(s => s.levels.map(l => l.name))
+      );
+      const locked = names.filter(n => challengeMapNames2.has(n));
+      if (locked.length) {
+        showBuilderToast(`⚠️ Can't switch mode on challenge maps`);
+        return;
+      }
+      const allDiamonds = names.every(n => { const l = levels.find(x => x.name === n); return l && l.mode === 'loot'; });
+      const newMode = allDiamonds ? 'escape' : 'loot';
+      const label = newMode === 'loot' ? 'Diamonds' : 'Escape';
+      names.forEach(name => {
+        const entry = levels.find(l => l.name === name);
+        if (entry) {
+          entry.mode = newMode;
+          upsertMapToCloud({...entry}).catch(() => {});
+        }
+      });
+      LS.set('cc_levels', JSON.stringify(levels));
+      showBuilderToast(`⇄ ${names.length} map${names.length > 1 ? 's' : ''} → ${label} mode`);
+      openMapsPanel('maps');
+    });
 
     // Separate standalone maps from series maps
     const standaloneMaps = allMaps.filter(l=>!l._fromSeries);
@@ -5442,91 +5610,127 @@ function openMapsPanel(defaultTab='maps') {
       return g;
     }
 
-    // ── STANDALONE ──────────────────────────────────────────────
-    let grid = null;
-    if (standaloneMaps.length) {
-      body.appendChild(makeZoneHeader('STANDALONE'));
-      grid = makeGrid(body);
-    }
-
-    // ── IN A SERIES ─────────────────────────────────────────────
-    // Group series maps by series name, preserve series order
-    const seriesGroups = {}; // seriesName -> {maps:[], isOpen:bool, isChallenge:bool}
-    const seriesOrder = [];
-    savedSeries().forEach(s => {
-      if (!seriesGroups[s.name]) { seriesGroups[s.name] = { maps: [], isOpen: false, isChallenge: !!s._isChallengeSeries }; seriesOrder.push(s.name); }
-      s.levels.forEach(l => {
-        const full = saved.find(x => x.name === l.name) || l;
-        if (!seriesGroups[s.name].maps.find(m => m.name === full.name)) {
-          seriesGroups[s.name].maps.push({ ...full, _fromSeries: true });
-        }
-      });
-    });
-
-    // Track which series sections are open (persist across re-renders)
-    if (!window._builderSeriesOpen) window._builderSeriesOpen = {};
-
-    let seriesGrid = null; // will be set per-series section
-
-    if (seriesMaps.length) {
-      if (standaloneMaps.length) body.appendChild(makeZoneHeader('IN A SERIES'));
-      seriesOrder.forEach(sName => {
-        const group = seriesGroups[sName];
-        if (!group || !group.maps.length) return;
-        const isOpen = !!window._builderSeriesOpen[sName];
-        const isChallenge = !!group.isChallenge;
-
-        // Series header - collapsible
-        const hdr = document.createElement('div');
-        const borderColor = isChallenge ? 'rgba(220,60,60,0.45)' : 'rgba(140,100,30,0.25)';
-        const bgColor = isChallenge ? 'rgba(30,5,5,0.95)' : 'rgba(18,13,4,0.95)';
-        const nameColor = isChallenge ? '#e63946' : '#c9a84c';
-        hdr.style.cssText = `display:flex;align-items:center;justify-content:space-between;padding:7px 10px;cursor:pointer;border-radius:3px;background:${bgColor};border:1px solid ${borderColor};margin-bottom:${isOpen?'0':'6px'};border-bottom-left-radius:${isOpen?'0':'3px'};border-bottom-right-radius:${isOpen?'0':'3px'};`;
-        hdr.innerHTML = `<span style="font-family:'Cinzel',serif;font-size:11px;font-weight:700;color:${nameColor};">${sName}</span>`
-          + `<span style="color:${isChallenge ? 'rgba(220,60,60,0.5)' : 'rgba(200,160,60,0.5)'};font-size:10px;">${isOpen ? '▲' : '▼'}</span>`;
-        hdr.addEventListener('click', () => {
-          window._builderSeriesOpen[sName] = !window._builderSeriesOpen[sName];
-          openMapsPanel('maps');
-        });
-        body.appendChild(hdr);
-
-        if (isOpen) {
-          const panel = document.createElement('div');
-          panel.dataset.seriesPanel = sName;
-          panel.style.cssText = `display:grid;grid-template-columns:repeat(3,1fr);gap:8px;width:100%;border:1px solid ${borderColor};border-top:none;border-bottom-left-radius:3px;border-bottom-right-radius:3px;padding:8px;box-sizing:border-box;background:rgba(10,8,4,0.97);margin-bottom:6px;`;
-          body.appendChild(panel);
-          seriesGrid = panel;
-        }
-      });
-    }
-
-    // Build set for quick series membership lookup
-    const mapToSeriesGrid = {};
-    if (seriesMaps.length) {
-      seriesOrder.forEach(sName => {
-        if (!window._builderSeriesOpen[sName]) return;
-        const group = seriesGroups[sName];
-        if (group) group.maps.forEach(m => { mapToSeriesGrid[m.name] = sName; });
-      });
-    }
-
-    allMaps.forEach((lv, i) => {
-      // Find the right grid for this map
-      if (lv._fromSeries) {
-        const sName = Object.keys(seriesGroups).find(k => seriesGroups[k].maps.find(m => m.name === lv.name));
-        if (!sName || !window._builderSeriesOpen[sName]) return; // collapsed, skip
-        // Find the panel for this series
-        const allPanels = body.querySelectorAll('div[style*="grid-template-columns"]');
-        // We'll append to the right panel below
+    function makeCollapsibleSection(label, color, count, key) {
+      if (!window._mapsTabOpen) window._mapsTabOpen = {};
+      const isOpen = !!window._mapsTabOpen[key];
+      const hdr = document.createElement('div');
+      hdr.style.cssText = `display:flex;align-items:center;justify-content:space-between;padding:9px 12px;cursor:pointer;border-radius:${isOpen?'3px 3px 0 0':'3px'};background:rgba(18,14,6,0.97);border:1px solid rgba(140,100,30,0.3);margin-bottom:${isOpen?'0':'6px'};`;
+      hdr.innerHTML = `<div style="display:flex;align-items:center;gap:8px;">
+        <span style="font-family:'Cinzel',serif;font-size:11px;font-weight:700;color:${color};">${label}</span>
+        <span style="font-family:'Lato',sans-serif;font-size:10px;color:rgba(180,140,60,0.4);">${count} map${count!==1?'s':''}</span>
+      </div>
+      <span style="color:rgba(180,140,60,0.4);font-size:10px;">${isOpen?'▲':'▼'}</span>`;
+      let grid = null;
+      if (isOpen) {
+        grid = document.createElement('div');
+        grid.style.cssText = 'display:grid;grid-template-columns:repeat(3,1fr);gap:8px;width:100%;border:1px solid rgba(140,100,30,0.2);border-top:none;border-radius:0 0 3px 3px;padding:8px;box-sizing:border-box;background:rgba(10,8,4,0.97);margin-bottom:8px;';
       }
-      const owned = isOwnedMap(lv) || lv._fromSeries;
-      const isAdmin = !!lv._adminImport;
-      const isChallenge = challengeMapNames.has(lv.name) || !!lv._challenge;
+      hdr.addEventListener('click', () => {
+        window._mapsTabOpen[key] = !window._mapsTabOpen[key];
+        renderMapsTab();
+      });
+      return { hdr, grid, isOpen };
+    }
+
+    // ── Categorise maps ──────────────────────────────────────────
+    const inSeriesNames = new Set();
+    savedSeries().filter(s => !s._isChallengeSeries).forEach(s => s.levels.forEach(l => inSeriesNames.add(l.name)));
+
+    const escapeStandalone = saved.filter(l => !inSeriesNames.has(l.name) && (l.mode || 'escape') === 'escape' && isOwnedMap(l))
+      .sort((a,b) => a.name.localeCompare(b.name));
+    const diamondStandalone = saved.filter(l => !inSeriesNames.has(l.name) && l.mode === 'loot' && isOwnedMap(l))
+      .sort((a,b) => a.name.localeCompare(b.name));
+
+    // Series groups - each series is its own collapsible subsection
+    const mySeries = savedSeries().filter(s => !s._isChallengeSeries && (!s.creator_id || s.creator_id === CREATOR_ID));
+    const seriesWithMaps = mySeries.filter(s => s.levels && s.levels.length > 0);
+
+    // ── RENDER SECTIONS ─────────────────────────────────────────
+
+    // 1. Standalone Escape Maps
+    const escSec = makeCollapsibleSection('🔓 STANDALONE ESCAPE MAPS', '#f5c842', escapeStandalone.length, 'escape_standalone');
+    body.appendChild(escSec.hdr);
+    if (escSec.isOpen && escSec.grid) body.appendChild(escSec.grid);
+
+    // 2. Standalone Diamonds Maps
+    const diaSec = makeCollapsibleSection('💎 STANDALONE DIAMONDS MAPS', '#00eeff', diamondStandalone.length, 'diamonds_standalone');
+    body.appendChild(diaSec.hdr);
+    if (diaSec.isOpen && diaSec.grid) body.appendChild(diaSec.grid);
+
+    // 3. Maps assigned to series - one collapsible per series
+    if (seriesWithMaps.length) {
+      const seriesHdr = document.createElement('div');
+      seriesHdr.style.cssText = "display:flex;align-items:center;gap:10px;margin:12px 0 6px;padding:0 2px;";
+      seriesHdr.innerHTML = '<div style="flex:1;height:1px;background:linear-gradient(90deg,transparent,rgba(200,160,60,0.3));"></div>'
+        + `<span style="font-family:'Cinzel',serif;font-size:9px;letter-spacing:3px;color:rgba(200,160,60,0.5);">IN A SERIES</span>`
+        + '<div style="flex:1;height:1px;background:linear-gradient(270deg,transparent,rgba(200,160,60,0.3));"></div>';
+      body.appendChild(seriesHdr);
+
+      seriesWithMaps.forEach(s => {
+        const mapsInSeries = s.levels
+          .map(l => saved.find(x => x.name === l.name) || l)
+          .sort((a,b) => a.name.localeCompare(b.name));
+        const sec = makeCollapsibleSection(s.name, '#c9a84c', mapsInSeries.length, 'series_' + s.name);
+        body.appendChild(sec.hdr);
+        if (sec.isOpen && sec.grid) {
+          body.appendChild(sec.grid);
+          // Render map cards into this section's grid
+          mapsInSeries.forEach(lv => {
+            const owned = isOwnedMap(lv) || true;
+            const isChallenge = challengeMapNames.has(lv.name) || !!lv._challenge;
+            renderCard(lv, sec.grid, owned, false, isChallenge);
+          });
+        }
+      });
+    }
+
+    // Render cards into escape and diamonds sections
+    if (escSec.isOpen && escSec.grid) {
+      escapeStandalone.forEach(lv => renderCard(lv, escSec.grid, true, false, challengeMapNames.has(lv.name)));
+    }
+    if (diaSec.isOpen && diaSec.grid) {
+      diamondStandalone.forEach(lv => renderCard(lv, diaSec.grid, true, false, challengeMapNames.has(lv.name)));
+    }
+
+    // Append bulk bar and done
+    body.appendChild(bulkBar);
+    return; // skip old allMaps.forEach below
+
+    // ── renderCard - builds a map card into a target grid ─────────
+    function renderCard(lv, targetGrid, owned, isAdmin, isChallenge) {
 
       const card = document.createElement('div');
+      card.className = 'map-card';
       const cardBg = isChallenge ? '#1a0505' : isAdmin ? '#141418' : owned ? '#141418' : '#0d1f2d';
       const cardBorder = isChallenge ? 'rgba(220,60,60,0.45)' : isAdmin ? 'rgba(200,200,210,0.35)' : owned ? 'rgba(200,200,210,0.25)' : 'rgba(46,196,182,0.3)';
       card.style.cssText = `display:flex;flex-direction:column;align-items:stretch;min-width:0;background:${cardBg};border:1px solid ${cardBorder};border-radius:4px;overflow:hidden;position:relative;box-shadow:0 2px 8px rgba(0,0,0,0.4);`;
+
+      // Checkbox overlay for select mode
+      const checkbox = document.createElement('div');
+      checkbox.className = 'map-checkbox';
+      checkbox.style.cssText = `display:none;position:absolute;top:4px;left:4px;width:20px;height:20px;border-radius:50%;border:2px solid rgba(245,200,66,0.6);background:rgba(0,0,0,0.6);z-index:5;align-items:center;justify-content:center;font-size:12px;`;
+      card.appendChild(checkbox);
+
+      // Card click in select mode = toggle selection
+      card.addEventListener('click', e => {
+        if (!selectMode) return;
+        e.stopPropagation();
+        if (selectedMaps.has(lv.name)) {
+          selectedMaps.delete(lv.name);
+          checkbox.textContent = '';
+          checkbox.style.background = 'rgba(0,0,0,0.6)';
+          checkbox.style.borderColor = 'rgba(245,200,66,0.6)';
+          card.style.outline = '';
+        } else {
+          selectedMaps.add(lv.name);
+          checkbox.textContent = '✓';
+          checkbox.style.background = 'rgba(245,200,66,0.9)';
+          checkbox.style.color = '#000';
+          checkbox.style.borderColor = '#f5c842';
+          card.style.outline = '2px solid rgba(245,200,66,0.6)';
+        }
+        updateBulkBar();
+      });
 
       // Thumbnail canvas - fills card width
       const cnv = document.createElement('canvas');
@@ -5676,14 +5880,7 @@ function openMapsPanel(defaultTab='maps') {
         card.appendChild(challengeBtn);
       }
 
-      if(lv._fromSeries){
-        const sName = seriesOrder.find(k => seriesGroups[k] && seriesGroups[k].maps.find(m => m.name === lv.name));
-        if (!sName || !window._builderSeriesOpen[sName]) return; // collapsed, skip rendering
-        const panel = body.querySelector(`[data-series-panel="${CSS.escape(sName)}"]`);
-        if (panel) panel.appendChild(card);
-      } else {
-        if (grid) grid.appendChild(card);
-      }
+      targetGrid.appendChild(card);
 
       // RENAME - tap name
       nameEl.addEventListener('click', ()=>{
@@ -5762,7 +5959,8 @@ function openMapsPanel(defaultTab='maps') {
         } catch(e){ console.error('Share failed:', e); showBuilderToast('⚠️ Share failed: ' + (e && e.message ? e.message.slice(0,60) : 'unknown error')); }
         finally { shareBtn.textContent=orig; shareBtn.disabled=false; }
       });
-    });
+    } // end renderCard
+
   }
 
   function renderSeriesTab(){
@@ -5946,8 +6144,31 @@ function openMapsPanel(defaultTab='maps') {
       empty.textContent='No series yet. Create one below.';
       body.appendChild(empty);
     } else {
-      all.forEach(s=>{
-        const isFeatured = s.name === featuredName;
+      // Split into escape and diamonds sections
+      const escapeSeries = all.filter(s => !s._isChallengeSeries && (s.mode || 'escape') !== 'loot');
+      const diamondsSeries = all.filter(s => !s._isChallengeSeries && s.mode === 'loot');
+      const challengeSeries = all.filter(s => s._isChallengeSeries);
+
+      function makeSectionDivider(label, color) {
+        const d = document.createElement('div');
+        d.style.cssText = 'display:flex;align-items:center;gap:10px;margin:12px 0 8px;';
+        d.innerHTML = `<div style="flex:1;height:1px;background:linear-gradient(90deg,transparent,${color}44);"></div>`
+          + `<span style="font-family:'Cinzel',serif;font-size:9px;letter-spacing:3px;color:${color};white-space:nowrap;">${label}</span>`
+          + `<div style="flex:1;height:1px;background:linear-gradient(270deg,transparent,${color}44);"></div>`;
+        return d;
+      }
+
+      const allGrouped = [
+        { label: 'ESCAPE SERIES', color: 'rgba(245,200,66,0.6)', items: escapeSeries },
+        { label: 'DIAMONDS SERIES', color: 'rgba(0,238,255,0.5)', items: diamondsSeries },
+        { label: 'CHALLENGES', color: 'rgba(220,60,60,0.5)', items: challengeSeries },
+      ];
+
+      allGrouped.forEach(group => {
+        if (!group.items.length) return;
+        body.appendChild(makeSectionDivider(group.label, group.color));
+        group.items.forEach(s=>{
+          const isFeatured = s.name === featuredName;
         const isChallenge = !!s._isChallengeSeries;
         const row=document.createElement('div');
         const rowBg = isFeatured ? '#1a1206' : isChallenge ? '#1a0505' : '#1a1a2e';
@@ -5962,9 +6183,10 @@ function openMapsPanel(defaultTab='maps') {
           <div style="flex:1;min-width:0;display:flex;align-items:center;gap:7px;flex-wrap:wrap;">
             <div class="usName" style="color:${isFeatured?'#f5c842':isChallenge?'#e63946':'#ffd700'};font-size:14px;font-family:'Lato',sans-serif;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${locked?'':'cursor:pointer;'}" ${locked?'':' title="Tap to rename"'}>${s.name}</div>
             ${isFeatured?`<span style="background:rgba(245,200,66,0.15);border:1px solid rgba(245,200,66,0.4);color:#f5c842;font-family:'Cinzel',serif;font-size:9px;padding:1px 6px;border-radius:2px;white-space:nowrap;flex-shrink:0;">⭐ FEATURED</span>`:''}
+            ${s.mode === 'loot' ? `<span style="background:rgba(0,238,255,0.1);border:1px solid rgba(0,238,255,0.3);color:#00eeff;font-family:'Cinzel',serif;font-size:9px;padding:1px 6px;border-radius:2px;white-space:nowrap;flex-shrink:0;">💎 DIAMONDS</span>` : ''}
             <div class="seriesCount" style="color:#666;font-size:12px;font-family:'Lato',sans-serif;">${s.levels.length} map${s.levels.length!==1?'s':''}</div>
           </div>
-          ${isFeatured && adminMode ? `<button class="usPush" style="${btnTeal}font-size:11px;padding:5px 10px;" title="Push to cloud quest">☁ Push</button>` : ''}
+          ${adminMode ? `<button class="usPush" style="${btnTeal}font-size:11px;padding:5px 10px;" title="Push to cloud">☁ Push</button>` : ''}
           ${!isFeatured ? `<button class="usPublish" style="background:none;border:1px solid ${s.is_public?'rgba(245,200,66,0.6)':'rgba(140,140,140,0.3)'};color:${s.is_public?'#f5c842':'rgba(160,160,160,0.5)'};font-family:'Lato',sans-serif;font-size:11px;padding:5px 10px;cursor:pointer;border-radius:3px;" title="${s.is_public?'Published - tap to unpublish':'Publish this series'}">${s.is_public?'🌐 Public':'○ Private'}</button>` : ''}
           <button class="usShare" style="font-family:'Lato',sans-serif;font-weight:700;font-size:11px;cursor:pointer;border-radius:3px;flex-shrink:0;padding:6px 10px;background:rgba(40,28,5,0.95);border:1px solid rgba(245,200,66,0.55);color:#f5c842;letter-spacing:0.5px;">SHARE</button>
           ${locked ? '' : `<button class="usDel" style="${btnDanger}">×</button>`}`;
@@ -6071,8 +6293,9 @@ function openMapsPanel(defaultTab='maps') {
             const orig=btn.innerHTML; btn.innerHTML='⏳'; btn.disabled=true;
             try {
               const fresh=savedSeries().find(x=>x.name===s.name)||s;
-              await upsertCloudSeries(fresh, 0);
-              showBuilderToast('☁ Quest pushed to cloud!');
+              const sortOrder = getQuestOrder().indexOf(s.name);
+              await upsertCloudSeries(fresh, sortOrder >= 0 ? sortOrder : 999);
+              showBuilderToast('☁ Series pushed to cloud!');
             } catch(e){ showBuilderToast('⚠️ Push failed'); console.error(e); }
             finally { btn.innerHTML=orig; btn.disabled=false; }
           });
@@ -6155,7 +6378,8 @@ function openMapsPanel(defaultTab='maps') {
         }
 
         body.appendChild(row);
-      });
+        }); // end group.items.forEach
+      }); // end allGrouped.forEach
     }
 
     // New series button
@@ -6165,9 +6389,11 @@ function openMapsPanel(defaultTab='maps') {
     newBtn.addEventListener('click',()=>{
       const nameIn=prompt('Series name:'); if(!nameIn||!nameIn.trim()) return;
       const desc=prompt('Description (optional):') || '';
-      saveSeries({name:nameIn.trim(),description:desc,levels:[]});
+      const modeChoice = confirm('Game mode:\n\nOK = Escape mode (find the exit)\nCancel = Diamonds mode (collect all diamonds)');
+      const mode = modeChoice ? 'escape' : 'loot';
+      saveSeries({name:nameIn.trim(),description:desc,levels:[],mode});
       rebuildSeriesTab();
-      showBuilderToast(`Series "${nameIn.trim()}" created!`);
+      showBuilderToast(`Series "${nameIn.trim()}" created! (${mode === 'loot' ? 'Diamonds mode' : 'Escape mode'})`);
     });
     body.appendChild(newBtn);
   }
@@ -6198,14 +6424,12 @@ function showAddMapsToSeriesOverlay(seriesName, onDone){
   grid.style.cssText = 'display:flex;flex-wrap:wrap;gap:10px;padding:14px;overflow-y:auto;flex:1;justify-content:flex-start;align-content:flex-start;';
 
   const saved = savedLevels();
-  const savedNames = new Set(saved.map(l=>l.name));
-  const fromSeries = [];
-  savedSeries().forEach(s=>{ s.levels.forEach(l=>{ if(!savedNames.has(l.name)){ fromSeries.push(l); savedNames.add(l.name); } }); });
-  const allMaps = [...saved, ...fromSeries];
-
   // Get maps already in this series
   const targetSeries = savedSeries().find(s=>s.name===seriesName);
   const alreadyIn = new Set((targetSeries?.levels||[]).map(l=>l.name));
+  const seriesMode = targetSeries?.mode || 'escape';
+  // Only show maps that match the series mode
+  const allMaps = saved.filter(l => (l.mode || 'escape') === seriesMode);
 
   const selected = new Set(alreadyIn); // start with already-added maps checked
 
@@ -6331,24 +6555,39 @@ function showAddMapsToSeriesOverlay(seriesName, onDone){
 
 document.getElementById('builderClearBtn').addEventListener('click',()=>{
   const overlay=document.createElement('div');
-  overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:300;display:flex;align-items:center;justify-content:center;';
-  overlay.innerHTML=`<div style="background:#0f0f1a;border:2px solid #444;padding:24px;font-family:'Press Start 2P',monospace;text-align:center;">
-    <div style="color:#fff;font-size:9px;line-height:2">Clear the whole map?</div>
-    <div style="display:flex;gap:12px;margin-top:16px;justify-content:center;">
-      <button id="clearYes" style="background:#e63946;border:none;color:#fff;font-family:'Press Start 2P',monospace;font-size:8px;padding:10px 14px;cursor:pointer;border-radius:3px;">CLEAR</button>
-      <button id="clearNo" style="background:#1a1a2e;border:2px solid #444;color:#fff;font-family:'Press Start 2P',monospace;font-size:8px;padding:10px 14px;cursor:pointer;border-radius:3px;">CANCEL</button>
-    </div>
+  overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:300;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;';
+  overlay.innerHTML=`<div style="background:linear-gradient(160deg,#0f0c18,#08060f);border:1px solid rgba(180,140,255,0.35);border-radius:4px;padding:28px 22px;width:min(300px,92vw);font-family:'Lato',sans-serif;text-align:center;display:flex;flex-direction:column;gap:14px;">
+    <div style="font-family:'Cinzel',serif;font-size:15px;font-weight:700;color:#e8d5ff;letter-spacing:1px;">NEW MAP</div>
+    <div style="color:rgba(200,180,240,0.6);font-size:13px;line-height:1.6;">Choose the game mode for this map:</div>
+    <button id="newEscapeBtn" style="width:100%;background:linear-gradient(160deg,rgba(40,28,8,0.98),rgba(25,17,5,0.99));border:1px solid rgba(245,200,66,0.5);color:#f5c842;font-family:'Cinzel',serif;font-weight:700;font-size:13px;letter-spacing:1px;padding:16px;cursor:pointer;border-radius:3px;">
+      🔓 ESCAPE MAP<br><span style="font-size:10px;color:rgba(200,170,90,0.6);font-family:'Lato',sans-serif;font-weight:400;letter-spacing:0;">Steel border · find the exit</span>
+    </button>
+    <button id="newDiamondsBtn" style="width:100%;background:linear-gradient(160deg,rgba(0,20,40,0.98),rgba(0,12,28,0.99));border:1px solid rgba(0,238,255,0.4);color:#00eeff;font-family:'Cinzel',serif;font-weight:700;font-size:13px;letter-spacing:1px;padding:16px;cursor:pointer;border-radius:3px;">
+      💎 DIAMONDS MAP<br><span style="font-size:10px;color:rgba(0,180,220,0.5);font-family:'Lato',sans-serif;font-weight:400;letter-spacing:0;">Open field · collect all diamonds</span>
+    </button>
+    <button id="newCancelBtn" style="background:none;border:none;color:rgba(200,200,200,0.4);font-family:'Cinzel',serif;font-size:11px;cursor:pointer;letter-spacing:1px;">CANCEL</button>
   </div>`;
   document.body.appendChild(overlay);
-  overlay.querySelector('#clearYes').addEventListener('click',()=>{
+
+  overlay.querySelector('#newEscapeBtn').addEventListener('click',()=>{
     overlay.remove();
+    setBuilderMapMode('escape');
     builderBricks = buildSteelPerimeter();
     builderBallPos={ col:Math.floor(BRICK_COLS/2), row:Math.floor(BRICK_ROWS/2) };
     builderPortalPos=null;
     builderCurrentLevelName=null;
     drawBuilder();
   });
-  overlay.querySelector('#clearNo').addEventListener('click',()=>{ overlay.remove(); });
+  overlay.querySelector('#newDiamondsBtn').addEventListener('click',()=>{
+    overlay.remove();
+    setBuilderMapMode('loot');
+    builderBricks = []; // open field - no perimeter
+    builderBallPos={ col:Math.floor(BRICK_COLS/2), row:Math.floor(BRICK_ROWS/2) };
+    builderPortalPos=null;
+    builderCurrentLevelName=null;
+    drawBuilder();
+  });
+  overlay.querySelector('#newCancelBtn').addEventListener('click',()=>{ overlay.remove(); });
 });
 
 document.getElementById('builderExitBtn').addEventListener('click',()=>{
@@ -6578,7 +6817,7 @@ let builderPortalPosSnapshot=null;
 
 document.getElementById('builderTestBtn').addEventListener('click',()=>{
   if(!builderBricks.length){ alert('Place some bricks first!'); return; }
-  if(!hasPerimeterExit(builderBricks)){ showNoExitWarning(); return; }
+  if(builderMapMode !== 'loot' && !hasPerimeterExit(builderBricks)){ showNoExitWarning(); return; }
   builderBricksSnapshot=builderBricks.map(b=>({...b}));
   builderBallPosSnapshot={...builderBallPos};
   builderPortalPosSnapshot=null;
@@ -6588,11 +6827,13 @@ document.getElementById('builderTestBtn').addEventListener('click',()=>{
   const ballPixY=builderBallPos.row*BRICK_H+BRICK_H/2;
   startGame({ ballCol:builderBallPos.col, ballRow:builderBallPos.row, ballX:ballPixX, ballY:ballPixY,
     background:builderBackground,
+    mode: builderMapMode,
     bricks:builderBricksSnapshot.map(b=>({
       col:b.col, row:b.row, x:b.col*BRICK_W, y:b.row*BRICK_H, w:BRICK_W, h:BRICK_H,
       color:b.color, isPaint:b.isPaint, isSteel:b.isSteel,
       isKey:b.isKey, isLock:b.isLock, isDiamond:b.isDiamond||false,
-      isWhite:b.isWhite||false, isSkull:b.isSkull||false, isReverse:b.isReverse||false, isBomb:b.isBomb||false, hit:0, cooldown:0 })) });
+      isWhite:b.isWhite||false, isSkull:b.isSkull||false, isReverse:b.isReverse||false, isBomb:b.isBomb||false, hit:0, cooldown:0 })) },
+    builderMapMode === 'loot' ? 'escape' : undefined);
 });
 
 function endGame(reason){
@@ -6929,7 +7170,7 @@ function endGame(reason){
       } else if(hasNext){
         activeSeriesIdx++;
         hideMessage();
-        startGame(activeSeries.levels[activeSeriesIdx]);
+        startGame(activeSeries.levels[activeSeriesIdx], activeSeries.mode === 'loot' ? 'escape' : undefined);
       } else {
         activeSeries=null; activeSeriesIdx=0;
         hideMessage(); showModeSelect();
@@ -6945,7 +7186,7 @@ function endGame(reason){
         activeSeries = nextSeries;
         activeSeriesIdx = 0;
         hideMessage();
-        startGame(nextSeries.levels[0]);
+        startGame(nextSeries.levels[0], nextSeries.mode === 'loot' ? 'escape' : undefined);
       } else {
         hideMessage();
         showModeSelect();
@@ -7047,6 +7288,51 @@ canvas.addEventListener('click',()=>{
 // =====================================================================
 // MODE SELECT SCREEN
 // =====================================================================
+function showDiamondsSeriesSelect() {
+  const diamondSeries = savedSeries().filter(s => s.mode === 'loot' && s.levels && s.levels.length);
+
+  // If no diamonds-mode series yet, just play a random map
+  if (!diamondSeries.length) {
+    startGame(null, 'escape'); // generates random map in loot mode
+    return;
+  }
+
+  // If only one series, go straight in
+  if (diamondSeries.length === 1) {
+    playSeries(diamondSeries[0]);
+    return;
+  }
+
+  // Multiple series - show a picker
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:500;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;';
+  const panel = document.createElement('div');
+  panel.style.cssText = "background:linear-gradient(160deg,#0a0f1a,#060c14);border:1px solid rgba(0,238,255,0.3);border-radius:4px;padding:24px 20px;width:min(320px,92vw);display:flex;flex-direction:column;gap:10px;font-family:'Lato',sans-serif;";
+  panel.innerHTML = `
+    <div style="font-family:'Cinzel',serif;font-size:15px;font-weight:700;color:#00eeff;letter-spacing:1px;text-align:center;margin-bottom:4px;">💎 DIAMONDS</div>
+    ${diamondSeries.map((s, i) => {
+      const progress = getSeriesProgress(s.name);
+      const sub = progress > 0 ? `Map ${Math.min(progress+1, s.levels.length)} of ${s.levels.length}` : `${s.levels.length} maps`;
+      return `<button data-idx="${i}" style="width:100%;background:linear-gradient(160deg,rgba(0,20,40,0.97),rgba(0,12,28,0.98));border:1px solid rgba(0,180,220,0.35);color:#00eeff;font-family:'Cinzel',serif;font-size:13px;font-weight:600;letter-spacing:1px;padding:14px;cursor:pointer;border-radius:3px;display:flex;flex-direction:column;align-items:center;gap:4px;">
+        <span>${s.name}</span>
+        <span style="font-size:10px;color:rgba(0,180,220,0.5);font-family:'Lato',sans-serif;">${sub}</span>
+      </button>`;
+    }).join('')}
+    <button id="diamondsPickerClose" style="background:none;border:none;color:rgba(200,200,200,0.5);font-family:'Cinzel',serif;font-size:11px;cursor:pointer;padding:6px;letter-spacing:1px;">CANCEL</button>
+  `;
+  ov.appendChild(panel);
+  document.body.appendChild(ov);
+
+  diamondSeries.forEach((s, i) => {
+    panel.querySelector(`[data-idx="${i}"]`).addEventListener('click', () => {
+      ov.remove();
+      playSeries(s);
+    });
+  });
+  panel.querySelector('#diamondsPickerClose').addEventListener('click', () => { ov.remove(); showModeSelect(); });
+  ov.addEventListener('click', e => { if(e.target === ov) { ov.remove(); showModeSelect(); } });
+}
+
 function showModeSelect(){
   // Clear any stuck overlays from previous game
   document.querySelectorAll('body > div[style*="position:fixed"]').forEach(el => {
@@ -7220,7 +7506,7 @@ function showModeSelect(){
         display:flex;flex-direction:column;align-items:center;gap:6px;
         touch-action:manipulation;transition:box-shadow 0.2s;">
         <canvas id="breakoutIcon" width="40" height="26" style="width:40px;height:26px;border-radius:3px;filter:drop-shadow(0 0 8px rgba(60,180,255,0.4))"></canvas>
-        <span>PICK THE LOCKS</span>
+        <span>DIAMONDS</span>
         <span style="font-size:10px;color:rgba(120,180,255,0.6);font-family:'Lato',sans-serif;font-weight:400;letter-spacing:0">Random maps · no guard</span>
       </button>` : `
       <button id="modeBreakout" style="
@@ -7233,7 +7519,7 @@ function showModeSelect(){
         display:flex;flex-direction:column;align-items:center;gap:6px;
         touch-action:manipulation;">
         <span style="font-size:28px;filter:${canAfford('breakout') ? 'drop-shadow(0 0 6px rgba(60,140,220,0.5))' : 'none'}">🔒</span>
-        <span>PICK THE LOCKS</span>
+        <span>DIAMONDS</span>
         <span style="font-size:10px;color:${canAfford('breakout') ? 'rgba(0,238,255,0.8)' : 'rgba(0,238,255,0.5)'};font-family:'Lato',sans-serif;">${UNLOCK_COSTS.breakout} 💎</span>
       </button>`}
       ${isUnlocked('blackout') ? `
@@ -7354,8 +7640,8 @@ function showModeSelect(){
     });
   }
   document.getElementById('modeBreakout').addEventListener('click',()=>{
-    if(!isUnlocked('breakout')){ showSpendConfirm('breakout', 'Pick the Locks', ()=>{ hideMessage(); startGame(null,'escape'); }); return; }
-    hideMessage(); startGame(null,'escape');
+    if(!isUnlocked('breakout')){ showSpendConfirm('breakout', 'Diamonds', ()=>{ hideMessage(); showDiamondsSeriesSelect(); }); return; }
+    hideMessage(); showDiamondsSeriesSelect();
   });
   document.getElementById('modeBlackout').addEventListener('click',()=>{
     if(!isUnlocked('blackout')){ showSpendConfirm('blackout', 'Prism Guard', ()=>{ hideMessage(); startGame(null,'blackout'); }); return; }
@@ -7446,7 +7732,10 @@ function playSeries(s, fromIdx){
   activeSeries=s;
   activeSeriesIdx = fromIdx !== undefined ? fromIdx : getSeriesProgress(s.name);
   if(activeSeriesIdx >= s.levels.length) activeSeriesIdx=0;
-  startGame(s.levels[activeSeriesIdx]);
+  // s.mode='loot' needs forcedMode='escape' to trigger gameMode='loot'
+  // s.mode='escape' or undefined needs no forcedMode
+  const forcedMode = s.mode === 'loot' ? 'escape' : undefined;
+  startGame(s.levels[activeSeriesIdx], forcedMode);
 }
 
 // =====================================================================
@@ -7594,7 +7883,8 @@ async function upsertCloudSeries(series, sortOrder) {
     description: series.description || '',
     levels: series.levels,
     sort_order: sortOrder,
-    creator_id: creatorId
+    creator_id: creatorId,
+    mode: series.mode || 'escape'
   };
 
   // Try PATCH first (update existing row by slug)
@@ -7606,7 +7896,7 @@ async function upsertCloudSeries(series, sortOrder) {
       'Authorization': `Bearer ${SUPA_KEY}`,
       'Prefer': 'return=minimal'
     },
-    body: JSON.stringify({ name: series.name, description: series.description || '', levels: series.levels, sort_order: sortOrder, creator_id: creatorId })
+    body: JSON.stringify({ name: series.name, description: series.description || '', levels: series.levels, sort_order: sortOrder, creator_id: creatorId, mode: series.mode || 'escape' })
   });
   if (patch.ok) {
     return { slug, name: series.name };
