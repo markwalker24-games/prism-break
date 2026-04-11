@@ -5367,6 +5367,11 @@ function loadLevelIntoBuilder(lv){
   builderPortalPos=null;
   builderCurrentLevelName=lv.name;
   setBuilderMapMode(lv.mode || 'escape'); // restore map mode
+  if (lv.background && BACKGROUNDS[lv.background]) {
+    builderBackground = lv.background;
+    const lbl = document.getElementById('builderBgLabel');
+    if (lbl) lbl.textContent = builderBackground;
+  }
 
   drawBuilder();
 }
@@ -6867,6 +6872,7 @@ document.getElementById('builderSaveBtn').addEventListener('click',()=>{
   const ballPixX=builderBallPos.col*BRICK_W+BRICK_W/2;
   const ballPixY=builderBallPos.row*BRICK_H+BRICK_H/2;
   const saveable={ ballCol:builderBallPos.col, ballRow:builderBallPos.row, ballX:ballPixX, ballY:ballPixY,
+    background:builderBackground,
     bricks:builderBricks.map(b=>({
       col:b.col, row:b.row, x:b.col*BRICK_W, y:b.row*BRICK_H, w:BRICK_W, h:BRICK_H,
       color:b.color, isPaint:b.isPaint, isSteel:b.isSteel,
