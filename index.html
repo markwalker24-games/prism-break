@@ -7033,11 +7033,14 @@ function endGame(reason){
     syncProgressToCloud().catch(()=>{});
   }
 
-  // Diamond tally for escape mode (admin/demo only)
-  const totalDiamondsInMap = currentLevelData && currentLevelData.bricks
-    ? currentLevelData.bricks.filter(b=>b.isDiamond).length : 0;
-  const diamondTally = isEscape && totalDiamondsInMap > 0
-    ? `<div style="color:#00eeff;font-size:13px;font-family:'Lato',sans-serif;margin-top:2px;">💎 ${diamondsCollected}/${totalDiamondsInMap} diamonds collected</div>`
+  // Diamond summary for win screen - always shown if any collected
+  const available = getAvailableDiamonds();
+  const diamondTally = diamondsCollected > 0
+    ? `<div style="display:flex;align-items:center;justify-content:center;gap:8px;margin-top:4px;">
+        <span style="font-size:18px;filter:drop-shadow(0 0 6px rgba(0,238,255,0.5));">💎</span>
+        <span style="color:#00eeff;font-size:14px;font-family:'Cinzel',serif;font-weight:700;letter-spacing:1px;">+${diamondsCollected} pocketed</span>
+        <span style="color:rgba(0,180,200,0.5);font-size:11px;font-family:'Lato',sans-serif;">${available} total</span>
+      </div>`
     : '';
 
   const isBlackout = gameMode === 'blackout';
@@ -7046,7 +7049,6 @@ function endGame(reason){
   const titleColor = isBlackout ? '#f5c842' : isLoot ? '#f5c842' : isEscape ? '#f5c842' : '#ff9966';
   const titleGlow = isBlackout ? 'rgba(245,200,66,0.5)' : isLoot ? 'rgba(245,200,66,0.5)' : isEscape ? 'rgba(245,200,66,0.5)' : 'rgba(255,120,50,0.5)';
   const subText = isBlackout ? 'You slipped past the guard' : isLoot ? 'Every last diamond. Yours.' : isEscape ? 'You found a way out' : 'All bricks cleared';
-  const guardReward = isBlackout ? `<div style="color:#f5c842;font-size:13px;font-family:'Lato',sans-serif;margin-top:4px;">+5 💎 earned</div>` : '';
   const seriesInfo = inSeries
     ? `<div style="color:rgba(180,140,60,0.55);font-size:11px">Map ${activeSeriesIdx+1} of ${activeSeries.levels.length} · ${activeSeries.name}</div>`
     : '';
@@ -7107,13 +7109,16 @@ function endGame(reason){
   const buildPromptLabel = isSeriesComplete ? 'BUILD YOUR OWN SERIES 🔨' : buildPromptMsgs[Math.floor(Math.random() * buildPromptMsgs.length)];
   const isRandomMode = !currentLevelData || !currentLevelData.name;
 
+  const isQuestSeriesMap = inSeries && activeSeries && isSeriesInQuest(activeSeries.name);
   const middleBtn = isChallengeMap
     ? `<button id="endChallengeFireBackBtn" style="${btnStyle('#e63946','rgba(50,5,5,0.98)')}">🔥 MAKE IT HARDER</button>`
     : isRandomMode
       ? `` // no middle button for random mode
       : showBuildPrompt
         ? `<button id="endBuildBtn" style="${btnStyle('#f5c842', isSeriesComplete ? 'rgba(60,44,8,0.98)' : 'rgba(40,28,5,0.95)')}">${buildPromptLabel}</button>`
-        : `<button id="endShareBtn" style="${btnStyle('#f5c842','rgba(40,28,5,0.95)')}">SHARE THIS MAP</button>`;
+        : isQuestSeriesMap
+          ? `` // no share button for quest series maps
+          : `<button id="endShareBtn" style="${btnStyle('#f5c842','rgba(40,28,5,0.95)')}">SHARE THIS MAP</button>`;
 
   // Always show the 3 CTAs on a win (except when testing in builder)
   let buttons='';
@@ -7149,7 +7154,6 @@ function endGame(reason){
     <div style="font-family:'Cinzel',serif;font-size:20px;font-weight:700;color:${titleColor};letter-spacing:1px;text-shadow:0 0 12px ${titleGlow}">${titleText}</div>
     <div style="color:rgba(180,150,80,0.7);font-size:12px">${subText}</div>
     ${diamondTally}
-    ${guardReward}
     ${seriesInfo}
     ${seriesCompleteBanner}
     <div style="height:1px;background:linear-gradient(90deg,transparent,rgba(180,140,50,0.3),transparent);width:100%;margin:2px 0;"></div>
@@ -7212,7 +7216,11 @@ function endGame(reason){
         if (diamondsEarned > 0) {
           const newTotal = addDiamonds(diamondsEarned);
           updateTotalDiamondDisplay();
-          setTimeout(() => showDiamondAlert(diamondsEarned), 800);
+          // First time ever winning with diamonds - show one-time reinforcement
+          if (!LS.get('pb_first_diamond_win')) {
+            LS.set('pb_first_diamond_win', '1');
+            setTimeout(() => showFirstDiamondWinTip(diamondsEarned, newTotal), 1200);
+          }
         }
       }
 
@@ -7443,7 +7451,9 @@ function showDiamondsSeriesSelect() {
 }
 
 function showIntroCutscene(onDone) {
-  // Show every launch to reinforce the theme
+  // Only show if user has no quest progress yet
+  const hasProgress = getCurrentQuestIndex() > 0 || getSeriesProgress(getFeaturedSeriesName()) > 0;
+  if (hasProgress) { onDone(); return; }
 
   const ov = document.createElement('div');
   ov.style.cssText = 'position:fixed;inset:0;background:#000;z-index:900;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;overflow:hidden;';
@@ -8897,23 +8907,22 @@ function shatterUnlock(btnEl, feature, onComplete) {
   requestAnimationFrame(animate);
 }
 
-function showDiamondAlert(earned) {
-  const available = getAvailableDiamonds();
+function showFirstDiamondWinTip(earned, total) {
   const ov = document.createElement('div');
   ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:600;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;';
   const panel = document.createElement('div');
-  panel.style.cssText = "background:linear-gradient(160deg,#0a0f1a,#060a12);border:1px solid rgba(0,238,255,0.4);border-radius:4px;padding:24px 20px;width:min(280px,88vw);display:flex;flex-direction:column;align-items:center;gap:10px;box-shadow:0 8px 40px rgba(0,0,0,0.8);font-family:'Lato',sans-serif;text-align:center;";
+  panel.style.cssText = "background:linear-gradient(160deg,#0a0f1a,#060a12);border:1px solid rgba(0,238,255,0.4);border-radius:4px;padding:24px 20px;width:min(300px,88vw);display:flex;flex-direction:column;align-items:center;gap:12px;box-shadow:0 8px 40px rgba(0,0,0,0.8);font-family:'Lato',sans-serif;text-align:center;";
   panel.innerHTML = `
     <div style="font-size:36px;filter:drop-shadow(0 0 12px rgba(0,238,255,0.6));">💎</div>
-    <div style="font-family:'Cinzel',serif;font-size:16px;font-weight:700;color:#00eeff;letter-spacing:1px;">+${earned} DIAMOND${earned !== 1 ? 'S' : ''}!</div>
-    <div style="color:rgba(0,200,220,0.6);font-size:12px;">${available} 💎 available</div>
-    <button id="diamondAlertClose" style="width:100%;background:none;border:1px solid rgba(0,238,255,0.3);color:rgba(0,200,220,0.7);font-family:'Cinzel',serif;font-size:12px;padding:10px;cursor:pointer;border-radius:3px;margin-top:4px;letter-spacing:1px;">NICE!</button>
+    <div style="font-family:'Cinzel',serif;font-size:15px;font-weight:700;color:#00eeff;letter-spacing:1px;">You kept them.</div>
+    <div style="color:rgba(0,200,220,0.7);font-size:13px;line-height:1.7;">Diamonds only count if you make it out. You escaped with <strong style="color:#00eeff;">${earned}</strong> — they're yours now.</div>
+    <div style="color:rgba(0,180,200,0.5);font-size:12px;">${total} 💎 total</div>
+    <button id="firstDiamondClose" style="width:100%;background:none;border:1px solid rgba(0,238,255,0.3);color:rgba(0,200,220,0.7);font-family:'Cinzel',serif;font-size:12px;padding:10px;cursor:pointer;border-radius:3px;letter-spacing:1px;">GOT IT</button>
   `;
   ov.appendChild(panel);
   document.body.appendChild(ov);
-  panel.querySelector('#diamondAlertClose').addEventListener('click', () => ov.remove());
+  panel.querySelector('#firstDiamondClose').addEventListener('click', () => ov.remove());
   ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
-  setTimeout(() => ov.remove(), 4000);
 }
 
 // =====================================================================
