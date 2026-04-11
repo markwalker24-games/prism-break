@@ -1723,7 +1723,7 @@ function addRandomDiamonds(brickList){
   }
   function place(brick){ brickList.push(brick); }
 
-  const diamondCount = 2 + Math.floor(Math.random()*2); // 2-3 diamonds
+  const diamondCount = 3 + Math.floor(Math.random()*3); // 3-5 diamonds
   const usedColors = new Set();
 
   // Generate random positions across the board for diamonds, avoiding center
@@ -2427,7 +2427,7 @@ function resolveBrick(b){
     for(let i=0;i<6;i++) spawnDiamondBurst(b.x+b.w/2, b.y+b.h/2);
     screenFlash=8;
     bricks.splice(bricks.indexOf(b),1);
-    queueBrickTip('diamond', 'images/brick_diamond.png', 'Your Haul', 'These are yours. The warden confiscated them when they locked you up. Grab them on your way out — you\'ll need them to buy your way into better things.');
+    queueBrickTip('diamond', 'images/brick_diamond.png', 'Pocket it.', 'Every diamond you collect is yours to keep. Save them up — they\'ll come in handy later.');
     // Loot mode: collect all diamonds to win
     if (gameMode === 'loot') {
       const remaining = bricks.filter(x => x.isDiamond).length;
@@ -3764,6 +3764,8 @@ function startGame(levelData, forcedMode){
       const guardMap = buildGuardModeMap();
       bricks = guardMap.bricks;
       initBall(guardMap.ballCol * BRICK_W + BRICK_W/2, guardMap.ballRow * BRICK_H + BRICK_H/2);
+      // Scatter 3-5 diamonds throughout the map
+      bricks = addRandomDiamonds(bricks);
       // Pure black background handled in draw()
     } else {
       initBall();
@@ -4250,6 +4252,8 @@ document.getElementById('mapPreviewPlay').addEventListener('click', () => {
   closeMapPreview();
   closeLevelSelect();
   if (seriesObj) { activeSeries = seriesObj; activeSeriesIdx = seriesIdx; }
+  // Mark community map played if this is a public or received map
+  if (lv && (lv.is_public || lv.received) && !isOwnedMap(lv)) markPlayedCommunityMap();
   startGame(lv);
 });
 
@@ -7200,26 +7204,16 @@ function endGame(reason){
       const isRandomGame = !currentLevelData || !currentLevelData.name;
       const alreadyCompleted = !isRandomGame && hasCompletedMap(slug);
       if (!testingLevel && !alreadyCompleted) {
-        const diamondsInMap = currentLevelData.bricks ? currentLevelData.bricks.filter(b => b.isDiamond).length : 0;
-        let diamondsEarned = diamondsInMap;
-        // Blackout gets flat 5
-        if (gameMode === 'blackout') diamondsEarned = 5;
-        // Loot mode: earn exactly what you collected (you grabbed it all to win)
-        if (gameMode === 'loot') diamondsEarned = diamondsCollected;
-        // Escape mode: earn diamonds collected + 1 escape bonus
-        if (gameMode === 'escape' && diamondsInMap > 0) {
-          diamondsEarned = diamondsCollected + 1;
-        } else if (gameMode === 'escape') {
-          diamondsEarned = 1;
-        }
+        let diamondsEarned = diamondsCollected; // always just what you pocketed
         // Cap challenge diamonds
         if (isChallengeMap) diamondsEarned = Math.min(diamondsEarned, CHALLENGE_DIAMOND_CAP);
-        diamondsEarned = Math.max(diamondsEarned, 1);
         // Only mark named maps as completed (not random arcade games)
         if (!isRandomGame) markMapCompleted(slug);
-        const newTotal = addDiamonds(diamondsEarned);
-        updateTotalDiamondDisplay();
-        setTimeout(() => showDiamondAlert(diamondsEarned), 800);
+        if (diamondsEarned > 0) {
+          const newTotal = addDiamonds(diamondsEarned);
+          updateTotalDiamondDisplay();
+          setTimeout(() => showDiamondAlert(diamondsEarned), 800);
+        }
       }
 
       const record = await fetchRecord(slug);
@@ -7449,8 +7443,7 @@ function showDiamondsSeriesSelect() {
 }
 
 function showIntroCutscene(onDone) {
-  // Only show once ever
-  if (LS.get('pb_intro_shown')) { onDone(); return; }
+  // Show every launch to reinforce the theme
 
   const ov = document.createElement('div');
   ov.style.cssText = 'position:fixed;inset:0;background:#000;z-index:900;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;overflow:hidden;';
@@ -7501,7 +7494,6 @@ function showIntroCutscene(onDone) {
   });
 
   content.querySelector('#introBtn').addEventListener('click', () => {
-    LS.set('pb_intro_shown', '1');
     ov.style.transition = 'opacity 0.6s ease';
     ov.style.opacity = '0';
     setTimeout(() => { ov.remove(); onDone(); }, 600);
@@ -7574,6 +7566,23 @@ function showAdminSettings() {
       }
     });
   });
+}
+
+// ── Progressive unlock conditions ─────────────────────────────
+function hasUnlockedMapRoom() {
+  return hasTipShown('bomb');
+}
+function hasUnlockedContraband() {
+  return getCurrentQuestIndex() >= 1;
+}
+function hasUnlockedMostWanted() {
+  return !!LS.get('pb_played_community');
+}
+function markPlayedCommunityMap() {
+  LS.set('pb_played_community', '1');
+}
+function hasUnlockedChallenges() {
+  return isUnlocked('full_builder') || getLocalChallenges().length > 0;
 }
 
 function showModeSelect(){
@@ -7673,45 +7682,48 @@ function showModeSelect(){
     <button id="modeSelectLevel" style="
       width:100%;
       background:linear-gradient(160deg,rgba(25,18,8,0.95),rgba(15,10,4,0.97));
-      border:1px solid rgba(180,140,50,0.3);
+      border:1px solid ${hasUnlockedMapRoom() ? 'rgba(180,140,50,0.3)' : 'rgba(100,100,100,0.2)'};
       box-shadow:0 2px 12px rgba(0,0,0,0.4);
-      color:rgba(200,170,90,0.85);
+      color:${hasUnlockedMapRoom() ? 'rgba(200,170,90,0.85)' : 'rgba(120,120,120,0.35)'};
       font-family:'Cinzel',serif;font-size:13px;font-weight:600;letter-spacing:1px;
-      padding:12px 14px;cursor:pointer;border-radius:4px;
+      padding:12px 14px;cursor:${hasUnlockedMapRoom() ? 'pointer' : 'default'};border-radius:4px;
       display:flex;align-items:center;justify-content:center;gap:10px;
-      touch-action:manipulation;">
+      touch-action:manipulation;opacity:${hasUnlockedMapRoom() ? '1' : '0.35'};">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.7;flex-shrink:0;"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
       <span>THE MAP ROOM</span>
+      ${!hasUnlockedMapRoom() ? '<span style="font-size:10px;color:rgba(150,150,150,0.4);font-family:\'Lato\',sans-serif;font-weight:400;">· keep playing to unlock</span>' : ''}
     </button>
 
     <!-- The Trade -->
     <button id="modeStore" style="
       width:100%;
       background:linear-gradient(160deg,rgba(20,15,5,0.97),rgba(12,9,3,0.98));
-      border:1px solid rgba(180,130,40,0.5);
+      border:1px solid ${hasUnlockedContraband() ? 'rgba(180,130,40,0.5)' : 'rgba(100,100,100,0.2)'};
       box-shadow:0 2px 12px rgba(0,0,0,0.5),inset 0 1px 0 rgba(220,170,60,0.1);
-      color:#c8963c;
+      color:${hasUnlockedContraband() ? '#c8963c' : 'rgba(120,120,120,0.35)'};
       font-family:'Cinzel',serif;font-size:13px;font-weight:700;letter-spacing:1px;
-      padding:12px 14px;cursor:pointer;border-radius:4px;
+      padding:12px 14px;cursor:${hasUnlockedContraband() ? 'pointer' : 'default'};border-radius:4px;
       display:flex;align-items:center;justify-content:center;gap:10px;
-      touch-action:manipulation;">
+      touch-action:manipulation;opacity:${hasUnlockedContraband() ? '1' : '0.35'};">
       <span style="font-size:16px;">💰</span>
       <span>CONTRABAND</span>
+      ${!hasUnlockedContraband() ? '<span style="font-size:10px;color:rgba(150,150,150,0.4);font-family:\'Lato\',sans-serif;font-weight:400;">· complete your first escape</span>' : ''}
     </button>
 
     <!-- Leaderboard button -->
     <button id="modeLeaderboard" style="
       width:100%;
       background:linear-gradient(160deg,rgba(25,18,8,0.95),rgba(15,10,4,0.97));
-      border:1px solid rgba(180,140,50,0.3);
+      border:1px solid ${hasUnlockedMostWanted() ? 'rgba(180,140,50,0.3)' : 'rgba(100,100,100,0.2)'};
       box-shadow:0 2px 12px rgba(0,0,0,0.4),inset 0 1px 0 rgba(255,220,100,0.08);
-      color:rgba(200,170,90,0.85);
+      color:${hasUnlockedMostWanted() ? 'rgba(200,170,90,0.85)' : 'rgba(120,120,120,0.35)'};
       font-family:'Cinzel',serif;font-size:13px;font-weight:600;letter-spacing:1px;
-      padding:12px 14px;cursor:pointer;border-radius:4px;
+      padding:12px 14px;cursor:${hasUnlockedMostWanted() ? 'pointer' : 'default'};border-radius:4px;
       display:flex;align-items:center;justify-content:center;gap:10px;
-      touch-action:manipulation;">
+      touch-action:manipulation;opacity:${hasUnlockedMostWanted() ? '1' : '0.35'};">
       <span style="font-size:16px;opacity:0.85">🏆</span>
       <span>MOST WANTED</span>
+      ${!hasUnlockedMostWanted() ? '<span style="font-size:10px;color:rgba(150,150,150,0.4);font-family:\'Lato\',sans-serif;font-weight:400;">· play a community map</span>' : ''}
     </button>
 
     <!-- Divider -->
@@ -7725,16 +7737,16 @@ function showModeSelect(){
     <button id="modeChallenges" style="
       width:100%;
       background:linear-gradient(160deg,rgba(30,5,5,0.97),rgba(18,3,3,0.98));
-      border:1px solid rgba(220,60,60,0.45);
+      border:1px solid ${hasUnlockedChallenges() ? 'rgba(220,60,60,0.45)' : 'rgba(100,100,100,0.2)'};
       box-shadow:0 2px 12px rgba(0,0,0,0.5),inset 0 1px 0 rgba(255,80,80,0.08);
-      color:#e63946;
+      color:${hasUnlockedChallenges() ? '#e63946' : 'rgba(120,120,120,0.35)'};
       font-family:'Cinzel',serif;font-size:13px;font-weight:700;letter-spacing:1px;
-      padding:12px 14px;cursor:pointer;border-radius:4px;
+      padding:12px 14px;cursor:${hasUnlockedChallenges() ? 'pointer' : 'default'};border-radius:4px;
       display:flex;align-items:center;justify-content:center;gap:10px;
-      touch-action:manipulation;">
+      touch-action:manipulation;opacity:${hasUnlockedChallenges() ? '1' : '0.35'};">
       <span style="font-size:16px;">🔥</span>
       <span>CHALLENGES</span>
-      <span id="challengeBadge" style="display:none;background:#e63946;color:#fff;font-family:'Lato',sans-serif;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;letter-spacing:0;"></span>
+      ${hasUnlockedChallenges() ? '<span id="challengeBadge" style="display:none;background:#e63946;color:#fff;font-family:\'Lato\',sans-serif;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;letter-spacing:0;"></span>' : '<span style="font-size:10px;color:rgba(150,150,150,0.4);font-family:\'Lato\',sans-serif;font-weight:400;">· unlock Design or receive a challenge</span>'}
     </button>
 
     <!-- Loot / Prism Guard -->
@@ -7895,7 +7907,7 @@ function showModeSelect(){
     if(!isUnlocked('full_builder')){ showSpendConfirm('full_builder', 'Design', ()=>{ hideMessage(); openBuilder(); }); return; }
     hideMessage(); openBuilder();
   });
-  document.getElementById('modeStore').addEventListener('click', () => { hideMessage(); showTradeScreen(); });
+  document.getElementById('modeStore').addEventListener('click', () => { if(!hasUnlockedContraband()) return; hideMessage(); showTradeScreen(); });
 
   // Admin toggle - simple tap
   const adminToggleBtn = document.getElementById('adminToggleBtn');
@@ -7906,13 +7918,14 @@ function showModeSelect(){
       toggleAdminMode();
     });
   }
-  document.getElementById('modeLeaderboard').addEventListener('click', () => showLeaderboard());
+  document.getElementById('modeLeaderboard').addEventListener('click', () => { if(!hasUnlockedMostWanted()) return; showLeaderboard(); });
 
   // Admin cog
   const adminCog = document.getElementById('adminCogBtn');
   if (adminCog) adminCog.addEventListener('click', () => showAdminSettings());
 
 document.getElementById('modeSelectLevel').addEventListener('click',()=>{
+  if(!hasUnlockedMapRoom()) return;
   hideMessage(); openLevelSelect();
 });
 
