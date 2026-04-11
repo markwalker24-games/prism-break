@@ -479,6 +479,77 @@
 <div id="message" style="position:fixed;inset:0;display:none;z-index:50;pointer-events:auto;background:rgba(0,0,0,0.6);backdrop-filter:blur(3px);overflow-y:auto;"></div>
 
 <script>
+// ── Series hero images ─────────────────────────────────────────
+const HERO_IMAGES = {
+  'prisoner_mine':        { src: 'images/prisoner_mine.png',        title: 'Chapter 1',    copy: ['7 years in the dark.', 'Tonight you move.', 'The diamonds go with you.'] },
+  'prisoner_yard':        { src: 'images/prisoner_yard.png',        title: 'Chapter 2',    copy: ["You're out of the cell.", 'The yard is watched.', 'Keep moving. Keep collecting.'] },
+  'prisoner_sack':        { src: 'images/prisoner_sack.png',        title: 'Chapter 3',    copy: ["They're starting to notice.", 'Good. Let them watch.', "You're not done yet."] },
+  'prisoner_wheelbarrow': { src: 'images/prisoner_wheelbarrow.png', title: 'Chapter 4',    copy: ['You came back for more.', 'No one expected that.', 'Clean it out. Leave nothing.'] },
+  'prisoner_snow':        { src: 'images/prisoner_snow.png',        title: 'Chapter 5',    copy: ['Past the walls. Past the wire.', "The cold doesn't care who you are.", 'Neither do you. Keep going.'] },
+  'prisoner_lava':        { src: 'images/prisoner_lava.png',        title: 'Chapter 6',    copy: ['They sent everything after you.', 'Fire. Ice. Guards. Alarms.', "You're still here."] },
+  'prisoner_forest':      { src: 'images/prisoner_forest.png',      title: 'Chapter 7',    copy: ['One more push.', 'The mountain is in sight.', 'Finish what you started.'] },
+  'prisoner_victory':     { src: 'images/prisoner_victory.png',     title: 'You made it.', copy: ['You broke out.', 'You cleaned them out.', "They'll never forget #10457."] },
+};
+
+function showHeroSplash(heroKey, btnLabel, onDone) {
+  const hero = HERO_IMAGES[heroKey];
+  if (!hero) { onDone(); return; }
+
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:#000;z-index:900;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;overflow:hidden;opacity:0;transition:opacity 0.5s ease;';
+
+  const img = document.createElement('img');
+  img.src = hero.src;
+  img.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center top;opacity:0;transition:opacity 1.2s ease;';
+  ov.appendChild(img);
+
+  const fade = document.createElement('div');
+  fade.style.cssText = 'position:absolute;bottom:0;left:0;right:0;height:55%;background:linear-gradient(0deg,rgba(0,0,0,0.97) 0%,rgba(0,0,0,0.7) 50%,rgba(0,0,0,0) 100%);pointer-events:none;';
+  ov.appendChild(fade);
+
+  const content = document.createElement('div');
+  content.style.cssText = "position:relative;z-index:2;width:100%;max-width:400px;padding:0 28px 48px;box-sizing:border-box;display:flex;flex-direction:column;align-items:center;gap:20px;opacity:0;transition:opacity 1s ease;";
+
+  const lines = hero.copy;
+  const copyHTML = lines.map((l, i) =>
+    i === lines.length - 1
+      ? `<span style="color:#f5c842;font-weight:700;">${l}</span>`
+      : l
+  ).join('<br>');
+
+  content.innerHTML = `
+    <div style="text-align:center;display:flex;flex-direction:column;gap:10px;">
+      <div style="font-family:'Cinzel',serif;font-size:13px;font-weight:400;color:rgba(200,170,80,0.6);letter-spacing:4px;text-transform:uppercase;">${hero.title}</div>
+      <div style="height:1px;background:linear-gradient(90deg,transparent,rgba(200,160,60,0.4),transparent);"></div>
+      <p style="font-family:'Lato',sans-serif;font-size:16px;line-height:1.85;color:rgba(220,200,160,0.9);margin:0;">${copyHTML}</p>
+    </div>
+    <button id="heroSplashBtn" style="
+      width:100%;
+      background:linear-gradient(180deg,rgba(60,45,15,0.98),rgba(35,25,8,0.99));
+      border:1px solid rgba(245,200,66,0.7);
+      border-bottom:2px solid rgba(80,55,10,0.95);
+      color:#f5c842;
+      font-family:'Cinzel',serif;font-weight:700;font-size:15px;letter-spacing:2px;
+      padding:16px;cursor:pointer;border-radius:4px;
+      box-shadow:0 0 20px rgba(245,200,66,0.15);
+    ">${btnLabel}</button>
+  `;
+  ov.appendChild(content);
+  document.body.appendChild(ov);
+
+  requestAnimationFrame(() => {
+    ov.style.opacity = '1';
+    setTimeout(() => { img.style.opacity = '1'; }, 100);
+    setTimeout(() => { content.style.opacity = '1'; }, 800);
+  });
+
+  content.querySelector('#heroSplashBtn').addEventListener('click', () => {
+    ov.style.transition = 'opacity 0.6s ease';
+    ov.style.opacity = '0';
+    setTimeout(() => { ov.remove(); onDone(); }, 600);
+  });
+}
+
 const BRICK_IMAGES = {};
 (function(){
   const data = {
