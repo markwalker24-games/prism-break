@@ -6280,7 +6280,44 @@ function openMapsPanel(defaultTab='maps') {
           ${locked ? '' : `<button class="usDel" style="${btnDanger}">×</button>`}`;
         row.appendChild(hdr2);
 
-        // Draggable level list
+        // Hero image picker
+        if (!isChallenge && !locked) {
+          const heroPicker = document.createElement('div');
+          heroPicker.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;';
+          const heroKeys = Object.keys(HERO_IMAGES);
+          const currentHero = s.hero || '';
+          heroPicker.innerHTML = `<span style="font-family:'Cinzel',serif;font-size:9px;color:rgba(180,140,60,0.5);letter-spacing:1px;">HERO</span>`;
+          heroKeys.forEach(key => {
+            const btn = document.createElement('button');
+            const isSelected = currentHero === key;
+            btn.style.cssText = `background:${isSelected ? 'rgba(245,200,66,0.2)' : 'rgba(20,15,5,0.8)'};border:1px solid ${isSelected ? 'rgba(245,200,66,0.6)' : 'rgba(120,90,20,0.3)'};color:${isSelected ? '#f5c842' : 'rgba(160,130,60,0.5)'};font-family:'Lato',sans-serif;font-size:9px;padding:3px 7px;cursor:pointer;border-radius:2px;`;
+            btn.textContent = key.replace('prisoner_', '');
+            btn.addEventListener('click', () => {
+              const all = savedSeries();
+              const idx = all.findIndex(x => x.name === s.name);
+              if (idx >= 0) {
+                all[idx].hero = key;
+                LS.set('cc_series', JSON.stringify(all));
+                upsertCloudSeries(all[idx], getQuestOrder().indexOf(s.name)).catch(() => {});
+              }
+              renderSeriesTab();
+            });
+            heroPicker.appendChild(btn);
+          });
+          // None option
+          const noneBtn = document.createElement('button');
+          const isNone = !currentHero;
+          noneBtn.style.cssText = `background:${isNone ? 'rgba(180,60,60,0.2)' : 'rgba(20,15,5,0.8)'};border:1px solid ${isNone ? 'rgba(180,60,60,0.4)' : 'rgba(120,90,20,0.3)'};color:${isNone ? '#e66' : 'rgba(160,130,60,0.5)'};font-family:'Lato',sans-serif;font-size:9px;padding:3px 7px;cursor:pointer;border-radius:2px;`;
+          noneBtn.textContent = 'none';
+          noneBtn.addEventListener('click', () => {
+            const all = savedSeries();
+            const idx = all.findIndex(x => x.name === s.name);
+            if (idx >= 0) { delete all[idx].hero; LS.set('cc_series', JSON.stringify(all)); }
+            renderSeriesTab();
+          });
+          heroPicker.appendChild(noneBtn);
+          row.appendChild(heroPicker);
+        }
         const lvList=document.createElement('div');
         lvList.style.cssText='display:flex;flex-direction:column;gap:4px;';
         let dragSrcIdx=null;
@@ -7076,7 +7113,15 @@ function endGame(reason){
         <div style="height:1px;background:linear-gradient(90deg,transparent,rgba(200,160,60,0.3),transparent);width:100%;margin:4px 0;"></div>
       </div>`
     : '';
-  if(inSeries && !hasNext && activeSeries) saveSeriesProgress(activeSeries.name, activeSeries.levels.length - 1);
+  if(inSeries && !hasNext && activeSeries) {
+    saveSeriesProgress(activeSeries.name, activeSeries.levels.length - 1);
+    // Show hero splash for series complete if it has one
+    if (activeSeries.hero) {
+      const isLastQuest = !nextQuestName && isSeriesInQuest(activeSeries.name);
+      const splashKey = isLastQuest ? 'prisoner_victory' : activeSeries.hero;
+      setTimeout(() => showHeroSplash(splashKey, isLastQuest ? 'YOU DID IT' : 'NEXT CHAPTER', () => {}), 2000);
+    }
+  }
 
   // Advance quest if player just completed a quest series
   let nextQuestName = null;
@@ -7086,7 +7131,12 @@ function endGame(reason){
     if(questOrder[currentIdx] === activeSeries.name) {
       nextQuestName = advanceQuest();
       if(nextQuestName) {
-        setTimeout(() => showToast(`🏆 Quest unlocked: ${nextQuestName}!`, '#00eeff'), 1500);
+        const nextSeries = savedSeries().find(s => s.name === nextQuestName);
+        if (nextSeries && nextSeries.hero) {
+          setTimeout(() => showHeroSplash(nextSeries.hero, 'KEEP GOING', () => {}), 1500);
+        } else {
+          setTimeout(() => showToast(`🏆 Quest unlocked: ${nextQuestName}!`, '#00eeff'), 1500);
+        }
       }
     }
   }
@@ -7451,16 +7501,27 @@ function showDiamondsSeriesSelect() {
 }
 
 function showIntroCutscene(onDone) {
-  // Only show if user has no quest progress yet
+  // If user has progress, show hero splash matching current series
   const hasProgress = getCurrentQuestIndex() > 0 || getSeriesProgress(getFeaturedSeriesName()) > 0;
-  if (hasProgress) { onDone(); return; }
+  if (hasProgress) {
+    const questOrder = getQuestOrder();
+    const currentIdx = getCurrentQuestIndex();
+    const currentSeriesName = questOrder[currentIdx];
+    const currentSeries = savedSeries().find(s => s.name === currentSeriesName);
+    if (currentSeries && currentSeries.hero) {
+      showHeroSplash(currentSeries.hero, 'KEEP GOING', onDone);
+    } else {
+      onDone();
+    }
+    return;
+  }
 
   const ov = document.createElement('div');
   ov.style.cssText = 'position:fixed;inset:0;background:#000;z-index:900;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;overflow:hidden;';
 
   // Character image - fills screen top portion
   const img = document.createElement('img');
-  img.src = 'images/prisoner.webp';
+  img.src = 'images/prisoner.png';
   img.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center top;opacity:0;transition:opacity 1.2s ease;';
   ov.appendChild(img);
 
@@ -7580,19 +7641,19 @@ function showAdminSettings() {
 
 // ── Progressive unlock conditions ─────────────────────────────
 function hasUnlockedMapRoom() {
-  return hasTipShown('bomb');
+  return adminMode || hasTipShown('bomb');
 }
 function hasUnlockedContraband() {
-  return getCurrentQuestIndex() >= 1;
+  return adminMode || getCurrentQuestIndex() >= 1;
 }
 function hasUnlockedMostWanted() {
-  return !!LS.get('pb_played_community');
+  return adminMode || !!LS.get('pb_played_community');
 }
 function markPlayedCommunityMap() {
   LS.set('pb_played_community', '1');
 }
 function hasUnlockedChallenges() {
-  return isUnlocked('full_builder') || getLocalChallenges().length > 0;
+  return adminMode || isUnlocked('full_builder') || getLocalChallenges().length > 0;
 }
 
 function showModeSelect(){
@@ -8154,7 +8215,8 @@ async function upsertCloudSeries(series, sortOrder) {
     levels: series.levels,
     sort_order: sortOrder,
     creator_id: creatorId,
-    mode: series.mode || 'escape'
+    mode: series.mode || 'escape',
+    hero: series.hero || null
   };
 
   // Try PATCH first (update existing row by slug)
@@ -8166,7 +8228,7 @@ async function upsertCloudSeries(series, sortOrder) {
       'Authorization': `Bearer ${SUPA_KEY}`,
       'Prefer': 'return=minimal'
     },
-    body: JSON.stringify({ name: series.name, description: series.description || '', levels: series.levels, sort_order: sortOrder, creator_id: creatorId, mode: series.mode || 'escape' })
+    body: JSON.stringify({ name: series.name, description: series.description || '', levels: series.levels, sort_order: sortOrder, creator_id: creatorId, mode: series.mode || 'escape', hero: series.hero || null })
   });
   if (patch.ok) {
     return { slug, name: series.name };
