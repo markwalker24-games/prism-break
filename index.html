@@ -38,6 +38,16 @@
     }
   }
 
+  /* Full-bleed splash / cutscene overlays: full-screen on mobile, confined to
+     the same centered phone-frame on desktop. */
+  .pb-frame-overlay { position:fixed; inset:0; }
+  @media (min-width:600px){
+    .pb-frame-overlay {
+      inset:auto; left:50%; top:50%; transform:translate(-50%,-50%);
+      height:min(100dvh,1026px); aspect-ratio:46 / 100; width:auto;
+    }
+  }
+
   /* Top bar */
   #topbar {
     width:100%; display:flex; align-items:center; justify-content:space-between;
@@ -519,7 +529,8 @@ function showHeroSplash(heroKey, btnLabel, onDone) {
   if (!hero) { onDone(); return; }
 
   const ov = document.createElement('div');
-  ov.style.cssText = 'position:fixed;inset:0;background:#000;z-index:900;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;overflow:hidden;opacity:0;transition:opacity 0.5s ease;';
+  ov.className = 'pb-frame-overlay';
+  ov.style.cssText = 'background:#000;z-index:900;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;overflow:hidden;opacity:0;transition:opacity 0.5s ease;';
 
   const img = document.createElement('img');
   img.src = hero.src;
@@ -7653,7 +7664,8 @@ function showIntroCutscene(onDone) {
   }
 
   const ov = document.createElement('div');
-  ov.style.cssText = 'position:fixed;inset:0;background:#000;z-index:900;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;overflow:hidden;';
+  ov.className = 'pb-frame-overlay';
+  ov.style.cssText = 'background:#000;z-index:900;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;overflow:hidden;';
 
   // Character image - fills screen top portion
   const img = document.createElement('img');
