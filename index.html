@@ -3876,8 +3876,10 @@ function startGame(levelData, forcedMode){
       const guardMap = buildGuardModeMap();
       bricks = guardMap.bricks;
       initBall(guardMap.ballCol * BRICK_W + BRICK_W/2, guardMap.ballRow * BRICK_H + BRICK_H/2);
-      // Scatter 3-5 diamonds throughout the map
-      bricks = addRandomDiamonds(bricks);
+      // NOTE: do NOT scatter diamonds here. addRandomDiamonds adds diamond/key
+      // clusters (and extra locks) meant for escape/loot maps, which corrupted
+      // the Prism Guard board on first load. The objective is to open the single
+      // perimeter lock; restartGame builds this same clean board.
       // Pure black background handled in draw()
     } else {
       initBall();
