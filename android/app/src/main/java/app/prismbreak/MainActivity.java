@@ -35,17 +35,24 @@ public class MainActivity extends BridgeActivity {
     }
 
     /**
-     * Immersive sticky fullscreen: hide the status and navigation bars. With
-     * BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE an edge swipe just *reveals* the bars
-     * transiently instead of firing the system back / nav gesture — which is what
-     * was hijacking the left/right hold controls in the game.
+     * Let the system inset our content below the status bar / camera cutout (so
+     * the HUD never sits under the camera and there's no matching gap at the
+     * bottom), while still going immersive at the bottom navigation bar. With
+     * BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE an edge swipe just *reveals* the nav
+     * bar transiently instead of firing the system back / home gesture — which is
+     * what was hijacking the left/right hold controls in the game.
      */
     private void enableImmersive() {
-        WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
+        // true = system fits content within the bars' insets (content starts
+        // below the status bar / cutout, fills down once the nav bar is hidden).
+        WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
         View decor = getWindow().getDecorView();
         WindowInsetsControllerCompat controller =
                 new WindowInsetsControllerCompat(getWindow(), decor);
-        controller.hide(WindowInsetsCompat.Type.systemBars());
+        // Hide only the navigation bar; keep the status bar so content sits below
+        // the camera. Light icons so the clock/battery read on the dark theme.
+        controller.hide(WindowInsetsCompat.Type.navigationBars());
+        controller.setAppearanceLightStatusBars(false);
         controller.setSystemBarsBehavior(
                 WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
     }
