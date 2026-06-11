@@ -164,12 +164,10 @@
   #builderTop {
     display:flex; align-items:center; justify-content:space-between;
     padding:4px 6px; border-bottom:1px solid rgba(200,160,60,0.15);
-    background:rgba(10,8,4,0.9); flex-wrap:wrap; gap:4px;
+    background:rgba(10,8,4,0.9); flex-wrap:nowrap; gap:4px; overflow:hidden;
   }
   #builderTitle { color:#c9a84c; flex-shrink:0; display:flex; align-items:center; padding:2px 4px; }
-  /* Wrap actions to a second row on narrow (short-window) frames so every button
-     — especially EXIT — stays inside the frame and clickable. */
-  #builderActions { display:flex; gap:3px; flex:1 1 auto; flex-wrap:wrap; justify-content:flex-end; min-width:0; }
+  #builderActions { display:flex; gap:3px; flex-shrink:0; }
   .builder-btn {
     background:rgba(30,22,10,0.9); border:1px solid rgba(120,90,30,0.5);
     border-bottom:2px solid rgba(60,40,10,0.8);
@@ -489,7 +487,6 @@
       </div>
       <div id="builderActions">
         <button class="builder-btn" id="builderMapsBtn">📁 MAPS</button>
-        <button class="builder-btn" id="builderImportBtn" style="display:none;border-color:rgba(220,60,60,0.6);color:#e66;">⬆ IMPORT</button>
         <button class="builder-btn" id="builderClearBtn">+ NEW</button>
         <span id="builderModeBadge" style="font-family:'Cinzel',serif;font-size:9px;padding:3px 7px;border-radius:2px;background:rgba(245,200,66,0.12);border:1px solid rgba(245,200,66,0.3);color:rgba(245,200,66,0.7);white-space:nowrap;">🔓 ESCAPE</span>
         <button class="builder-btn green" id="builderTestBtn">▶ TEST</button>
@@ -5023,9 +5020,8 @@ function isAdminUser() {
 }
 
 function updateAdminStar() {
-  // No longer used in builder - admin toggle is on home screen
-  const importBtn = document.getElementById('builderImportBtn');
-  if (importBtn) importBtn.style.display = adminMode ? 'block' : 'none';
+  // No longer used in builder - admin toggle is on home screen. Import moved to
+  // the Maps panel (admin-only) to keep the builder toolbar on a single row.
 }
 
 function toggleAdminMode() {
@@ -5663,6 +5659,19 @@ function openMapsPanel(defaultTab='maps') {
     const savedNames = new Set(allMaps.map(l=>l.name)); // keep for compat
     body.innerHTML = '';
     body.style.padding = '8px';
+
+    // Admin-only: Import a map (relocated here from the builder toolbar so the
+    // builder top bar stays on a single row). Available even when no maps exist.
+    if (adminMode) {
+      const importRow = document.createElement('div');
+      importRow.style.cssText = 'display:flex;justify-content:flex-end;margin-bottom:8px;';
+      const importBtn = document.createElement('button');
+      importBtn.style.cssText = "background:none;border:1px solid rgba(220,60,60,0.5);color:#e66;font-family:'Cinzel',serif;font-size:10px;font-weight:600;letter-spacing:1px;padding:5px 12px;cursor:pointer;border-radius:3px;";
+      importBtn.textContent = '⬆ IMPORT MAP';
+      importBtn.addEventListener('click', showImportOverlay);
+      importRow.appendChild(importBtn);
+      body.appendChild(importRow);
+    }
 
     if(!allMaps.length){
       const empty = document.createElement('div');
@@ -8810,7 +8819,6 @@ function showImportOverlay(){
   ov.addEventListener('click', e=>{ if(e.target===ov) ov.remove(); });
 }
 
-document.getElementById('builderImportBtn').addEventListener('click', showImportOverlay);
 
 // =====================================================================
 // PUBLIC MAPS + LEADERBOARD
