@@ -4163,8 +4163,8 @@ document.addEventListener('keydown',e=>{
     return;
   }
 
-  // Down = detonate the most recently placed charge; Up = detonate all charges.
-  // Desktop equivalent of the swipe-down detonator (same dynamite-skin gating).
+  // Down = detonate the next charge in the order placed; Up = detonate all.
+  // Desktop equivalent of the swipe-down detonator (FIFO, same as mobile).
   if(e.key==='ArrowDown' || e.key==='ArrowUp'){
     e.preventDefault();
     if(isActive('skin_dynamite') && activeBombs.length>0 && gameRunning && ballLaunched){
@@ -4173,7 +4173,7 @@ document.addEventListener('keydown',e=>{
         toBlast.forEach(bomb=>detonateBomb(bomb));
         showToast('💥 ALL DETONATED!', '#ff6600');
       } else {
-        const bomb = activeBombs.pop(); // most recently placed (LIFO)
+        const bomb = activeBombs.shift(); // oldest first (FIFO) - matches mobile swipe
         detonateBomb(bomb);
         if(activeBombs.length>0) showToast(`💥 ${activeBombs.length} charge${activeBombs.length!==1?'s':''} remaining`, '#ff6600');
       }
