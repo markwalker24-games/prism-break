@@ -4120,16 +4120,46 @@ gameArea.addEventListener('mousedown', e=>{
 document.addEventListener('mouseup',   ()=>{ delete activeTouches['mouse']; updateMoveFlags(); });
 document.addEventListener('mousemove', e=>{ if(activeTouches['mouse']){ activeTouches['mouse']=getSide(e.clientX); updateMoveFlags(); } });
 
+// Dismiss the top-most open tutorial/info pop-up. Brick tips, "HOW TO MOVE",
+// how-to-play, etc. all carry a "GOT IT" button; the respawn screen is dismissed
+// by tapping the message box. Returns true if something was dismissed.
+function dismissTopModal(){
+  const btn = [...document.querySelectorAll('button')].filter(b=>{
+    const r=b.getBoundingClientRect();
+    return r.width>0 && r.height>0 && /^got it/i.test((b.textContent||'').trim());
+  }).pop();
+  if(btn){ btn.click(); return true; }
+  if(isRespawning){ msgBox.click(); return true; }
+  return false;
+}
+
 document.addEventListener('keydown',e=>{
-  if(e.key==='ArrowLeft')  moveLeft=true;
-  if(e.key==='ArrowRight') moveRight=true;
-  if(e.key==='Escape' && gameRunning){ gameRunning=false; gameOver=false; ballLaunched=false; activeSeries=null; activeSeriesIdx=0; showTopBarBtns(false); showModeSelect(); }
-  if((e.key===' '||e.key==='Enter')&&!gameRunning&&!builderOpen) showModeSelect();
-  if(gameRunning&&!paused&&!ballLaunched) launchBall();
+  // Let form fields (e.g. the save-map name input) handle their own keys.
+  if(e.target && (e.target.tagName==='INPUT' || e.target.tagName==='TEXTAREA')) return;
+
+  // Arrow keys act like touches on the left/right half, so they flow through the
+  // same activeTouches pipeline as thumbs — reusing the both-sides-held -> release
+  // -> drop-bomb logic in updateMoveFlags().
+  if(e.key==='ArrowLeft' || e.key==='ArrowRight'){
+    const side = e.key==='ArrowLeft' ? 'left' : 'right';
+    const id   = e.key==='ArrowLeft' ? 'kbdL' : 'kbdR';
+    if(activeTouches[id]!==side){ activeTouches[id]=side; updateMoveFlags(); }
+    if(gameRunning&&!paused&&!ballLaunched) launchBall();
+    e.preventDefault();
+    return;
+  }
+
+  if(e.key==='Escape' && gameRunning){ gameRunning=false; gameOver=false; ballLaunched=false; activeSeries=null; activeSeriesIdx=0; showTopBarBtns(false); showModeSelect(); return; }
+
+  // Enter / Space dismiss any open tutorial pop-up first; otherwise open the menu.
+  if(e.key==='Enter' || e.key===' '){
+    if(dismissTopModal()){ e.preventDefault(); return; }
+    if(!gameRunning && !builderOpen) showModeSelect();
+  }
 });
 document.addEventListener('keyup',e=>{
-  if(e.key==='ArrowLeft')  moveLeft=false;
-  if(e.key==='ArrowRight') moveRight=false;
+  if(e.key==='ArrowLeft'){  delete activeTouches['kbdL']; updateMoveFlags(); }
+  if(e.key==='ArrowRight'){ delete activeTouches['kbdR']; updateMoveFlags(); }
 });
 
 // =====================================================================
