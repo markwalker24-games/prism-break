@@ -21,6 +21,23 @@
     user-select:none; -webkit-user-select:none; font-family:'Lato',sans-serif;
   }
 
+  /* Phone-frame stage: full-screen on mobile; centered, locked portrait
+     aspect ratio with letterboxing on desktop (>=600px). Mobile is unchanged
+     because at <600px the stage simply fills the viewport. */
+  #stage {
+    width:100%; flex:1 1 auto; min-height:0;
+    display:flex; flex-direction:column; position:relative;
+  }
+  @media (min-width:600px){
+    body { justify-content:center; background:#050402; }
+    #stage {
+      flex:0 0 auto; width:auto;
+      height:min(100dvh, 1026px);   /* 472 / 0.46 -> caps frame width at ~472px */
+      aspect-ratio:46 / 100;        /* locked portrait phone ratio */
+      box-shadow:0 0 60px rgba(0,0,0,0.9);
+    }
+  }
+
   /* Top bar */
   #topbar {
     width:100%; display:flex; align-items:center; justify-content:space-between;
@@ -164,8 +181,14 @@
     flex:1; width:100%; overflow:hidden; min-height:0;
   }
   @media (min-width: 600px) {
-    #builderScreen { align-items:center; background:#050402; }
-    #builderInner { max-width:520px; height:100%; flex:none; box-shadow:0 0 60px rgba(0,0,0,0.9); }
+    #builderScreen { align-items:center; justify-content:center; background:#050402; }
+    /* Same phone-frame as the game so the grid fills the frame edge-to-edge */
+    #builderInner {
+      flex:none; width:auto;
+      height:min(100dvh, 1026px);
+      aspect-ratio:46 / 100;
+      box-shadow:0 0 60px rgba(0,0,0,0.9);
+    }
   }
   #paletteDrawer {
     position:absolute; right:0; top:0; bottom:0;
@@ -290,6 +313,7 @@
 })();
 </script>
 
+<div id="stage">
 <div id="topbar">
   <div id="ui"><span style="color:#00eeff;">💎</span> <span id="totalDiamondDisplay" style="color:#00eeff;font-weight:700;">0</span> &nbsp; <span style="color:#ffd700">🔑</span> <span id="keyDisplay" style="color:#ffd700">0</span> &nbsp; <span id="bombHud" style="color:#ff6600;display:none">💣 <span id="bombDisplay">0</span></span> &nbsp; <span id="diamondHud" style="color:#00eeff;display:none">💎 <span id="diamondDisplay">0</span>/<span id="diamondTotal">0</span></span></div>
   <div style="display:flex;align-items:center;gap:8px;">
@@ -382,8 +406,7 @@
 <div id="canvasWrap">
   <canvas id="gameCanvas"></canvas>
 </div>
-
-<!-- MENU OVERLAY -->
+</div><!-- /#stage -->
 
 <!-- LEVEL SELECT OVERLAY -->
 <div class="overlay" id="levelSelectOverlay">
@@ -625,10 +648,14 @@ function renderLives(){
 }
 const msgBox      = document.getElementById('message');
 
-const W = window.innerWidth;
+// Size the game to the phone-frame (#stage), not the raw window, so width,
+// height, rendering, and ball physics all use the framed box. On mobile the
+// stage fills the viewport, so these match the old window-based values exactly.
+const _stageRect = document.getElementById('stage').getBoundingClientRect();
+const W = Math.round(_stageRect.width);
 const topbarH = document.getElementById('topbar').getBoundingClientRect().height || 32;
 const borderH = 4; // 2px top + 2px bottom border on canvasWrap
-const H = Math.floor(window.innerHeight - topbarH - borderH);
+const H = Math.floor(_stageRect.height - topbarH - borderH);
 
 const DPR = window.devicePixelRatio || 1;
 canvas.width = W * DPR; canvas.height = H * DPR;
@@ -3961,7 +3988,7 @@ const gameArea = document.getElementById('canvasWrap');
 // Track active touches mapped to which side they're on
 const activeTouches = {}; // pointerId -> 'left'|'right'
 
-function getSide(clientX){ return clientX < window.innerWidth/2 ? 'left' : 'right'; }
+function getSide(clientX){ const r = canvas.getBoundingClientRect(); return clientX < r.left + r.width/2 ? 'left' : 'right'; }
 
 let bothSidesTimestamp=0;
 let bothSidesReleaseTimer=null;
