@@ -675,19 +675,35 @@ function renderLives(){
 }
 const msgBox      = document.getElementById('message');
 
-// Size the game to the phone-frame (#stage), not the raw window, so width,
-// height, rendering, and ball physics all use the framed box. On mobile the
-// stage fills the viewport, so these match the old window-based values exactly.
-const _stageRect = document.getElementById('stage').getBoundingClientRect();
-const W = Math.round(_stageRect.width);
-const topbarH = document.getElementById('topbar').getBoundingClientRect().height || 32;
-const borderH = 4; // 2px top + 2px bottom border on canvasWrap
-const H = Math.floor(_stageRect.height - topbarH - borderH);
-
+// Size the game to the phone-frame (#stage), not the raw window. Computed in a
+// function (W/H/BRICK_* are `let`) because iOS applies its safe-area insets a
+// frame or two AFTER load — if we measured only once at load, the playfield
+// would be sized to the full height and its bottom rows would overflow the
+// inset area. So we recompute once the insets settle. Recompute is skipped once
+// a game/builder is running (re-sizing then would misalign placed bricks).
+const borderH = 4; // legacy canvasWrap border allowance
 const DPR = window.devicePixelRatio || 1;
-canvas.width = W * DPR; canvas.height = H * DPR;
-canvas.style.width = W+'px'; canvas.style.height = H+'px';
-canvas.getContext('2d').scale(DPR, DPR);
+const BRICK_COLS = 9;
+const BRICK_ROWS = 27; // fixed grid - same on all screens
+let W = 0, H = 0, topbarH = 32, BRICK_W = 0, BRICK_H = 0;
+function applyGameDimensions(force){
+  if (!force && ((typeof gameRunning !== 'undefined' && gameRunning) ||
+                 (typeof builderOpen !== 'undefined' && builderOpen))) return;
+  const sr = document.getElementById('stage').getBoundingClientRect();
+  W = Math.round(sr.width);
+  topbarH = document.getElementById('topbar').getBoundingClientRect().height || 32;
+  H = Math.floor(sr.height - topbarH - borderH);
+  BRICK_W = Math.floor(Math.min(W, 472) / BRICK_COLS); // cap matches desktop builder
+  BRICK_H = Math.floor(H / BRICK_ROWS);                 // scale to fill height
+  canvas.width = W * DPR; canvas.height = H * DPR;      // (resets the 2d transform)
+  canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+  canvas.getContext('2d').scale(DPR, DPR);
+}
+applyGameDimensions(true); // initial (may be pre-inset on iOS; re-fit below)
+// Re-fit after the browser settles safe-area insets (iOS) / first paint. These
+// all run before any game starts, so the corrected size is in place in time.
+requestAnimationFrame(function(){ requestAnimationFrame(function(){ applyGameDimensions(); }); });
+[150, 400, 800].forEach(function(t){ setTimeout(function(){ applyGameDimensions(); }, t); });
 
 const COLORS     = ['#e63946','#f4a261','#2ec4b6','#9b5de5','#a8e63d'];
 // Ball colors - slightly more saturated/vivid to match brick art
@@ -701,10 +717,6 @@ const BALL_COLORS = {
 };
 const COLOR_DARK = {'#e63946':'#7a1520','#f4a261':'#7a4a1f','#2ec4b6':'#0d5f5a','#9b5de5':'#4a1a7a','#a8e63d':'#4a6610'};
 
-const BRICK_COLS   = 9;
-const BRICK_ROWS   = 27; // fixed grid - same on all screens
-const BRICK_W      = Math.floor(Math.min(W, 472) / BRICK_COLS); // cap matches desktop builder
-const BRICK_H      = Math.floor(H / BRICK_ROWS); // scale to fill screen height exactly
 const PAINT_CHANCE = 1 / 16;
 const BALL_R       = 9;
 const BALL_SPD     = 2.8;
