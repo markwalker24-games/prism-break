@@ -1,0 +1,19 @@
+{
+  "name": "prism-break",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Prism Break — prison-escape brick breaker (Capacitor wrapper)",
+  "scripts": {
+    "sync": "rm -rf www && mkdir -p www && cp index.html manifest.json sw.js icon-192.png icon-512.png www/ && cp -R images www/images",
+    "cap:sync": "npm run sync && npx cap sync",
+    "cap:ios": "npm run sync && npx cap sync ios && npx cap open ios",
+    "cap:android": "npm run sync && npx cap sync android && npx cap open android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.4.0",
+    "@capacitor/app": "^8.1.0",
+    "@capacitor/cli": "^8.4.0",
+    "@capacitor/core": "^8.4.0",
+    "@capacitor/ios": "^8.4.0"
+  }
+}

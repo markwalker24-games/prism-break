@@ -1,0 +1,13 @@
+{
+  "appId": "app.prismbreak",
+  "appName": "Prism Break",
+  "webDir": "www",
+  "backgroundColor": "#0a0a0f",
+  "android": {
+    "backgroundColor": "#0a0a0f"
+  },
+  "ios": {
+    "backgroundColor": "#0a0a0f",
+    "contentInset": "never"
+  }
+}

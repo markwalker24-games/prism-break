@@ -10469,5 +10469,29 @@ loadActiveSeries().then(() => {
       .catch(err => console.warn('[PB] SW registration failed:', err));
   });
 }</script>
+<script>
+// ── Native app (Capacitor) integration — a complete no-op on web/PWA ──
+(function(){
+  var Cap = window.Capacitor;
+  if (!Cap || typeof Cap.isNativePlatform !== 'function' || !Cap.isNativePlatform()) return;
+  var App = Cap.Plugins && Cap.Plugins.App;
+  if (!App || !App.addListener) return;
+  // The Android hardware/edge-swipe "back" must NOT exit the app (it conflicts
+  // with the left/right hold controls). Adding a listener also disables
+  // Capacitor's default exit-on-back. Map it to a sensible in-app action.
+  App.addListener('backButton', function(){
+    try { if (typeof dismissTopModal === 'function' && dismissTopModal()) return; } catch(e){}
+    try { if (typeof builderOpen !== 'undefined' && builderOpen) { closeBuilder(); showModeSelect(); return; } } catch(e){}
+    try {
+      if (typeof gameRunning !== 'undefined' && gameRunning) {
+        gameRunning = false; gameOver = false; ballLaunched = false;
+        showTopBarBtns(false); showModeSelect(); return;
+      }
+    } catch(e){}
+    // Already on the home screen: background the app rather than quit it.
+    try { App.minimizeApp(); } catch(e){}
+  });
+})();
+</script>
 </body>
 </html>

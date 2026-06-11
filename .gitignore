@@ -4,3 +4,36 @@
 !.dev.vars.example
 .env*
 !.env.example
+
+# Node / Capacitor
+node_modules/
+www/
+
+# Capacitor copies the web app into these on `cap copy` — regenerated, don't commit
+ios/App/App/public/
+android/app/src/main/assets/public/
+
+# iOS build artifacts
+ios/App/Pods/
+ios/App/build/
+ios/DerivedData/
+**/*.xcuserstate
+ios/App/App.xcworkspace/xcuserdata/
+ios/App/App.xcodeproj/xcuserdata/
+
+# Android build artifacts
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+android/captures/
+.gradle/
+
+# misc
+.DS_Store
+
+# local-only tooling / backups (not part of the app)
+.claude/
+index.html.bak_*
+MECHANICS.md
