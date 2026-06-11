@@ -960,16 +960,18 @@ async function syncQuestOrderToCloud(order, type = 'escape') {
 
 async function loadQuestOrderFromCloud() {
   try {
-    const local = getQuestOrder();
-    if (local.length) return;
     const res = await fetch(
       `${SUPA_URL}/rest/v1/app_config?key=eq.quest_order&select=value&limit=1`,
       { headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` } }
     );
     if (!res.ok) return;
     const rows = await res.json();
-    if (rows.length && Array.isArray(rows[0].value)) {
-      setQuestOrder(rows[0].value);
+    if (rows.length && Array.isArray(rows[0].value) && rows[0].value.length) {
+      // The curated quest order is global/admin-owned, so the cloud is the source
+      // of truth: always apply it, overwriting any stale local order (e.g. one
+      // pointing at a renamed/removed series, which leaves the home quest button
+      // stuck on "Loading..." forever). Set directly to avoid re-pushing to cloud.
+      LS.set('pb_quest_order', JSON.stringify(rows[0].value));
     }
   } catch(e) { console.warn('loadQuestOrderFromCloud error:', e); }
 }
@@ -7823,7 +7825,18 @@ function showModeSelect(){
   const available = getAvailableDiamonds();
   const canAfford = (feature) => !isUnlocked(feature) && available >= UNLOCK_COSTS[feature];
   const featuredName = getFeaturedSeriesName();
-  const featuredSeries = savedSeries().find(s => s.name === featuredName) || null;
+  let featuredSeries = savedSeries().find(s => s.name === featuredName) || null;
+  const questUnresolved = !featuredSeries; // featured pointer didn't resolve to a loaded series
+  // If the series ARE loaded but the featured pointer is stale (renamed/removed
+  // series), fall back to a valid quest series so the button works instead of
+  // sticking on "Loading...". The self-heal below upgrades to the canonical
+  // series once the cloud quest order is reconciled.
+  if (questUnresolved && savedSeries().length) {
+    const all = savedSeries();
+    const fallbackName = getQuestOrder().find(n => all.some(s => s.name === n))
+      || (ACTIVE_SERIES.find(s => (s.mode || 'escape') !== 'loot') || all[0]).name;
+    featuredSeries = all.find(s => s.name === fallbackName) || null;
+  }
   const seriesButtons = featuredSeries ? (()=>{
     const s = featuredSeries;
     const id = 'modeHardcoded0';
@@ -8077,7 +8090,7 @@ function showModeSelect(){
 
   // If the featured quest wasn't cached yet, the button above is the grayed
   // "Loading..." fallback — poll for the series and re-render once it loads.
-  if(!featuredSeries) scheduleHomeRefreshForSeries();
+  if(questUnresolved) scheduleHomeRefreshForSeries();
 
   // Long-press diamond count to reset progress
   const diamondEl = document.getElementById('homeDiamondCount');
@@ -10364,7 +10377,10 @@ initAuth().then(() => {
 })();
 // Load cloud data after UI is shown
 loadResetTokenFromCloud().catch(() => {});
-loadQuestOrderFromCloud().catch(() => {});
+loadQuestOrderFromCloud().then(() => {
+  // Reconciling the quest order may change which series is featured — refresh home.
+  if (!gameRunning && !gameOver && !builderOpen && document.getElementById('modeHardcoded0')) showModeSelect();
+}).catch(() => {});
 loadDiamondsOrderFromCloud().catch(() => {});
 loadActiveSeries().then(() => {
   // Refresh home screen now that series are loaded - but only if still on home screen
