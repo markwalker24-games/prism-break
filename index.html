@@ -6513,7 +6513,7 @@ function openMapsPanel(defaultTab='maps') {
               const sortOrder = getQuestOrder().indexOf(s.name);
               await upsertCloudSeries(fresh, sortOrder >= 0 ? sortOrder : 999);
               showBuilderToast('☁ Series pushed to cloud!');
-            } catch(e){ showBuilderToast('⚠️ Push failed'); console.error(e); }
+            } catch(e){ showBuilderToast('⚠️ Push failed: ' + (e.message || e)); console.error(e); }
             finally { btn.innerHTML=orig; btn.disabled=false; }
           });
         }
