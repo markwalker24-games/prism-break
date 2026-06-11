@@ -7790,7 +7790,27 @@ function hasUnlockedChallenges() {
   return adminMode || isUnlocked('full_builder') || getLocalChallenges().length > 0;
 }
 
+// When the home screen has to render the "Loading..." quest fallback (the
+// featured series isn't cached yet), poll until the cloud series arrive and then
+// re-render the real button. Self-heals races between auth/intro/series loading,
+// and re-attempts the fetch in case it was slow or failed.
+let _homeSeriesRetryTimer = null;
+function scheduleHomeRefreshForSeries(){
+  clearTimeout(_homeSeriesRetryTimer);
+  let tries = 0;
+  const tick = () => {
+    _homeSeriesRetryTimer = null;
+    if (gameRunning || gameOver || builderOpen || msgBox.style.display === 'none') return; // left home
+    if (savedSeries().find(s => s.name === getFeaturedSeriesName())) { showModeSelect(); return; } // data ready
+    tries++;
+    if (tries === 3) loadActiveSeries().catch(()=>{}); // re-attempt cloud fetch if it stalled/failed
+    if (tries < 20) _homeSeriesRetryTimer = setTimeout(tick, 500); // poll up to ~10s
+  };
+  _homeSeriesRetryTimer = setTimeout(tick, 500);
+}
+
 function showModeSelect(){
+  clearTimeout(_homeSeriesRetryTimer); _homeSeriesRetryTimer = null;
   // Clear any stuck overlays from previous game
   document.querySelectorAll('body > div[style*="position:fixed"]').forEach(el => {
     if (el !== msgBox && el.style.zIndex >= 500) el.remove();
@@ -8054,6 +8074,10 @@ function showModeSelect(){
   </div>`;
 
   showMessage(html);
+
+  // If the featured quest wasn't cached yet, the button above is the grayed
+  // "Loading..." fallback — poll for the series and re-render once it loads.
+  if(!featuredSeries) scheduleHomeRefreshForSeries();
 
   // Long-press diamond count to reset progress
   const diamondEl = document.getElementById('homeDiamondCount');
