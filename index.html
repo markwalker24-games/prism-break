@@ -14,11 +14,23 @@
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Cinzel+Decorative:wght@700&family=Lato:wght@300;400;700&display=swap');
   * { margin:0; padding:0; box-sizing:border-box; }
+  /* Device safe-area insets (notch / Dynamic Island / home indicator). Used to
+     keep content out of the system UI on iOS and PWA. */
+  :root {
+    --sat: env(safe-area-inset-top, 0px);
+    --sar: env(safe-area-inset-right, 0px);
+    --sab: env(safe-area-inset-bottom, 0px);
+    --sal: env(safe-area-inset-left, 0px);
+  }
+  /* The Android native app already insets the WebView itself (MainActivity), so
+     zero these there to avoid double-insetting. Class is set from JS at startup. */
+  html.cap-android { --sat:0px; --sar:0px; --sab:0px; --sal:0px; }
   body {
     background:#0a0a0f;
     display:flex; flex-direction:column; align-items:center;
     height:100vh; height:-webkit-fill-available; height:100dvh; overflow:hidden;
     user-select:none; -webkit-user-select:none; font-family:'Lato',sans-serif;
+    padding: var(--sat) var(--sar) var(--sab) var(--sal);
   }
 
   /* Phone-frame stage: full-screen on mobile; centered, locked portrait
@@ -40,7 +52,7 @@
 
   /* Full-bleed splash / cutscene overlays: full-screen on mobile, confined to
      the same centered phone-frame on desktop. */
-  .pb-frame-overlay { position:fixed; inset:0; }
+  .pb-frame-overlay { position:fixed; inset:0; padding: var(--sat) var(--sar) var(--sab) var(--sal); }
   @media (min-width:600px){
     .pb-frame-overlay {
       inset:auto; left:50%; top:50%; transform:translate(-50%,-50%);
@@ -74,7 +86,7 @@
     z-index:50;
     background:transparent;
     pointer-events:none;
-    padding:16px;
+    padding: calc(16px + var(--sat)) calc(16px + var(--sar)) calc(16px + var(--sab)) calc(16px + var(--sal));
   }
   #message.active { display:flex; pointer-events:auto; }
 
@@ -511,6 +523,10 @@
 <div id="message" style="position:fixed;inset:0;display:none;z-index:50;pointer-events:auto;background:rgba(0,0,0,0.6);backdrop-filter:blur(3px);overflow-y:auto;"></div>
 
 <script>
+// Tag the Android native app so CSS can skip safe-area padding there (the native
+// MainActivity already insets the WebView). Must run before layout is measured.
+try { if (window.Capacitor && Capacitor.getPlatform && Capacitor.getPlatform() === 'android') document.documentElement.classList.add('cap-android'); } catch(e){}
+
 // ── Series hero images ─────────────────────────────────────────
 const HERO_IMAGES = {
   'prisoner_mine':        { src: 'images/prisoner_mine.png',        title: 'Chapter 1',    copy: ['7 years in the dark.', 'Tonight you move.', 'The diamonds go with you.'] },
