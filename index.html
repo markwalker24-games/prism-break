@@ -1211,7 +1211,21 @@ async function initAuth() {
   });
 }
 
+const NATIVE_OAUTH_REDIRECT = 'app.prismbreak://auth';
 async function signInWithGoogle() {
+  const Cap = window.Capacitor;
+  if (Cap && typeof Cap.isNativePlatform === 'function' && Cap.isNativePlatform()) {
+    // Native app: redirect to a custom scheme that reopens the app, and open the
+    // OAuth page in the SYSTEM browser (Google blocks embedded webviews). The
+    // session is completed in the appUrlOpen handler below.
+    const { data, error } = await _supaClient.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: NATIVE_OAUTH_REDIRECT, skipBrowserRedirect: true }
+    });
+    if (error || !data || !data.url) { console.warn('OAuth init failed', error); return; }
+    await Cap.Plugins.Browser.open({ url: data.url });
+    return;
+  }
   await _supaClient.auth.signInWithOAuth({
     provider: 'google',
     options: { redirectTo: GAME_URL }
@@ -10490,6 +10504,31 @@ loadActiveSeries().then(() => {
     } catch(e){}
     // Already on the home screen: background the app rather than quit it.
     try { App.minimizeApp(); } catch(e){}
+  });
+
+  // OAuth deep link: after Google sign-in the system browser redirects to
+  // app.prismbreak://auth?code=... (or #access_token=...). Complete the session
+  // here inside the app's webview, then close the browser. onAuthStateChange
+  // (initAuth) updates the UI on SIGNED_IN.
+  App.addListener('appUrlOpen', function(event){
+    var url = (event && event.url) || '';
+    if (url.indexOf('app.prismbreak://') !== 0) return;
+    try { if (Cap.Plugins.Browser) Cap.Plugins.Browser.close(); } catch(e){}
+    try {
+      var code = null, access_token = null, refresh_token = null;
+      var qi = url.indexOf('?'), hi = url.indexOf('#');
+      if (qi >= 0) { code = new URLSearchParams(url.substring(qi + 1).split('#')[0]).get('code'); }
+      if (hi >= 0) {
+        var hp = new URLSearchParams(url.substring(hi + 1));
+        access_token = hp.get('access_token'); refresh_token = hp.get('refresh_token');
+        if (!code) code = hp.get('code');
+      }
+      if (code) {
+        _supaClient.auth.exchangeCodeForSession(code).catch(function(e){ console.warn('exchangeCodeForSession failed', e); });
+      } else if (access_token && refresh_token) {
+        _supaClient.auth.setSession({ access_token: access_token, refresh_token: refresh_token }).catch(function(e){ console.warn('setSession failed', e); });
+      }
+    } catch(e) { console.warn('OAuth deep-link handling failed', e); }
   });
 })();
 </script>
