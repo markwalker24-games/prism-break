@@ -1,10 +1,15 @@
 package app.prismbreak;
 
+import android.graphics.Color;
 import android.graphics.Rect;
 import android.os.Build;
 import android.os.Bundle;
 import android.view.View;
+import android.view.WindowManager;
 
+import androidx.core.graphics.Insets;
+import androidx.core.view.OnApplyWindowInsetsListener;
+import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
@@ -19,15 +24,20 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        // Allow the window to extend into the camera-cutout area; we pad the web
+        // content back out of it explicitly below.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            getWindow().getAttributes().layoutInDisplayCutoutMode =
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+        }
         enableImmersive();
+        applyInsetsAsPadding();
         applyGestureExclusion();
     }
 
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
-        // Re-assert immersive whenever the window regains focus (e.g. after the
-        // transient bars auto-hide, or returning from background).
         if (hasFocus) {
             enableImmersive();
             applyGestureExclusion();
@@ -35,26 +45,48 @@ public class MainActivity extends BridgeActivity {
     }
 
     /**
-     * Let the system inset our content below the status bar / camera cutout (so
-     * the HUD never sits under the camera and there's no matching gap at the
-     * bottom), while still going immersive at the bottom navigation bar. With
-     * BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE an edge swipe just *reveals* the nav
-     * bar transiently instead of firing the system back / home gesture — which is
-     * what was hijacking the left/right hold controls in the game.
+     * Fully immersive (both bars hidden) so the game keeps its fullscreen look.
+     * BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE makes an edge swipe just *reveal* the
+     * bars transiently instead of firing the system back / home gesture — which is
+     * what was hijacking the left/right hold controls.
      */
     private void enableImmersive() {
-        // true = system fits content within the bars' insets (content starts
-        // below the status bar / cutout, fills down once the nav bar is hidden).
-        WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
+        // Edge-to-edge (enforced on modern Android; the framework no longer fits
+        // content for us). We inset the content ourselves in applyInsetsAsPadding().
+        WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
         View decor = getWindow().getDecorView();
         WindowInsetsControllerCompat controller =
                 new WindowInsetsControllerCompat(getWindow(), decor);
-        // Hide only the navigation bar; keep the status bar so content sits below
-        // the camera. Light icons so the clock/battery read on the dark theme.
-        controller.hide(WindowInsetsCompat.Type.navigationBars());
-        controller.setAppearanceLightStatusBars(false);
+        controller.hide(WindowInsetsCompat.Type.systemBars());
         controller.setSystemBarsBehavior(
                 WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+    }
+
+    /**
+     * On modern Android edge-to-edge is enforced and the framework no longer
+     * auto-pads content for the bars/cutout. Do it explicitly by padding the
+     * activity content view (padding a parent reliably resizes the web viewport,
+     * unlike padding the WebView itself which can just clip): push content below
+     * the camera cutout / status bar and fill to the bottom (nav bar hidden -> its
+     * inset is 0). This shifts the whole game down out from under the camera and
+     * removes the matching gap at the bottom.
+     */
+    private void applyInsetsAsPadding() {
+        final View content = findViewById(android.R.id.content);
+        if (content == null) return;
+        content.setBackgroundColor(Color.parseColor("#0a0a0f"));
+        ViewCompat.setOnApplyWindowInsetsListener(content, new OnApplyWindowInsetsListener() {
+            @Override
+            public WindowInsetsCompat onApplyWindowInsets(View v, WindowInsetsCompat insets) {
+                Insets safe = insets.getInsets(
+                        WindowInsetsCompat.Type.statusBars()
+                                | WindowInsetsCompat.Type.navigationBars()
+                                | WindowInsetsCompat.Type.displayCutout());
+                v.setPadding(safe.left, safe.top, safe.right, safe.bottom);
+                return insets;
+            }
+        });
+        ViewCompat.requestApplyInsets(content);
     }
 
     /**
