@@ -164,10 +164,12 @@
   #builderTop {
     display:flex; align-items:center; justify-content:space-between;
     padding:4px 6px; border-bottom:1px solid rgba(200,160,60,0.15);
-    background:rgba(10,8,4,0.9); flex-wrap:nowrap; gap:4px; overflow:hidden;
+    background:rgba(10,8,4,0.9); flex-wrap:wrap; gap:4px;
   }
   #builderTitle { color:#c9a84c; flex-shrink:0; display:flex; align-items:center; padding:2px 4px; }
-  #builderActions { display:flex; gap:3px; flex-shrink:0; }
+  /* Wrap actions to a second row on narrow (short-window) frames so every button
+     — especially EXIT — stays inside the frame and clickable. */
+  #builderActions { display:flex; gap:3px; flex:1 1 auto; flex-wrap:wrap; justify-content:flex-end; min-width:0; }
   .builder-btn {
     background:rgba(30,22,10,0.9); border:1px solid rgba(120,90,30,0.5);
     border-bottom:2px solid rgba(60,40,10,0.8);
@@ -2216,35 +2218,37 @@ function drawBall(c,b){
         }
 
       } else if (tid === 'trail_purple') {
-        // SMOKE - wispy tendrils that drift and fade
-        const drift1 = Math.sin(tNow * 3.5 + i * 0.6) * blobR * 0.7;
-        const drift2 = Math.cos(tNow * 2.8 + i * 0.9) * blobR * 0.5;
-        const smokeAlpha = alpha * 0.6 * (1 - frac * 0.3);
-        // Layer multiple smoke puffs with different drift
-        for (let p = 0; p < 3; p++) {
-          const pDrift = p * 1.3;
-          const px = t.x + Math.sin(tNow * 2.2 + i * 0.4 + pDrift) * blobR * (0.5 + p * 0.3);
-          const py = t.y + Math.cos(tNow * 1.8 + i * 0.5 + pDrift) * blobR * (0.3 + p * 0.2);
-          const pR = blobR * (0.8 + p * 0.5) * (0.6 + 0.4 * (1 - frac));
-          const pAlpha = smokeAlpha * (0.5 - p * 0.12);
+        // BILLOWING SMOKE - soft voluminous puffs that gently churn and swirl
+        const baseAlpha = alpha * 0.55 * (1 - frac * 0.25);
+        const puffs = 4;
+        for (let p = 0; p < puffs; p++) {
+          // each puff slowly orbits the trail point on its own phase, so the
+          // cloud appears to rotate / curl (the swirl) rather than sit still
+          const swirl   = tNow * 0.8 + i * 0.55 + p * (Math.PI * 2 / puffs);
+          const breathe = 0.7 + 0.3 * Math.sin(tNow * 1.2 + i * 0.8 + p * 1.7);
+          const orbit   = blobR * (0.3 + 0.25 * p) * breathe;
+          const px = t.x + Math.cos(swirl) * orbit;
+          const py = t.y + Math.sin(swirl) * orbit - frac * blobR * 0.35; // rises as it ages
+          const pR = blobR * (1.05 + p * 0.4) * (0.6 + 0.5 * (1 - frac));   // big & soft = billowy
+          const pAlpha = baseAlpha * (0.6 - p * 0.1);
           if (pAlpha <= 0) continue;
           const grad = c.createRadialGradient(px, py, 0, px, py, pR);
-          const purp = Math.floor(50 + p * 30);
-          grad.addColorStop(0,   `rgba(${140+p*20},${purp},${180+p*20},${pAlpha})`);
-          grad.addColorStop(0.4, `rgba(${80+p*15},${Math.floor(purp*0.5)},${130+p*15},${pAlpha * 0.5})`);
-          grad.addColorStop(1,   `rgba(30,0,50,0)`);
+          grad.addColorStop(0,    `rgba(${170+p*16},${95+p*16},${215+p*8},${pAlpha})`);
+          grad.addColorStop(0.5,  `rgba(${115+p*14},${55+p*10},${165+p*8},${pAlpha * 0.5})`);
+          grad.addColorStop(1,    `rgba(45,12,75,0)`);
           c.fillStyle = grad;
           c.beginPath(); c.arc(px, py, pR, 0, Math.PI*2); c.fill();
         }
-        // Wispy tendril lines at the tail end
-        if (frac < 0.5 && i > 0) {
-          const prev = b.trail[i-1];
-          c.strokeStyle = `rgba(160,80,220,${smokeAlpha * 0.3})`;
-          c.lineWidth = blobR * 0.3;
+        // a small curling wisp that rotates over time for extra swirl
+        if (frac > 0.25) {
+          const a = tNow * 1.5 + i * 0.7;
+          const wx = t.x + Math.cos(a) * blobR * 0.6;
+          const wy = t.y + Math.sin(a) * blobR * 0.6 - frac * blobR * 0.2;
+          c.strokeStyle = `rgba(195,130,240,${baseAlpha * 0.3})`;
+          c.lineWidth = blobR * 0.25;
           c.lineCap = 'round';
           c.beginPath();
-          c.moveTo(prev.x + drift1 * 0.5, prev.y + drift2 * 0.5);
-          c.quadraticCurveTo(t.x + drift1, t.y + drift2, t.x + drift1 * 0.3, t.y + drift2 * 0.3);
+          c.arc(wx, wy, blobR * 0.5, a, a + Math.PI * 1.3);
           c.stroke();
         }
 
@@ -4159,6 +4163,24 @@ document.addEventListener('keydown',e=>{
     if(activeTouches[id]!==side){ activeTouches[id]=side; updateMoveFlags(); }
     if(gameRunning&&!paused&&!ballLaunched) launchBall();
     e.preventDefault();
+    return;
+  }
+
+  // Down = detonate the most recently placed charge; Up = detonate all charges.
+  // Desktop equivalent of the swipe-down detonator (same dynamite-skin gating).
+  if(e.key==='ArrowDown' || e.key==='ArrowUp'){
+    e.preventDefault();
+    if(isActive('skin_dynamite') && activeBombs.length>0 && gameRunning && ballLaunched){
+      if(e.key==='ArrowUp'){
+        const toBlast=[...activeBombs]; activeBombs=[];
+        toBlast.forEach(bomb=>detonateBomb(bomb));
+        showToast('💥 ALL DETONATED!', '#ff6600');
+      } else {
+        const bomb = activeBombs.pop(); // most recently placed (LIFO)
+        detonateBomb(bomb);
+        if(activeBombs.length>0) showToast(`💥 ${activeBombs.length} charge${activeBombs.length!==1?'s':''} remaining`, '#ff6600');
+      }
+    }
     return;
   }
 
