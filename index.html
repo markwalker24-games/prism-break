@@ -2674,10 +2674,38 @@ function killBall(){
 }
 
 function checkBrickCollisions(){
+  // Cell-occupancy snapshot, built lazily on the first corner contact. Used to
+  // enforce "no diagonal access": a brick reachable only by cutting a sealed
+  // corner must not be touched.
+  let _occ = null;
+  const _buildOcc = () => {
+    const s = new Set();
+    for(const x of bricks){
+      const xc = x.col!==undefined ? x.col : Math.round(x.x/BRICK_W);
+      const xr = x.row!==undefined ? x.row : Math.round(x.y/BRICK_H);
+      s.add(xc+','+xr);
+    }
+    return s;
+  };
   for(let i=bricks.length-1;i>=0;i--){
     const b=bricks[i];
     if(b.cooldown>0) continue;
     if(!overlaps(ball.x-BALL_R,ball.y-BALL_R,BALL_R*2,BALL_R*2,b.x,b.y,b.w,b.h)) continue;
+
+    // Sealed-corner guard: if the ball is contacting this brick only at a corner
+    // (its centre is diagonally outside the brick) and BOTH cardinal cells
+    // between the ball and the brick are occupied, the brick is unreachable.
+    // Skip it so the ball bounces off the blockers instead of "cutting" the
+    // corner to touch it. One open side = legitimate access, so resolve normally.
+    const dcol = ball.x < b.x ? -1 : ball.x > b.x+b.w ? 1 : 0;
+    const drow = ball.y < b.y ? -1 : ball.y > b.y+b.h ? 1 : 0;
+    if(dcol!==0 && drow!==0){
+      if(!_occ) _occ = _buildOcc();
+      const bc = b.col!==undefined ? b.col : Math.round(b.x/BRICK_W);
+      const br = b.row!==undefined ? b.row : Math.round(b.y/BRICK_H);
+      if(_occ.has((bc+dcol)+','+br) && _occ.has(bc+','+(br+drow))) continue;
+    }
+
     const oT=(ball.y+BALL_R)-b.y, oB=(b.y+b.h)-(ball.y-BALL_R);
     const oL=(ball.x+BALL_R)-b.x, oR=(b.x+b.w)-(ball.x-BALL_R);
     const minV=Math.min(oT,oB), minH=Math.min(oL,oR);
